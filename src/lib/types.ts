@@ -262,12 +262,23 @@ export type Diagnostics = {
   timingMs: number;
 };
 
+/** UI preferences stored in settings.json (D-070); `filters` is the browser's saved filter object. */
+export type UiPrefs = {
+  theme: string;
+  accent: string;
+  onboarded: boolean;
+  filters: Record<string, unknown> | null;
+  lastUpdateCheckMs: number;
+};
+
 export type Settings = {
   profileName: string;
   extraArgs: string;
   skipIntro: boolean;
   noSplash: boolean;
   noPause: boolean;
+  /** Read-only for `settings_set`; written through `ui_prefs_set`. */
+  ui: UiPrefs;
 };
 
 export type ModPlanItem = {

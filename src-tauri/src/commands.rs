@@ -15,7 +15,7 @@ use crate::browser::verify::{self, Target, Verdict, Verification};
 use crate::browser::{Cache, HistoryEntry, PopulationSample, ServerRow};
 use crate::error::{AppError, AppResult};
 use crate::launch::{self, LaunchSpec, Launched};
-use crate::settings::{Settings, SettingsStore};
+use crate::settings::{Settings, SettingsStore, UiPrefs};
 use crate::steam::diagnostics::{self, Diagnostics};
 use crate::steam::sdk::{ItemDetails, SteamStatus, SteamWorker};
 use crate::steam::{locate, registry, version, workshop};
@@ -142,9 +142,17 @@ pub fn settings_get(state: State<'_, AppState>) -> Settings {
     state.settings.get()
 }
 
+/// Replaces the launch options only; UI preferences are written through `ui_prefs_set`.
 #[tauri::command]
 pub fn settings_set(state: State<'_, AppState>, settings: Settings) -> AppResult<()> {
-    state.settings.set(settings).map_err(|e| AppError::Internal(format!("settings: {e}")))
+    state.settings.set_launch(settings).map_err(|e| AppError::Internal(format!("settings: {e}")))
+}
+
+/// Merges a partial UI-preferences object (theme, accent, filters, onboarded,
+/// lastUpdateCheckMs) into the settings file and returns the stored result (D-070).
+#[tauri::command]
+pub fn ui_prefs_set(state: State<'_, AppState>, patch: serde_json::Value) -> AppResult<UiPrefs> {
+    state.settings.patch_ui(patch).map_err(|e| AppError::Internal(format!("ui prefs: {e}")))
 }
 
 #[derive(Serialize)]

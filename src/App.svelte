@@ -11,21 +11,33 @@
   import Welcome from "./lib/Welcome.svelte";
   import { prefs } from "./lib/state/prefs.svelte";
   import { servers } from "./lib/state/servers.svelte";
+  import { uiPrefs } from "./lib/state/uiprefs.svelte";
   import { updates } from "./lib/state/updates.svelte";
 
   $effect(() => {
     void updates.autoCheck();
   });
 
+  // The welcome overlay shows until the settings file says onboarded (D-070). A flag
+  // left in localStorage by earlier builds counts and is migrated silently.
   const ONBOARDED_KEY = "dayz-launcher.onboarded.v1";
   let showWelcome = $state(false);
-  try {
-    showWelcome = localStorage.getItem(ONBOARDED_KEY) == null;
-  } catch {
-    showWelcome = false;
-  }
+  $effect(() => {
+    void uiPrefs.ready.then((u) => {
+      if (u.onboarded) return;
+      let legacy = false;
+      try {
+        legacy = localStorage.getItem(ONBOARDED_KEY) != null;
+      } catch {
+        /* storage unavailable */
+      }
+      if (legacy) uiPrefs.patch({ onboarded: true });
+      else showWelcome = true;
+    });
+  });
   function finishWelcome() {
     showWelcome = false;
+    uiPrefs.patch({ onboarded: true });
     try {
       localStorage.setItem(ONBOARDED_KEY, String(Date.now()));
     } catch {

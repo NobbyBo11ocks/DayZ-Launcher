@@ -160,6 +160,7 @@ pub fn run() {
             commands::steam_status,
             commands::settings_get,
             commands::settings_set,
+            commands::ui_prefs_set,
             commands::servers_cached,
             commands::servers_refresh,
             commands::servers_verify,

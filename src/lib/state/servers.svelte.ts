@@ -4,6 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
+import { uiPrefs } from "./uiprefs.svelte";
 import {
   isUntrusted,
   trustedPlayers,
@@ -57,6 +58,7 @@ export const defaultFilters = (): Filters => ({
   hideUntrusted: true,
 });
 
+/** localStorage cache for an instant start; the settings file wins once read (D-070). */
 function loadFilters(): Filters {
   try {
     const raw = localStorage.getItem(FILTERS_KEY);
@@ -92,6 +94,12 @@ class ServersStore {
   #unlisten: UnlistenFn[] = [];
   #started = false;
   #autoRefreshed = false;
+
+  constructor() {
+    void uiPrefs.ready.then((u) => {
+      if (u.filters) this.filters = { ...defaultFilters(), ...(u.filters as Partial<Filters>), search: this.filters.search };
+    });
+  }
 
   /** Distinct maps with counts, most common first. */
   maps = $derived.by(() => {
@@ -345,8 +353,9 @@ class ServersStore {
   }
 
   saveFilters() {
+    const { search: _s, ...rest } = this.filters;
+    uiPrefs.patch({ filters: rest });
     try {
-      const { search: _s, ...rest } = this.filters;
       localStorage.setItem(FILTERS_KEY, JSON.stringify(rest));
     } catch {
       /* ignore */
