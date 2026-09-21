@@ -22,10 +22,9 @@
     if (row) direct = "";
   }
 
-  $effect(() => {
-    void servers.start();
-    return () => servers.stop();
-  });
+  // The store is started once by App.svelte and never stopped: tying its event
+  // listeners to this view's lifetime lost every `servers:*` event that arrived while
+  // another section was open, which left "verifying…" on screen for good (D-084).
 
   // Start-up timing for Diagnostics (D-078): the first frame that shows rows.
   $effect(() => {

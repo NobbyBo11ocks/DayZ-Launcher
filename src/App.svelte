@@ -15,7 +15,10 @@
   import { uiPrefs } from "./lib/state/uiprefs.svelte";
   import { updates } from "./lib/state/updates.svelte";
 
+  // The server store lives for the whole session: its listeners must not depend on
+  // which section is open (D-084).
   $effect(() => {
+    void servers.start();
     void updates.autoCheck();
   });
 
