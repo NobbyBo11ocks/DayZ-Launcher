@@ -29,7 +29,31 @@ TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/dayz-launcher.key)" TAURI_SIGNING_PRIV
 
 `--ci` stops the CLI from prompting for the key password (the key has none). Run this from Git Bash; PowerShell drops empty environment variables, and without the password variable the CLI waits on a prompt forever.
 
-The public key is in `src-tauri/tauri.conf.json`; the updater polls `https://github.com/NobbyBo11ocks/dayz-launcher/releases/latest/download/latest.json`. To publish a release:
+The public key is in `src-tauri/tauri.conf.json`; the updater polls `https://github.com/NobbyBo11ocks/dayz-launcher/releases/latest/download/latest.json`.
+
+### Releasing through GitHub Actions (preferred)
+
+Bump `version` in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`, commit, then push a matching tag:
+
+```bash
+git tag v0.1.4 && git push origin main v0.1.4
+```
+
+The [release workflow](.github/workflows/release.yml) builds the signed installer on a clean Windows runner, creates the release with generated notes, uploads the installer, its `.sig` and `latest.json`, smoke-installs the result, and verifies the published manifest. It needs two repository secrets, set once from this machine:
+
+```bash
+gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/dayz-launcher.key
+```
+
+```bash
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --body ""
+```
+
+Run the workflow manually from the Actions tab for a build-only dry run.
+
+### Releasing by hand
+
+To publish a release from this machine:
 
 1. Bump `version` in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`, then run the signed build above.
 2. Create the GitHub release with the installer and its signature:

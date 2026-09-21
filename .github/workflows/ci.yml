@@ -1,0 +1,58 @@
+# Continuous checks on every push and pull request (D-071): the same gates that run
+# locally before a commit. Windows only, like the app.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags-ignore: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Type-check the frontend
+        run: npm run check
+
+      - name: Build the frontend
+        run: npm run build
+
+      - name: Rust formatting
+        run: cargo fmt --check
+        working-directory: src-tauri
+
+      - name: Rust lints
+        run: cargo clippy --all-targets -- -D warnings
+        working-directory: src-tauri
+
+      - name: Rust unit tests
+        run: cargo test
+        working-directory: src-tauri
+
+      - name: NSIS template matches upstream
+        run: node tools/nsis_template_check.js

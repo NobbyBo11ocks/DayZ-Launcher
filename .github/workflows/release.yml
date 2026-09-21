@@ -1,0 +1,132 @@
+# Builds, signs and publishes a release when a `v<version>` tag is pushed (D-071).
+# Manual runs build only (dry run) unless `publish` is ticked.
+#
+# Required repository secrets:
+#   TAURI_SIGNING_PRIVATE_KEY          content of the minisign private key
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD the key's password (empty string for ours)
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Create the GitHub release (otherwise build only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: NSIS template matches upstream
+        run: node tools/nsis_template_check.js
+
+      - name: Tag must match the configured version
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: |
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $tag = "${{ github.ref_name }}"
+          if ($tag -ne "v$version") { throw "tag $tag does not match tauri.conf.json version $version" }
+          "tag $tag matches version $version"
+
+      # The updater config carries a public key, so every build (dry runs too) must sign.
+      - name: Signing key is configured
+        shell: pwsh
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: if (-not $env:KEY) { throw "repository secret TAURI_SIGNING_PRIVATE_KEY is not set (see README, Releasing through GitHub Actions)" }
+
+      # Builds the signed NSIS installer; when publishing, also creates the release
+      # and uploads the installer, its .sig and latest.json (asset names rewritten
+      # the way GitHub does it).
+      - name: Build and publish
+        id: tauri
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ env.PUBLISH == 'true' && 'v__VERSION__' || '' }}
+          releaseName: ${{ env.PUBLISH == 'true' && 'v__VERSION__' || '' }}
+          releaseBody: |
+            Existing installs update themselves from Settings, or automatically within 24 hours.
+            The installer is not code-signed yet, so Windows SmartScreen shows an "unknown publisher" warning on first run: choose "More info", then "Run anyway".
+          generateReleaseNotes: ${{ env.PUBLISH == 'true' }}
+          releaseDraft: false
+          prerelease: false
+          updaterJsonPreferNsis: true
+          uploadUpdaterJson: ${{ env.PUBLISH == 'true' }}
+          uploadWorkflowArtifacts: ${{ env.PUBLISH != 'true' }}
+          args: --ci
+
+      # A clean Windows image without Steam or DayZ: the installer must land in the
+      # per-user Programs folder, the app must start and stay up, and the uninstaller
+      # must leave nothing behind.
+      - name: Smoke-install on the runner
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem src-tauri/target/release/bundle/nsis -Filter '*-setup.exe' | Select-Object -First 1
+          if (-not $setup) { throw 'no installer built' }
+          "installer: $($setup.Name) ($($setup.Length) bytes)"
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList '/S' -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "installer exit code $($p.ExitCode)" }
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\DayZ Launcher'
+          foreach ($f in 'dayz-launcher.exe', 'steam_api64.dll', 'uninstall.exe') {
+            if (-not (Test-Path (Join-Path $dir $f))) { throw "missing $f in $dir" }
+          }
+          $key = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\DayZ Launcher'
+          "installed $($key.DisplayVersion) at $($key.InstallLocation)"
+          $app = Start-Process -FilePath (Join-Path $dir 'dayz-launcher.exe') -PassThru
+          Start-Sleep -Seconds 15
+          if ($app.HasExited) { throw "app exited within 15 s with code $($app.ExitCode)" }
+          "app running after 15 s (pid $($app.Id)); stopping it"
+          Stop-Process -Id $app.Id -Force
+          Start-Sleep -Seconds 2
+          $u = Start-Process -FilePath (Join-Path $dir 'uninstall.exe') -ArgumentList '/S' -PassThru -Wait
+          if ($u.ExitCode -ne 0) { throw "uninstaller exit code $($u.ExitCode)" }
+          Start-Sleep -Seconds 2
+          if (Test-Path $dir) { throw "install folder still exists after uninstall" }
+          "uninstall clean"
+
+      - name: Verify the published manifest and signature
+        if: env.PUBLISH == 'true'
+        shell: pwsh
+        run: |
+          $ok = $false
+          foreach ($attempt in 1..6) {
+            node tools/verify_update_sig.js
+            if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+            "attempt $attempt failed; waiting for the release assets to propagate"
+            Start-Sleep -Seconds 20
+          }
+          if (-not $ok) { throw 'the published manifest did not verify' }
