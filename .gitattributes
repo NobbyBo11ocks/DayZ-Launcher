@@ -1,0 +1,9 @@
+# Normalise line endings to LF in the repo and on checkout, regardless of core.autocrlf.
+* text=auto eol=lf
+
+# Binary payloads: never normalise, never diff as text.
+*.dll  binary
+*.png  binary
+*.ico  binary
+*.icns binary
+*.bin  binary
