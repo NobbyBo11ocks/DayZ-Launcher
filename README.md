@@ -6,6 +6,7 @@ Stack: Tauri 2 (Rust) + Svelte 5 + Vite. Design and research live in [docs/](doc
 
 ## Features
 
+- Home page: a welcome band with your Steam name and avatar, quick facts and "Join again", then the latest DayZ posts from Steam with pictures and video previews, refreshed automatically, with an unread badge and an alert when an update lands.
 - Server browser fed by Steam's own matchmaking list, with a virtualised table, filters (perspective, map, country, mod, queue, password, BattlEye, daytime, version, ping) and sorting.
 - Player counts verified directly with each server and cross-checked against Steam, so inflated and fabricated counts are flagged or hidden.
 - Country flags from an offline table; mods, population history and connected-session summary per server.
@@ -16,7 +17,7 @@ Stack: Tauri 2 (Rust) + Svelte 5 + Vite. Design and research live in [docs/](doc
 - Launch profiles: save sets of launch options and pick one in the join dialog.
 - If Steam is unavailable, the public DZSA list can be loaded instead so you can still browse.
 - Signed automatic updates, a 4 MB per-user installer, a Diagnostics view with a Performance section and a confirmed clean-up of dangling `!Workshop` junctions, and a Steam idle release so the launcher does not count as playtime while it sits open.
-- Slim frameless window; every view except the server list fits the window without scrolling.
+- Slim frameless window that remembers its size and position; every view except the server list fits the window without scrolling.
 
 ## Develop
 

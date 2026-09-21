@@ -6,6 +6,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import Flag from "./Flag.svelte";
   import Sparkline from "./Sparkline.svelte";
+  import { external } from "./external";
   import { servers } from "./state/servers.svelte";
   import { clock, countryName, isInflated, trustedPlayers, type Diagnostics, type PopulationSample, type ServerDetails, type ServerRow } from "./types";
 
@@ -240,7 +241,7 @@
             <li class:missing={installed && !installed.has(m.workshopId)}>
               <span class="tick" aria-hidden="true">{installed ? (installed.has(m.workshopId) ? "✓" : "○") : "·"}</span>
               <span class="mname" title={m.name}>{m.name}</span>
-              <a class="mid" href="https://steamcommunity.com/sharedfiles/filedetails/?id={m.workshopId}" target="_blank" rel="noreferrer" title="Open in the Steam Workshop">{m.workshopId}</a>
+              <a class="mid" href="https://steamcommunity.com/sharedfiles/filedetails/?id={m.workshopId}" onclick={external} title="Open in the Steam Workshop">{m.workshopId}</a>
             </li>
           {/each}
         </ul>

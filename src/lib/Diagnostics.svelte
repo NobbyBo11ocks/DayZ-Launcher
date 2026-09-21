@@ -120,7 +120,7 @@
           <dl class="kv">
             <dt>Start-up</dt>
             <dd class={perf.firstPaintMs == null ? "muted" : perf.firstPaintMs <= BUDGET.startMs ? "ok" : "warn"}>
-              {perf.firstPaintMs == null ? "no list painted yet" : `${perf.firstPaintMs} ms to the first list`} <span class="muted">(budget {BUDGET.startMs} ms)</span>
+              {perf.firstPaintMs == null ? "no frame painted yet" : `${perf.firstPaintMs} ms to the first frame`} <span class="muted">(budget {BUDGET.startMs} ms)</span>
             </dd>
             <dt>Uptime</dt><dd>{fmtDur(perf.uptimeMs)} · CPU {fmtDur(perf.hostCpuMs)} ({((100 * perf.hostCpuMs) / Math.max(1, perf.uptimeMs)).toFixed(1)}% of one core)</dd>
             <dt>Host memory</dt>

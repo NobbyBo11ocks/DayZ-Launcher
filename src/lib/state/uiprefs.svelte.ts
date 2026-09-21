@@ -13,6 +13,7 @@ export const defaultUiPrefs = (): UiPrefs => ({
   onboarded: false,
   filters: null,
   lastUpdateCheckMs: 0,
+  newsSeen: 0,
 });
 
 class UiPrefsStore {

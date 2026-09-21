@@ -284,7 +284,30 @@ export type UiPrefs = {
   onboarded: boolean;
   filters: Record<string, unknown> | null;
   lastUpdateCheckMs: number;
+  /** Unix seconds of the newest news post the user has seen (D-099). */
+  newsSeen: number;
 };
+
+/** One DayZ news post from Steam's feed (D-099). */
+export type NewsItem = {
+  gid: string;
+  title: string;
+  url: string;
+  author: string;
+  feed: string;
+  official: boolean;
+  date: number;
+  summary: string;
+  update: boolean;
+  /** First picture of the post (Steam's image CDN), if any (D-100). */
+  image?: string;
+  /** YouTube id of the first embedded video, if any (D-100). */
+  video?: string;
+};
+export type NewsCached = { items: NewsItem[]; fetchedAt: number | null };
+
+/** The signed-in user's Steam avatar as raw RGBA (D-100); drawn on a canvas. */
+export type Avatar = { width: number; height: number; rgba: number[] };
 
 /** A saved set of launch options (D-088). */
 export type LaunchProfile = {

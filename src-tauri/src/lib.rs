@@ -7,6 +7,7 @@ mod commands;
 pub mod error;
 pub mod geoip;
 pub mod launch;
+pub mod news;
 pub mod perf;
 pub mod settings;
 pub mod steam;
@@ -49,6 +50,19 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
+        // External links (news posts, Workshop pages) open in the default browser (D-099).
+        .plugin(tauri_plugin_opener::init())
+        // Size, position and maximised state come back on the next start (D-098);
+        // visibility, decorations and fullscreen are left alone (frameless window).
+        .plugin(
+            tauri_plugin_window_state::Builder::new()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::SIZE
+                        | tauri_plugin_window_state::StateFlags::POSITION
+                        | tauri_plugin_window_state::StateFlags::MAXIMIZED,
+                )
+                .build(),
+        )
         .setup(|app| {
             let db_path = app.path().app_local_data_dir()?.join("cache.db");
             let cache = Arc::new(Mutex::new(Cache::open(&db_path)?));
@@ -207,6 +221,9 @@ pub fn run() {
             commands::mods_scan,
             commands::junctions_remove_dangling,
             commands::friends_list,
+            commands::news_fetch,
+            commands::news_cached,
+            commands::steam_avatar,
             commands::launch_game,
             commands::favourites_list,
             commands::favourite_set,

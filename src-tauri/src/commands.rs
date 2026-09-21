@@ -731,6 +731,74 @@ pub async fn junctions_remove_dangling() -> AppResult<JunctionCleanup> {
     .map_err(|e| AppError::Internal(format!("junction task failed: {e}")))?
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewsCached {
+    pub items: Vec<crate::news::NewsItem>,
+    /// Unix seconds of the fetch that produced `items`, if any.
+    pub fetched_at: Option<i64>,
+}
+
+/// Latest DayZ news from Steam (D-099); the result is kept in the cache's meta table
+/// so the next start paints it before the network answers.
+#[tauri::command]
+pub async fn news_fetch(state: State<'_, AppState>) -> AppResult<NewsCached> {
+    let items = crate::news::fetch(60).await.map_err(AppError::Internal)?;
+    let now = ServerRow::now_unix();
+    let json =
+        serde_json::to_string(&items).map_err(|e| AppError::Internal(format!("news: {e}")))?;
+    let c = Arc::clone(&state.cache);
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        if let Ok(c) = c.lock() {
+            let _ = c.set_meta("news", &json);
+            let _ = c.set_meta("news_at", &now.to_string());
+        }
+    })
+    .await;
+    Ok(NewsCached {
+        items,
+        fetched_at: Some(now),
+    })
+}
+
+/// The last fetched news list, if any.
+#[tauri::command]
+pub async fn news_cached(state: State<'_, AppState>) -> AppResult<NewsCached> {
+    let c = Arc::clone(&state.cache);
+    tauri::async_runtime::spawn_blocking(move || {
+        let c = c
+            .lock()
+            .map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
+        let items = c
+            .get_meta("news")
+            .ok()
+            .flatten()
+            .and_then(|j| serde_json::from_str(&j).ok())
+            .unwrap_or_default();
+        let fetched_at = c
+            .get_meta("news_at")
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse().ok());
+        Ok(NewsCached { items, fetched_at })
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("news task failed: {e}")))?
+}
+
+/// The signed-in user's Steam avatar for the welcome header (D-100); `None` until
+/// Steam has the image cached.
+#[tauri::command]
+pub async fn steam_avatar(
+    state: State<'_, AppState>,
+) -> AppResult<Option<crate::steam::sdk::Avatar>> {
+    let steam = state.steam.clone_handle();
+    tauri::async_runtime::spawn_blocking(move || steam.avatar())
+        .await
+        .map_err(|e| AppError::Internal(format!("avatar task failed: {e}")))?
+        .map_err(AppError::Internal)
+}
+
 /// Steam friends with presence and, for those in DayZ, their server (D-092).
 #[tauri::command]
 pub async fn friends_list(state: State<'_, AppState>) -> AppResult<Vec<FriendInfo>> {

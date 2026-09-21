@@ -26,6 +26,7 @@ Out of scope for v1: Linux, server-owner listing/boosts, accounts, telemetry. (T
 | v0.1.5 | Find servers by mod, Performance section in Diagnostics, Steam idle release setting, tidied details pane, single instance, favourite alerts, store lifetime fix | D-077–D-084 |
 | v0.1.6 | Windows toasts for favourite alerts, launch profiles, DZSA list fallback, LAN tab, Friends tab, dangling-junction cleanup in Diagnostics, slim title bar, views that fit the window without scrolling, code-signing guide (docs/12) | D-086–D-094 |
 | v0.1.7 | Join a friend's session from the Friends tab: Steam's game-server address first, rich-presence `connect` as fallback, presence re-requested every poll; LAN scans no longer count as a list refresh | D-096 |
+| v0.1.8 | News tab (Steam's DayZ feed, auto-refresh, unread badge, update alerts), window size and position remembered, external links through the opener plugin | D-098, D-099 |
 | infra | GitHub Actions CI and tag-driven release workflow, release tools (`make_latest.js`, `verify_update_sig.js`, `nsis_template_check.js`) | D-063, D-071 |
 
-Candidates, not scheduled: code signing (Q11), a server-side "friends on this server" column in the browser, remembering the window size and position.
+Candidates, not scheduled: code signing (Q11), a "friends on this server" marker in the browser once Q21 shows how DayZ reports servers to Steam.

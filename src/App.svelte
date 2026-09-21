@@ -6,12 +6,14 @@
   import JoinDialog from "./lib/JoinDialog.svelte";
   import Lan from "./lib/Lan.svelte";
   import Mods from "./lib/Mods.svelte";
+  import News from "./lib/News.svelte";
   import Recent from "./lib/Recent.svelte";
   import Servers from "./lib/Servers.svelte";
   import Settings from "./lib/Settings.svelte";
   import TitleBar from "./lib/TitleBar.svelte";
   import Toasts from "./lib/Toasts.svelte";
   import Welcome from "./lib/Welcome.svelte";
+  import { news } from "./lib/state/news.svelte";
   import { prefs } from "./lib/state/prefs.svelte";
   import { servers } from "./lib/state/servers.svelte";
   import { uiPrefs } from "./lib/state/uiprefs.svelte";
@@ -22,6 +24,7 @@
   $effect(() => {
     void servers.start();
     void updates.autoCheck();
+    void news.start();
   });
 
   // The welcome overlay shows until the settings file says onboarded (D-070). A flag
@@ -68,6 +71,7 @@
   });
 
   const sections = [
+    { id: "news", label: "News", glyph: "▤" },
     { id: "servers", label: "Servers", glyph: "≡" },
     { id: "lan", label: "LAN", glyph: "⌂" },
     { id: "favourites", label: "Favourites", glyph: "★" },
@@ -78,7 +82,8 @@
     { id: "diagnostics", label: "Diagnostics", glyph: "✚" },
   ] as const;
   type Section = (typeof sections)[number]["id"];
-  let active = $state<Section>("servers");
+  /** News is the landing page (D-100); the server list is one click away. */
+  let active = $state<Section>("news");
   /** List views manage their own edges; the rest get padding and must fit the viewport (D-094). */
   const listViews: ReadonlySet<Section> = new Set<Section>(["servers", "lan", "favourites", "friends"]);
 
@@ -100,12 +105,15 @@
       <button class="rail-item" class:active={active === s.id} aria-current={active === s.id ? "page" : undefined} onclick={() => (active = s.id)} title={s.label}>
         <span class="glyph" aria-hidden="true">{s.glyph}</span>
         <span class="text">{s.label}</span>
+        {#if s.id === "news" && news.unread > 0}<span class="badge" aria-label="{news.unread} new posts">{news.unread > 99 ? "99+" : news.unread}</span>{/if}
       </button>
     {/each}
   </nav>
 
   <main class="content" class:padded={!listViews.has(active)}>
-    {#if active === "servers"}
+    {#if active === "news"}
+      <News />
+    {:else if active === "servers"}
       <Servers />
     {:else if active === "lan"}
       <Lan />

@@ -3,6 +3,7 @@
   // mod management (D-075): update what is stale, unsubscribe what is unwanted.
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+  import { external } from "./external";
   import { servers } from "./state/servers.svelte";
   import { fmtBytes, type Diagnostics, type SyncDone, type SyncProgress, type UnsubscribeResult } from "./types";
 
@@ -136,7 +137,7 @@
           {@const running = servers.modCatalog.get(it.id)?.servers ?? 0}
           <tr class:stale={it.needsUpdate}>
             <td>{name}</td>
-            <td class="muted">{it.metaName ?? "–"} <a class="mid" href="https://steamcommunity.com/sharedfiles/filedetails/?id={it.id}" target="_blank" rel="noreferrer">{it.id}</a></td>
+            <td class="muted">{it.metaName ?? "–"} <a class="mid" href="https://steamcommunity.com/sharedfiles/filedetails/?id={it.id}" onclick={external} title="Open in the Steam Workshop">{it.id}</a></td>
             <td class="num">{fmtBytes(it.size)}</td>
             <td>{new Date(it.timeUpdated * 1000).toLocaleDateString()}{it.needsUpdate ? " ⚠ update available" : ""}</td>
             <td class={j ? "ok" : "muted"}>{j ? j.name : "none (created on first join)"}</td>

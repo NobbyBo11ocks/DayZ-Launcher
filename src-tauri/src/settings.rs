@@ -23,6 +23,9 @@ pub struct UiPrefs {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filters: Option<Value>,
     pub last_update_check_ms: u64,
+    /// Unix seconds of the newest news post the user has seen (News tab, D-099).
+    #[serde(default)]
+    pub news_seen: i64,
 }
 
 impl Default for UiPrefs {
@@ -33,6 +36,7 @@ impl Default for UiPrefs {
             onboarded: false,
             filters: None,
             last_update_check_ms: 0,
+            news_seen: 0,
         }
     }
 }

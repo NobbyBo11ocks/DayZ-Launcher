@@ -2,6 +2,7 @@
   // Appearance, browser defaults, launch options and profiles, updates, Steam
   // (docs/06 §5). Two columns so the whole view fits the viewport (D-094).
   import { invoke } from "@tauri-apps/api/core";
+  import { external } from "./external";
   import { prefs, type Accent, type Theme } from "./state/prefs.svelte";
   import { servers } from "./state/servers.svelte";
   import { updates } from "./state/updates.svelte";
@@ -163,8 +164,8 @@
 
       <h2>Credits</h2>
       <p class="muted note">
-        IP geolocation by <a href="https://db-ip.com" target="_blank" rel="noreferrer">DB-IP</a> (IP to Country Lite, CC BY 4.0).
-        Flags by <a href="https://github.com/lipis/flag-icons" target="_blank" rel="noreferrer">flag-icons</a> (MIT).
+        IP geolocation by <a href="https://db-ip.com" onclick={external}>DB-IP</a> (IP to Country Lite, CC BY 4.0).
+        Flags by <a href="https://github.com/lipis/flag-icons" onclick={external}>flag-icons</a> (MIT).
         Server data from Steam and the servers themselves; nothing is sent anywhere else.
       </p>
     </div>

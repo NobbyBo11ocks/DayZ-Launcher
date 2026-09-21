@@ -4,23 +4,26 @@ Goal: the fastest way from "open launcher" to "in game", in a dark, quiet, infor
 
 ## 1. Window and layout
 
-- Default 1280×800, minimum 960×600. Custom title bar (`decorations: false`, drag region) so the theme covers the whole window: 30 px high, no app name, an update notice when one is pending, and our own minimise/maximise/close buttons (D-091).
+- Default 1280×800, minimum 960×600; size, position and maximised state are remembered between runs (`tauri-plugin-window-state`, D-098). Custom title bar (`decorations: false`, drag region) so the theme covers the whole window: 30 px high, no app name, an update notice when one is pending, and our own minimise/maximise/close buttons (D-091).
 - Three regions:
 
 ```text
 ┌──────────────────────────────────────────────────────────────────┐
 │ (drag region)                              update notice │ ▭ ✕   │
 ├──────────┬───────────────────────────────┬────────────────────────┤
-│ Servers  │ filter bar                    │                        │
-│ LAN      │ virtualised table             │ details pane           │
-│ Favs     │ name · map · players/queue    │ header + JOIN          │
-│ Friends  │ time · ping · flags           │ info grid              │
-│ Recent   │ (sortable columns)            │ mods (state per mod)   │
-│ Mods     │                               │ population sparkline   │
+│ News ③   │ filter bar                    │                        │
+│ Servers  │ virtualised table             │ details pane           │
+│ LAN      │ name · map · players/queue    │ header + JOIN          │
+│ Favs     │ time · ping · flags           │ info grid              │
+│ Friends  │ (sortable columns)            │ mods (state per mod)   │
+│ Recent   │                               │ population sparkline   │
+│ Mods     │                               │                        │
 │ Settings │                               │                        │
 │ Diagn.   │                               │                        │
 └──────────┴───────────────────────────────┴────────────────────────┘
 ```
+
+- News (D-099) sits first with an unread badge (③ above); it is a padded view of cards that scrolls inside, not a table.
 
 - Responsive: rail collapses to icons < 1100 px; details pane hidden < 1000 px; table drops the "time" and "version" columns < 900 px.
 - Only the server list views scroll their table. Recent, Mods, Settings, Diagnostics and Friends fit the viewport (`.content.padded` is `overflow: hidden`); when the window is smaller than their content, a table or a column scrolls on its own, never the page (D-094).

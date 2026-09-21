@@ -68,7 +68,7 @@
   .btn { all: unset; cursor: pointer; padding: 6px 12px; border-radius: var(--radius); background: var(--bg-row); color: var(--fg); border: 1px solid var(--border); }
   .btn:disabled { opacity: 0.5; cursor: default; }
   .btn:focus-visible { outline: 2px solid var(--accent); }
-  .empty { margin: auto; text-align: center; }
+  .empty { margin: auto; text-align: center; max-width: 520px; }
   .empty p { margin: 4px 0; }
   kbd { padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-row); font-size: 11px; }
   /* The details pane only exists while a row is selected; the table takes the full width otherwise. */
