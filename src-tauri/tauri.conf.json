@@ -44,7 +44,7 @@
     "resources": { "resources/steam_api64.dll": "steam_api64.dll" },
     "windows": {
       "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
-      "nsis": { "installMode": "currentUser", "languages": ["English"] }
+      "nsis": { "installMode": "currentUser", "languages": ["English"], "template": "nsis/installer.nsi" }
     }
   }
 }
