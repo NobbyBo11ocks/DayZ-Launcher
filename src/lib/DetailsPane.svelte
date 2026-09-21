@@ -2,9 +2,10 @@
   // Details pane (docs/06 §3): live INFO/RULES/PLAYER for the selected server,
   // mods with installed state, verification verdict with its reason.
   import { invoke } from "@tauri-apps/api/core";
+  import Flag from "./Flag.svelte";
   import Sparkline from "./Sparkline.svelte";
   import { servers } from "./state/servers.svelte";
-  import { clock, isInflated, trustedPlayers, type Diagnostics, type PopulationSample, type ServerDetails, type ServerRow } from "./types";
+  import { clock, countryName, isInflated, trustedPlayers, type Diagnostics, type PopulationSample, type ServerDetails, type ServerRow } from "./types";
 
   let { row, localVersion }: { row: ServerRow | null; localVersion: string | null } = $props();
 
@@ -117,7 +118,7 @@
     <header class="head">
       <h2 title={row.name}>{row.name}</h2>
       <div class="sub muted">
-        {row.map} · {row.ip}:{row.gamePort}
+        {#if row.country}<Flag code={row.country} /> {countryName(row.country)} · {/if}{row.map} · {row.ip}:{row.gamePort}
         <button class="link" onclick={copyAddress}>{copied ? "copied" : "copy"}</button>
       </div>
       <div class="actions">

@@ -5,6 +5,7 @@ pub mod a2s;
 pub mod browser;
 mod commands;
 pub mod error;
+pub mod geoip;
 pub mod launch;
 pub mod settings;
 pub mod steam;

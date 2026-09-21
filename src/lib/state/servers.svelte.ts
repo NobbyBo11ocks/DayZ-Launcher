@@ -27,6 +27,8 @@ export type Filters = {
   search: string;
   perspective: Perspective;
   map: string;
+  /** ISO country code, "" = any (D-073). */
+  country: string;
   notFull: boolean;
   notEmpty: boolean;
   hasQueue: boolean;
@@ -46,6 +48,7 @@ export const defaultFilters = (): Filters => ({
   search: "",
   perspective: "any",
   map: "",
+  country: "",
   notFull: false,
   notEmpty: false,
   hasQueue: false,
@@ -110,6 +113,13 @@ class ServersStore {
 
   untrustedCount = $derived([...this.rows.values()].filter(isUntrusted).length);
 
+  /** Distinct countries with counts, most common first (rows without a country are skipped). */
+  countries = $derived.by(() => {
+    const counts = new Map<string, number>();
+    for (const r of this.rows.values()) if (r.country) counts.set(r.country, (counts.get(r.country) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  });
+
   list = $derived.by(() => {
     const f = this.filters;
     const q = f.search.trim().toLowerCase();
@@ -120,6 +130,7 @@ class ServersStore {
       if (f.perspective === "1pp" && !r.tags.firstPersonOnly) continue;
       if (f.perspective === "3pp" && r.tags.firstPersonOnly) continue;
       if (f.map && r.map !== f.map) continue;
+      if (f.country && r.country !== f.country) continue;
       const pop = trustedPlayers(r);
       if (f.notFull && pop >= r.maxPlayers) continue;
       if (f.notEmpty && pop <= 0) continue;

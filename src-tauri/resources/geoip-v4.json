@@ -1,0 +1,8 @@
+{
+  "source": "dbip-country-lite.csv",
+  "licence": "CC BY 4.0, attribution: IP Geolocation by DB-IP (https://db-ip.com)",
+  "rows": 357325,
+  "ranges": 357325,
+  "countries": 246,
+  "built": "2026-09-21"
+}

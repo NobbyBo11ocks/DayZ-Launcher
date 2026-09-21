@@ -81,6 +81,11 @@ To publish a release from this machine:
 
 The installer is not code-signed, so Windows SmartScreen shows an "unknown publisher" warning on first run.
 
+## Data and credits
+
+- Country flags: IP geolocation by [DB-IP](https://db-ip.com) (IP to Country Lite, CC BY 4.0), compacted into `src-tauri/resources/geoip-v4.bin` by `node tools/geoip_build.js` (re-run to pick up the current month, then commit). Flag images from [flag-icons](https://github.com/lipis/flag-icons) (MIT), rasterised into `src/assets/flags.png` by `node tools/flags_build.js`.
+- Everything else comes from Steam and the game servers themselves; the launcher sends nothing anywhere else.
+
 
 ## Verify the DayZ query protocol
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   // Virtualised server table (docs/05 §5, docs/06 §2): fixed 36 px rows, renders only
   // the viewport plus overscan, reports visible ids for verification, keyboard nav.
+  import Flag from "./Flag.svelte";
   import { clock, isInflated, isUntrusted, trustedPlayers, type ServerRow } from "./types";
   import type { SortKey } from "./state/servers.svelte";
 
@@ -184,6 +185,7 @@
                 }}
                 ondblclick={(e) => e.stopPropagation()}>{favourites.has(r.id) ? "★" : "☆"}</button
               >
+              <Flag code={r.country} />
               <span class="flags">
                 {#if r.password}<span class="flag" title="Password protected">🔒</span>{/if}
                 {#if r.tags.firstPersonOnly}<span class="pill" title="First person only">1PP</span>{/if}

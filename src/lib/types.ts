@@ -111,6 +111,8 @@ export type ServerRow = {
   steamEmpty: boolean | null;
   verifiedAt: number | null;
   verdict: Verdict | null;
+  /** ISO 3166-1 alpha-2 from the embedded GeoIP table, null when unknown (D-073). */
+  country: string | null;
 };
 
 /** Rule R0 (docs/11): Steam says empty, A2S_INFO claims players. */
@@ -261,6 +263,17 @@ export type Diagnostics = {
   warnings: string[];
   timingMs: number;
 };
+
+/** Country name for an ISO 3166-1 alpha-2 code in the UI language, or the code itself. */
+const displayNames = typeof Intl !== "undefined" && "DisplayNames" in Intl ? new Intl.DisplayNames(undefined, { type: "region" }) : null;
+export function countryName(code: string | null | undefined): string {
+  if (!code) return "";
+  try {
+    return displayNames?.of(code.toUpperCase()) ?? code;
+  } catch {
+    return code;
+  }
+}
 
 /** UI preferences stored in settings.json (D-070); `filters` is the browser's saved filter object. */
 export type UiPrefs = {

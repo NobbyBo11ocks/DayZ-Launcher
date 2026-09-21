@@ -1,6 +1,7 @@
 <script lang="ts">
   // Filter chips and search (docs/06 §4). All state lives in the servers store.
   import { servers, type ModFilter, type Perspective } from "./state/servers.svelte";
+  import { countryName } from "./types";
 
   let searchEl = $state<HTMLInputElement | null>(null);
   export function focusSearch() {
@@ -26,6 +27,7 @@
       (f.perspective !== "any" ? 1 : 0) +
       (f.mods !== "any" ? 1 : 0) +
       (f.map ? 1 : 0) +
+      (f.country ? 1 : 0) +
       (f.maxPing > 0 ? 1 : 0),
   );
 </script>
@@ -56,6 +58,13 @@
     <option value="">All maps</option>
     {#each servers.maps.slice(0, 40) as [map, n] (map)}
       <option value={map}>{map} ({n})</option>
+    {/each}
+  </select>
+
+  <select class="select" bind:value={servers.filters.country} onchange={() => servers.saveFilters()} aria-label="Country">
+    <option value="">All countries</option>
+    {#each servers.countries.slice(0, 60) as [cc, n] (cc)}
+      <option value={cc}>{countryName(cc)} ({n})</option>
     {/each}
   </select>
 

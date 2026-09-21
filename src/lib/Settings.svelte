@@ -132,6 +132,13 @@
     <dt>Last refresh</dt>
     <dd>{servers.lastRefresh ? new Date(servers.lastRefresh * 1000).toLocaleString() : "never"}</dd>
   </dl>
+
+  <h2>Credits</h2>
+  <p class="muted note">
+    IP geolocation by <a href="https://db-ip.com" target="_blank" rel="noreferrer">DB-IP</a> (IP to Country Lite, CC BY 4.0).
+    Flags by <a href="https://github.com/lipis/flag-icons" target="_blank" rel="noreferrer">flag-icons</a> (MIT).
+    Server data from Steam and the servers themselves; nothing is sent anywhere else.
+  </p>
 </section>
 
 <style>

@@ -51,14 +51,14 @@ One window, no tray icon by default, no background service. When the window is m
 
 | Metric | Budget | M0 baseline (2026-09-21, D-023) | How to measure |
 |---|---|---|---|
-| Installer size (NSIS, downloadBootstrapper) | < 15 MB | M0 1.32 MB; M4 2.26 MB; **M7 3.23 MB** (exe 8.54 MB with SQLite, Steamworks and the updater's TLS stack) | file size |
+| Installer size (NSIS, downloadBootstrapper) | < 15 MB | M0 1.32 MB; M4 2.26 MB; M7 3.23 MB (exe 8.54 MB with SQLite, Steamworks and the updater's TLS stack); **v0.1.3+flags 3.83 MB** (exe 10.5 MB: +1.79 MB GeoIP table, +145 KB flag sprite, D-073) | file size |
 | Host process (`dayz-launcher.exe`) private bytes, idle | < 90 MB with list loaded and Steamworks initialised | M0 5.9 MB; M4 65–79 MB; **M7 70 MB flat over 7 min** (82 during refresh). `steam_api64.dll` loads `steamclient64.dll` and `gameoverlayrenderer64.dll` in-process; releasing Steamworks when idle does not lower this (D-057) | `Get-Process dayz-launcher \| select PrivateMemorySize64` |
 | All processes private bytes (commit), idle | < 330 MB with list loaded | M0 171.7 MB; M4 294–315 MB; **M7 282–310 MB** (host 70, browser 41, gpu 85–91, renderer 65–72, utility 11.5 + 7.5, crashpad 2.2); two earlier runs grew past 400 MB and are recorded as unexplained (Q18, D-060) | sum of `PrivateMemorySize64` over host + `msedgewebview2.exe` whose command line contains `com.dayzlauncher` |
 | Cold start to first painted list | < 1.0 s | window responding within the 7 s sample; not yet timed | Tauri `--verbose` timestamps + `performance.now()` in UI |
 | Full refresh, 20 000 servers | < 15 s | app log |
 | Idle CPU, window focused | < 0.5 % | M0 ≈ 0.6 % (startup included); M4 0.1 % over 20 s; **M7 0.15 %** of one core averaged over 7 min (1.2 → 1.8 s cumulative) | Task Manager over 60 s |
 | Idle CPU, window minimised | 0 % (timers paused) | n/a | same |
-| Frontend JS bundle (gzip) | < 120 KB | 14.44 KB JS + 0.97 KB CSS | `vite build` report |
+| Frontend JS bundle (gzip) | < 120 KB | M0 14.44 KB JS + 0.97 KB CSS; **v0.1.3+flags 44.4 KB JS + 4.4 KB CSS** (plus the 145 KB flag sprite as a separate asset) | `vite build` report |
 
 **Metric note.** "Sum of working sets" is misleading for WebView2: the runtime's DLL pages are mapped into every helper process and counted each time (331 MB summed WS at M0 vs 172 MB commit). Budgets therefore use private bytes. The six WebView2 helper processes are the runtime's fixed cost; our job is to keep the host and renderer from growing on top of them.
 

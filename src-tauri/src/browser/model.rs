@@ -47,6 +47,10 @@ pub struct ServerRow {
     /// Verdict string from `verify::Verdict::as_str` (rules R2–R5), if verified.
     #[serde(default)]
     pub verdict: Option<String>,
+    /// ISO 3166-1 alpha-2 country of `ip` from the embedded GeoIP table (D-073);
+    /// derived, not stored in the cache.
+    #[serde(default)]
+    pub country: Option<String>,
 }
 
 impl ServerRow {
@@ -58,6 +62,11 @@ impl ServerRow {
 
     pub fn id_for(ip: &str, query_port: u16) -> String {
         format!("{ip}:{query_port}")
+    }
+
+    /// Country code for an IPv4 string, `None` for unknown, private or unparsable addresses.
+    pub fn country_for(ip: &str) -> Option<String> {
+        crate::geoip::country(ip.parse().ok()?).map(str::to_owned)
     }
 
     /// Row from a direct A2S_INFO reply (direct connect, favourites import). Steam's
@@ -89,6 +98,7 @@ impl ServerRow {
             steam_empty: None,
             verified_at: None,
             verdict: None,
+            country: Self::country_for(ip),
         }
     }
 

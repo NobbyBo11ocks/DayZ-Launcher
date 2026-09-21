@@ -229,9 +229,11 @@ impl Cache {
     fn row_from(r: &rusqlite::Row<'_>) -> rusqlite::Result<ServerRow> {
         let keywords: String = r.get(14)?;
         let server_version: i32 = r.get(12)?;
+        let ip: String = r.get(1)?;
         Ok(ServerRow {
             id: r.get(0)?,
-            ip: r.get(1)?,
+            country: ServerRow::country_for(&ip),
+            ip,
             game_port: r.get::<_, i64>(2)? as u16,
             query_port: r.get::<_, i64>(3)? as u16,
             name: r.get(4)?,
@@ -406,6 +408,7 @@ mod tests {
             steam_empty: None,
             verified_at: None,
             verdict: None,
+            country: None,
         }
     }
 

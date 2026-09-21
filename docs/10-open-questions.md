@@ -8,7 +8,7 @@ Resolve each with a primary source or a local experiment, then move the answer t
 | Q2 | Does `-nolauncher` change what Steam's own "Play" does on Windows, and does running `DayZ_x64.exe` directly (without `DayZ_BE.exe`) still start BattlEye? | M5 | Read `installscript.vdf` and Steam's launch config for 221100 (`appinfo.vdf` via `steamworks Apps::launch_command_line`), try both spawns against a BE server |
 | ~~Q3~~ | Resolved 2026-09-21 → D-034: one anonymous entry per player (empty name, score 0, real duration) | – | – |
 | Q4 | Side effects of `Client::init_app(221100)` while the game runs (overlay, "In-Game" status, two Steamworks clients) | M3/M5 | Official launcher already runs as 221100 alongside the game; confirm with steamworks-rs issue tracker and a local test |
-| Q5 | GeoIP source and licence for country flags (DB-IP Lite CC-BY 4.0 vs MaxMind GeoLite2 account vs ip-api rate limits) | M4 | Compare DB sizes (< 5 MB target) and licence text; prefer an offline DB updated with the app |
+| ~~Q5~~ | Resolved 2026-09-21 → D-073: DB-IP IP-to-Country Lite (CC BY 4.0) compacted to a 1.8 MB table embedded in the exe; flags from flag-icons (MIT) as one sprite; no online lookups | – | – |
 | ~~Q6~~ | Resolved 2026-09-21 → D-018: `steamworks-sys` vendors `steam_api64.dll`/`.lib` under `lib/steam/redistributable_bin/win64`; bundle the DLL as a resource | – | – |
 | Q7 | Do relative `-mod=!Workshop\@CF` paths work on Windows? (only needed if the 32 KB limit is ever approached) | none | Optional experiment |
 | Q8 | Meaning of the per-mod u32 hash and the `overflow`/flag bytes | none | Not needed for matching; ignore unless Bohemia documents it (S-45) |

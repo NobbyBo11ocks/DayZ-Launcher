@@ -848,6 +848,7 @@ fn row_from(item: GameServerItem, steam_empty: Option<bool>) -> ServerRow {
     let tags = DayzTags::parse(&item.tags);
     ServerRow {
         id: ServerRow::id_for(&ip, item.query_port),
+        country: ServerRow::country_for(&ip),
         ip,
         game_port: item.connection_port,
         query_port: item.query_port,

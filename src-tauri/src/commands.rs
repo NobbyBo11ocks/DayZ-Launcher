@@ -1034,6 +1034,7 @@ pub async fn import_official_favourites(
                 result.unreachable += 1;
                 ServerRow {
                     id: id.clone(),
+                    country: ServerRow::country_for(&e.query_ip),
                     ip: e.query_ip.clone(),
                     game_port: e.game_port,
                     query_port: e.query_port,
