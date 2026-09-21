@@ -28,8 +28,22 @@
       (f.mods !== "any" ? 1 : 0) +
       (f.map ? 1 : 0) +
       (f.country ? 1 : 0) +
+      (f.mod ? 1 : 0) +
       (f.maxPing > 0 ? 1 : 0),
   );
+
+  // Mod filter (D-080): the catalogue can hold thousands of names, so a text box
+  // narrows the select; the chosen mod always stays listed.
+  let modQuery = $state("");
+  const modOptions = $derived.by(() => {
+    const q = modQuery.trim().toLowerCase();
+    const list = servers.modOptions.filter((m) => !q || m.name.toLowerCase().includes(q)).slice(0, 300);
+    if (f.mod && !list.some((m) => m.id === f.mod)) {
+      const cur = servers.modCatalog.get(f.mod);
+      list.unshift({ id: f.mod, name: cur?.name ?? String(f.mod), servers: cur?.servers ?? 0 });
+    }
+    return list;
+  });
 </script>
 
 <div class="filters" role="toolbar" aria-label="Filters">
@@ -74,6 +88,18 @@
     {/each}
   </div>
 
+  {#if servers.modCatalog.size > 0 || f.mod}
+    <span class="modf" role="group" aria-label="Running a specific mod">
+      <input class="modsearch" type="search" placeholder="Find mod…" bind:value={modQuery} aria-label="Search the mod list" />
+      <select class="select" bind:value={servers.filters.mod} onchange={() => servers.saveFilters()} aria-label="Servers running this mod" title="Servers whose mod list includes this Workshop item">
+        <option value={0}>Any mod</option>
+        {#each modOptions as m (m.id)}
+          <option value={m.id}>{m.name} ({m.servers})</option>
+        {/each}
+      </select>
+    </span>
+  {/if}
+
   <button class="chip" class:on={f.notEmpty} onclick={() => toggle("notEmpty")}>Not empty</button>
   <button class="chip" class:on={f.notFull} onclick={() => toggle("notFull")}>Not full</button>
   <button class="chip" class:on={f.hasQueue} onclick={() => toggle("hasQueue")}>Has queue</button>
@@ -113,6 +139,9 @@
   .chip.trust.on { border-color: var(--warn); }
   .chip.reset { border-style: dashed; }
   .select { padding: 5px 8px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg); max-width: 200px; }
+  .modf { display: inline-flex; gap: 4px; }
+  .modsearch { width: 110px; padding: 5px 8px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg); font-size: 12px; }
+  .modsearch:focus-visible { outline: 2px solid var(--accent); }
   .ping { display: inline-flex; align-items: center; gap: 4px; color: var(--fg-muted); font-size: 12px; }
   .ping input { width: 60px; padding: 4px 6px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg); }
 </style>

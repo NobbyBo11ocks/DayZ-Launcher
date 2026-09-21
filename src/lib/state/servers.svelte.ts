@@ -12,7 +12,10 @@ import {
   type Favourite,
   type HistoryEntry,
   type ImportResult,
+  type ModScanSummary,
+  type ModsIndex,
   type RefreshDone,
+  type ServerMods,
   type ServerRow,
   type SteamStatus,
   type Verification,
@@ -29,6 +32,8 @@ export type Filters = {
   map: string;
   /** ISO country code, "" = any (D-073). */
   country: string;
+  /** Workshop id the server must run, 0 = any (D-080). */
+  mod: number;
   notFull: boolean;
   notEmpty: boolean;
   hasQueue: boolean;
@@ -49,6 +54,7 @@ export const defaultFilters = (): Filters => ({
   perspective: "any",
   map: "",
   country: "",
+  mod: 0,
   notFull: false,
   notEmpty: false,
   hasQueue: false,
@@ -92,6 +98,13 @@ class ServersStore {
   history = $state<HistoryEntry[]>([]);
   /** Server the join dialog is open for. */
   joiningId = $state<string | null>(null);
+  /** Mod ids per scanned server and the mod catalogue with server counts (D-080). */
+  modsByServer = new SvelteMap<string, number[]>();
+  modCatalog = new SvelteMap<number, { name: string; servers: number }>();
+  modScan = $state<ModScanSummary | null>(null);
+  modScanning = $state(false);
+  /** Set by a view that wants the app to switch section (Mods → Servers with a mod filter). */
+  navigate = $state<string | null>(null);
 
   #pending = new SvelteSet<string>();
   #unlisten: UnlistenFn[] = [];
@@ -131,6 +144,7 @@ class ServersStore {
       if (f.perspective === "3pp" && r.tags.firstPersonOnly) continue;
       if (f.map && r.map !== f.map) continue;
       if (f.country && r.country !== f.country) continue;
+      if (f.mod && !this.modsByServer.get(r.id)?.includes(f.mod)) continue;
       const pop = trustedPlayers(r);
       if (f.notFull && pop >= r.maxPlayers) continue;
       if (f.notEmpty && pop <= 0) continue;
@@ -172,6 +186,51 @@ class ServersStore {
 
   selected = $derived(this.selectedId ? (this.rows.get(this.selectedId) ?? null) : null);
 
+  /** Catalogue entries, most widely used first. */
+  modOptions = $derived(
+    [...this.modCatalog.entries()]
+      .map(([id, e]) => ({ id, name: e.name, servers: e.servers }))
+      .sort((a, b) => b.servers - a.servers || a.name.localeCompare(b.name)),
+  );
+
+  /** Populated modded servers whose mod list has not been scanned yet. */
+  unscannedModded = $derived([...this.rows.values()].filter((r) => r.tags.modded && trustedPlayers(r) > 0 && !this.modsByServer.has(r.id)).length);
+
+  private async loadModsIndex() {
+    try {
+      const idx = await invoke<ModsIndex>("mods_index");
+      this.modCatalog.clear();
+      for (const c of idx.catalog) this.modCatalog.set(c.id, { name: c.name, servers: c.servers });
+      this.modsByServer.clear();
+      for (const s of idx.index) this.modsByServer.set(s.id, s.mods);
+    } catch {
+      /* the scan will fill it in */
+    }
+  }
+
+  /** A batch of freshly scanned servers plus the names of the mods they mention. */
+  applyMods(list: ServerMods[], names: [number, string][]) {
+    for (const [id, name] of names) if (!this.modCatalog.has(id)) this.modCatalog.set(id, { name, servers: 0 });
+    const delta = new Map<number, number>();
+    for (const s of list) {
+      for (const m of this.modsByServer.get(s.id) ?? []) delta.set(m, (delta.get(m) ?? 0) - 1);
+      for (const m of s.mods) delta.set(m, (delta.get(m) ?? 0) + 1);
+      this.modsByServer.set(s.id, s.mods);
+    }
+    for (const [m, d] of delta) {
+      const e = this.modCatalog.get(m);
+      if (e && d !== 0) this.modCatalog.set(m, { name: e.name, servers: Math.max(0, e.servers + d) });
+    }
+  }
+
+  async scanMods(force: boolean) {
+    try {
+      await invoke("mods_scan", { force });
+    } catch (e) {
+      this.error = String(e);
+    }
+  }
+
   /** Favourite rows, search-filtered and sorted like the main list; trust filters do not apply. */
   favouriteRows = $derived.by(() => {
     const q = this.filters.search.trim().toLowerCase();
@@ -197,6 +256,7 @@ class ServersStore {
       this.steam = await invoke<SteamStatus>("steam_status");
       this.localVersion = await invoke<string | null>("local_game_version");
       await this.loadFavourites();
+      void this.loadModsIndex();
     } catch (e) {
       this.error = String(e);
     }
@@ -220,6 +280,15 @@ class ServersStore {
       await listen<VerifySummary>("servers:verify-done", (ev) => {
         this.verifySummary = ev.payload;
         this.verifying = false;
+      }),
+      await listen<ModScanSummary>("servers:mods-start", (ev) => {
+        this.modScan = ev.payload;
+        this.modScanning = ev.payload.total > 0;
+      }),
+      await listen<[ServerMods[], [number, string][]]>("servers:mods", (ev) => this.applyMods(ev.payload[0], ev.payload[1])),
+      await listen<ModScanSummary>("servers:mods-done", (ev) => {
+        this.modScan = ev.payload;
+        this.modScanning = false;
       }),
     );
     this.maybeAutoRefresh();

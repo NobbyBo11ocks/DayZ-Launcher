@@ -3,7 +3,15 @@
   // mod management (D-075): update what is stale, unsubscribe what is unwanted.
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+  import { servers } from "./state/servers.svelte";
   import { fmtBytes, type Diagnostics, type SyncDone, type SyncProgress, type UnsubscribeResult } from "./types";
+
+  /** Jump to the server list filtered to servers running this mod (D-080). */
+  function showServers(id: number) {
+    servers.filters.mod = id;
+    servers.saveFilters();
+    servers.navigate = "servers";
+  }
 
   let data = $state<Diagnostics | null>(null);
   let error = $state<string | null>(null);
@@ -116,6 +124,7 @@
           <th class="num"><button class="th" onclick={() => setSort("size")}>Size{mark("size")}</button></th>
           <th><button class="th" onclick={() => setSort("updated")}>Updated{mark("updated")}</button></th>
           <th>Junction</th>
+          <th class="num" title="Populated servers whose scanned mod list includes this item">Servers</th>
           <th></th>
         </tr>
       </thead>
@@ -123,12 +132,16 @@
         {#each items as it (it.id)}
           {@const j = junctionsById.get(it.id)}
           {@const name = it.modName ?? it.metaName ?? String(it.id)}
+          {@const running = servers.modCatalog.get(it.id)?.servers ?? 0}
           <tr class:stale={it.needsUpdate}>
             <td>{name}</td>
             <td class="muted">{it.metaName ?? "–"} <a class="mid" href="https://steamcommunity.com/sharedfiles/filedetails/?id={it.id}" target="_blank" rel="noreferrer">{it.id}</a></td>
             <td class="num">{fmtBytes(it.size)}</td>
             <td>{new Date(it.timeUpdated * 1000).toLocaleDateString()}{it.needsUpdate ? " ⚠ update available" : ""}</td>
             <td class={j ? "ok" : "muted"}>{j ? j.name : "none (created on first join)"}</td>
+            <td class="num">
+              {#if running}<button class="btn" onclick={() => showServers(it.id)} title="Show these servers">{running}</button>{:else}<span class="muted">0</span>{/if}
+            </td>
             <td class="act">
               {#if busyIds.has(it.id)}
                 <span class="muted">…</span>

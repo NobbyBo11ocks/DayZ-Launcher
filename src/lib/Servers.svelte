@@ -53,6 +53,8 @@
     else if (d) parts.push(`${d.responded} servers from Steam in ${(d.elapsedMs / 1000).toFixed(0)} s`);
     if (servers.verifying && !v) parts.push("verifying player counts…");
     else if (v) parts.push(`${v.verified} verified · ${v.inflated + v.unverifiable + v.synthetic} fake · ${v.offline} offline`);
+    if (servers.modScanning) parts.push(`scanning mod lists (${servers.modScan?.total ?? 0})…`);
+    if (servers.filters.mod && servers.unscannedModded > 0) parts.push(`${servers.unscannedModded} modded servers not scanned yet`);
     if (servers.lastRefresh && !s?.refreshing && !d) parts.push(`cached ${new Date(servers.lastRefresh * 1000).toLocaleTimeString()}`);
     return parts.join(" · ");
   });

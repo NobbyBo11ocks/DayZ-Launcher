@@ -134,13 +134,20 @@ pub fn run() {
                             if !targets.is_empty() {
                                 #[cfg(debug_assertions)]
                                 eprintln!("[verify] start: {} populated servers", targets.len());
-                                tauri::async_runtime::spawn(commands::run_verification(
-                                    handle.clone(),
-                                    Arc::clone(&cache),
-                                    a2s.clone(),
-                                    targets,
-                                    true,
-                                ));
+                                // Verification first (players), then the mod lists of
+                                // whatever is populated and modded (D-080).
+                                let (h, c, client) = (handle.clone(), Arc::clone(&cache), a2s.clone());
+                                tauri::async_runtime::spawn(async move {
+                                    commands::run_verification(
+                                        h.clone(),
+                                        Arc::clone(&c),
+                                        client.clone(),
+                                        targets,
+                                        true,
+                                    )
+                                    .await;
+                                    commands::run_mod_scan(h, c, client, false).await;
+                                });
                             }
                         }
                         SteamEvent::SyncProgress(p) => {
@@ -182,6 +189,8 @@ pub fn run() {
             commands::join_plan,
             commands::mods_sync,
             commands::mods_unsubscribe,
+            commands::mods_index,
+            commands::mods_scan,
             commands::launch_game,
             commands::favourites_list,
             commands::favourite_set,

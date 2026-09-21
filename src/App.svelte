@@ -71,6 +71,15 @@
   ] as const;
   type Section = (typeof sections)[number]["id"];
   let active = $state<Section>("servers");
+
+  // A view can ask for a section switch (Mods → Servers with a mod filter, D-080).
+  $effect(() => {
+    const want = servers.navigate;
+    if (want && sections.some((s) => s.id === want)) {
+      active = want as Section;
+      servers.navigate = null;
+    }
+  });
 </script>
 
 <div class="shell">

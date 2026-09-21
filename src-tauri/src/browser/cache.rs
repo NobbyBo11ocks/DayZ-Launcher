@@ -3,6 +3,7 @@
 //! rusqlite 0.40 with the bundled SQLite; WAL journal; one connection behind a mutex.
 //! Pre-release schema policy: a version mismatch drops and recreates the table.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -66,6 +67,18 @@ CREATE TABLE IF NOT EXISTS servers (
 );
 CREATE INDEX IF NOT EXISTS servers_last_seen ON servers(last_seen);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS server_mods (
+  server_id TEXT NOT NULL,
+  mod_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  PRIMARY KEY (server_id, mod_id)
+);
+CREATE INDEX IF NOT EXISTS server_mods_mod ON server_mods(mod_id);
+CREATE TABLE IF NOT EXISTS server_mods_at (
+  server_id TEXT PRIMARY KEY,
+  scanned_at INTEGER NOT NULL,
+  mod_count INTEGER NOT NULL
+);
 ";
 
 const SELECT_COLUMNS: &str = "id, ip, game_port, query_port, name, map, description, players, max_players, bots, password, secure,
@@ -73,6 +86,31 @@ const SELECT_COLUMNS: &str = "id, ip, game_port, query_port, name, map, descript
 
 pub struct Cache {
     conn: Connection,
+}
+
+/// One mod as seen across the scanned servers (D-080).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModCatalogEntry {
+    pub id: u64,
+    /// `mod.cpp` name as the servers report it (names are not unique).
+    pub name: String,
+    pub servers: usize,
+}
+
+/// Mod ids of one scanned server.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerMods {
+    pub id: String,
+    pub mods: Vec<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModsIndex {
+    pub catalog: Vec<ModCatalogEntry>,
+    pub index: Vec<ServerMods>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -354,11 +392,96 @@ impl Cache {
         tx.commit()
     }
 
-    /// Drops rows not confirmed for `max_age_secs`; returns how many were removed.
+    /// Drops rows not confirmed for `max_age_secs` (and their mod lists); returns how many were removed.
     pub fn prune(&self, max_age_secs: i64) -> rusqlite::Result<usize> {
         let cutoff = ServerRow::now_unix() - max_age_secs;
-        self.conn
-            .execute("DELETE FROM servers WHERE last_seen < ?1", params![cutoff])
+        let n = self
+            .conn
+            .execute("DELETE FROM servers WHERE last_seen < ?1", params![cutoff])?;
+        self.conn.execute_batch(
+            "DELETE FROM server_mods WHERE server_id NOT IN (SELECT id FROM servers);
+             DELETE FROM server_mods_at WHERE server_id NOT IN (SELECT id FROM servers);",
+        )?;
+        Ok(n)
+    }
+
+    // ----- mod lists (D-080) ---------------------------------------------------
+
+    /// Replaces the stored mod list of one server (A2S_RULES DayZ payload).
+    pub fn replace_server_mods(
+        &mut self,
+        id: &str,
+        mods: &[(u64, String)],
+        now: i64,
+    ) -> rusqlite::Result<()> {
+        let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM server_mods WHERE server_id = ?1", params![id])?;
+        {
+            let mut ins = tx.prepare_cached(
+                "INSERT OR REPLACE INTO server_mods (server_id, mod_id, name) VALUES (?1, ?2, ?3)",
+            )?;
+            for (mid, name) in mods {
+                ins.execute(params![id, *mid as i64, name])?;
+            }
+        }
+        tx.execute(
+            "INSERT INTO server_mods_at (server_id, scanned_at, mod_count) VALUES (?1, ?2, ?3)
+             ON CONFLICT(server_id) DO UPDATE SET scanned_at = excluded.scanned_at, mod_count = excluded.mod_count",
+            params![id, now, mods.len() as i64],
+        )?;
+        tx.commit()
+    }
+
+    /// Unix seconds of each server's last mod scan.
+    pub fn mods_scanned(&self) -> rusqlite::Result<HashMap<String, i64>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT server_id, scanned_at FROM server_mods_at")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+        rows.collect()
+    }
+
+    /// Everything the browser needs for the mod filter: names with server counts, and
+    /// the mod ids per scanned server (servers scanned as vanilla have an empty list).
+    pub fn mods_index(&self) -> rusqlite::Result<ModsIndex> {
+        let mut catalog = Vec::new();
+        {
+            let mut stmt = self.conn.prepare(
+                "SELECT mod_id, MAX(name), COUNT(*) FROM server_mods GROUP BY mod_id ORDER BY 3 DESC, 2",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok(ModCatalogEntry {
+                    id: r.get::<_, i64>(0)? as u64,
+                    name: r.get(1)?,
+                    servers: r.get::<_, i64>(2)? as usize,
+                })
+            })?;
+            for row in rows {
+                catalog.push(row?);
+            }
+        }
+        let mut by_server: HashMap<String, Vec<u64>> = HashMap::new();
+        {
+            let mut stmt = self.conn.prepare("SELECT server_id FROM server_mods_at")?;
+            for id in stmt.query_map([], |r| r.get::<_, String>(0))? {
+                by_server.entry(id?).or_default();
+            }
+            let mut stmt = self
+                .conn
+                .prepare("SELECT server_id, mod_id FROM server_mods ORDER BY server_id")?;
+            let rows = stmt.query_map([], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64))
+            })?;
+            for row in rows {
+                let (sid, mid) = row?;
+                by_server.entry(sid).or_default().push(mid);
+            }
+        }
+        let index = by_server
+            .into_iter()
+            .map(|(id, mods)| ServerMods { id, mods })
+            .collect();
+        Ok(ModsIndex { catalog, index })
     }
 
     pub fn get_meta(&self, key: &str) -> rusqlite::Result<Option<String>> {

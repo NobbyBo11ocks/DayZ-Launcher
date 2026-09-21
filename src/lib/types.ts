@@ -306,6 +306,12 @@ export type ModPlanItem = {
   folder: string | null;
 };
 
+/** Mod lists collected from A2S_RULES across servers (D-080). */
+export type ModCatalogEntry = { id: number; name: string; servers: number };
+export type ServerMods = { id: string; mods: number[] };
+export type ModsIndex = { catalog: ModCatalogEntry[]; index: ServerMods[] };
+export type ModScanSummary = { total: number; scanned: number; failed: number; elapsedMs: number };
+
 /** Self-measurement from the host (D-078); bytes are private (commit) sizes. */
 export type PerfSample = {
   uptimeMs: number;

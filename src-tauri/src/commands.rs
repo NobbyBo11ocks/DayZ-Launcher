@@ -405,6 +405,154 @@ pub struct ServerDetails {
     pub verification: Verification,
 }
 
+/// Mod lists are re-scanned when older than this.
+const MOD_SCAN_MAX_AGE_SECS: i64 = 24 * 3600;
+
+#[derive(Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ModScanSummary {
+    pub total: usize,
+    pub scanned: usize,
+    pub failed: usize,
+    pub elapsed_ms: u64,
+}
+
+/// Scans the mod lists (A2S_RULES DayZ payload) of populated, modded servers whose
+/// stored list is missing or older than a day (D-080), after the verification pass.
+/// One datagram each way at the client's pacing; results stream as `servers:mods`
+/// batches and the run ends with `servers:mods-done`.
+pub async fn run_mod_scan(
+    app: AppHandle,
+    cache: Arc<Mutex<Cache>>,
+    client: Client,
+    force: bool,
+) -> ModScanSummary {
+    use crate::browser::ServerMods;
+    let t0 = Instant::now();
+    let now = ServerRow::now_unix();
+    let targets: Vec<(String, SocketAddr)> = {
+        let c = Arc::clone(&cache);
+        tauri::async_runtime::spawn_blocking(move || {
+            let c = c.lock().ok()?;
+            let scanned = c.mods_scanned().ok()?;
+            let rows = c.load_all().ok()?;
+            Some(
+                rows.iter()
+                    .filter(|r| r.tags.modded && (r.verified_players.unwrap_or(r.players) > 0))
+                    .filter(|r| {
+                        force
+                            || scanned
+                                .get(&r.id)
+                                .is_none_or(|at| now - at > MOD_SCAN_MAX_AGE_SECS)
+                    })
+                    .filter_map(|r| {
+                        Some((
+                            r.id.clone(),
+                            format!("{}:{}", r.ip, r.query_port).parse().ok()?,
+                        ))
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+    };
+    let mut summary = ModScanSummary {
+        total: targets.len(),
+        ..Default::default()
+    };
+    let _ = app.emit("servers:mods-start", &summary);
+    if targets.is_empty() {
+        let _ = app.emit("servers:mods-done", &summary);
+        return summary;
+    }
+    // Gentler than the verification pass: RULES replies are up to ~5 KB each.
+    let client = client.with_rate(100).with_retries(1);
+    for chunk in targets.chunks(200) {
+        let mut set = tokio::task::JoinSet::new();
+        for (id, addr) in chunk.iter().cloned() {
+            let c = client.clone();
+            set.spawn(async move {
+                let mods = c.rules(addr).await.ok().map(|r| {
+                    r.value.dayz.map_or_else(Vec::new, |d| {
+                        d.mods
+                            .into_iter()
+                            .map(|m| (m.workshop_id, m.name))
+                            .collect::<Vec<(u64, String)>>()
+                    })
+                });
+                (id, mods)
+            });
+        }
+        let mut batch: Vec<(String, Vec<(u64, String)>)> = Vec::with_capacity(chunk.len());
+        while let Some(Ok((id, mods))) = set.join_next().await {
+            match mods {
+                Some(m) => batch.push((id, m)),
+                None => summary.failed += 1,
+            }
+        }
+        summary.scanned += batch.len();
+        let payload: Vec<ServerMods> = batch
+            .iter()
+            .map(|(id, mods)| ServerMods {
+                id: id.clone(),
+                mods: mods.iter().map(|(m, _)| *m).collect(),
+            })
+            .collect();
+        let names: Vec<(u64, String)> = batch
+            .iter()
+            .flat_map(|(_, mods)| mods.iter().cloned())
+            .collect();
+        let _ = app.emit("servers:mods", &(payload, names));
+        let c = Arc::clone(&cache);
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            if let Ok(mut c) = c.lock() {
+                for (id, mods) in &batch {
+                    let _ = c.replace_server_mods(id, mods, now);
+                }
+            }
+        })
+        .await;
+    }
+    summary.elapsed_ms = t0.elapsed().as_millis() as u64;
+    #[cfg(debug_assertions)]
+    eprintln!(
+        "[mods] scan done: total={} scanned={} failed={} in {} ms",
+        summary.total, summary.scanned, summary.failed, summary.elapsed_ms
+    );
+    let _ = app.emit("servers:mods-done", &summary);
+    summary
+}
+
+/// Stored mod lists and the mod catalogue for the browser's mod filter (D-080).
+#[tauri::command]
+pub async fn mods_index(state: State<'_, AppState>) -> AppResult<crate::browser::ModsIndex> {
+    let cache = Arc::clone(&state.cache);
+    tauri::async_runtime::spawn_blocking(move || {
+        let c = cache
+            .lock()
+            .map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
+        c.mods_index()
+            .map_err(|e| AppError::Internal(format!("cache: {e}")))
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("mods index task failed: {e}")))?
+}
+
+/// Starts a mod scan now; `force` ignores the one-day freshness. Returns the target count.
+#[tauri::command]
+pub async fn mods_scan(app: AppHandle, state: State<'_, AppState>, force: bool) -> AppResult<()> {
+    tauri::async_runtime::spawn(run_mod_scan(
+        app,
+        Arc::clone(&state.cache),
+        state.a2s.clone(),
+        force,
+    ));
+    Ok(())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UnsubscribeResult {
