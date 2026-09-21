@@ -1,0 +1,971 @@
+{
+  "target": "51.89.173.29:2303",
+  "capturedAt": "2026-09-21T11:53:11.865Z",
+  "info": {
+    "protocol": 17,
+    "name": "[UK/EU] Volatile PVE | 30k Start | Ai | Custom POIs | Bitcoin |",
+    "map": "chernarusplus",
+    "folder": "dayz",
+    "game": "Survival at its Finest, PVE server with friendly active staff. ",
+    "appId16": 0,
+    "players": 4,
+    "maxPlayers": 60,
+    "bots": 0,
+    "serverType": "d",
+    "environment": "w",
+    "password": false,
+    "vac": true,
+    "version": "1.29.163709",
+    "edf": 177,
+    "gamePort": 2302,
+    "steamId": "90293140396239878",
+    "keywords": "battleye,external,privHive,shard123ABC,lqs0,etm4.000000,entm4.000000,mod,11:40",
+    "gameId": "221100",
+    "trailingBytes": 0,
+    "tags": {
+      "unknown": [],
+      "battleye": true,
+      "external": true,
+      "privateHive": true,
+      "shard": "123ABC",
+      "queue": 0,
+      "timeMultiplier": 4,
+      "nightMultiplier": 4,
+      "modded": true,
+      "time": "11:40"
+    }
+  },
+  "rulesDatagrams": 1,
+  "rulesSplit": {
+    "split": false,
+    "total": 1,
+    "splitSize": null,
+    "compressed": false
+  },
+  "rules": {
+    "ruleCount": 49,
+    "chunkCount": 40,
+    "chunkKeys": [
+      "1/40",
+      "2/40",
+      "3/40",
+      "4/40",
+      "5/40",
+      "6/40",
+      "7/40",
+      "8/40",
+      "9/40",
+      "10/40",
+      "11/40",
+      "12/40",
+      "13/40",
+      "14/40",
+      "15/40",
+      "16/40",
+      "17/40",
+      "18/40",
+      "19/40",
+      "20/40",
+      "21/40",
+      "22/40",
+      "23/40",
+      "24/40",
+      "25/40",
+      "26/40",
+      "27/40",
+      "28/40",
+      "29/40",
+      "30/40",
+      "31/40",
+      "32/40",
+      "33/40",
+      "34/40",
+      "35/40",
+      "36/40",
+      "37/40",
+      "38/40",
+      "39/40",
+      "40/40"
+    ],
+    "rawLen": 5005,
+    "unescapedLen": 4997,
+    "protocolVersion": 2,
+    "overflow": 0,
+    "dlcFlags": 0,
+    "dlcHashes": [],
+    "mods": [
+      {
+        "hash": 707626053,
+        "idLenByte": 4,
+        "steamWorkshopId": "3270576624",
+        "name": "Volatile Heli Pack"
+      },
+      {
+        "hash": 3477793811,
+        "idLenByte": 4,
+        "steamWorkshopId": "3628006769",
+        "name": "AI Bandits"
+      },
+      {
+        "hash": 3569612613,
+        "idLenByte": 4,
+        "steamWorkshopId": "3672471146",
+        "name": "BS Patrol Helicopter"
+      },
+      {
+        "hash": 739426073,
+        "idLenByte": 4,
+        "steamWorkshopId": "3166815421",
+        "name": "No Vehicle Damage Complete"
+      },
+      {
+        "hash": 3004277924,
+        "idLenByte": 4,
+        "steamWorkshopId": "3768699401",
+        "name": "BigBiertje PvE Missions - MultiMap"
+      },
+      {
+        "hash": 3385924176,
+        "idLenByte": 4,
+        "steamWorkshopId": "3307457670",
+        "name": "MBM_UnderglowLights"
+      },
+      {
+        "hash": 3167994150,
+        "idLenByte": 4,
+        "steamWorkshopId": "3782346165",
+        "name": "Ish Safe Case"
+      },
+      {
+        "hash": 3318748413,
+        "idLenByte": 4,
+        "steamWorkshopId": "3642274739",
+        "name": "Flexible Stamina"
+      },
+      {
+        "hash": 2637700187,
+        "idLenByte": 4,
+        "steamWorkshopId": "3608849835",
+        "name": "Paragon Storage Autoclose"
+      },
+      {
+        "hash": 1101436024,
+        "idLenByte": 4,
+        "steamWorkshopId": "3395173971",
+        "name": "Paragon Bottle Fix"
+      },
+      {
+        "hash": 2159828941,
+        "idLenByte": 4,
+        "steamWorkshopId": "3739245022",
+        "name": "ZenVirusFix"
+      },
+      {
+        "hash": 1373822899,
+        "idLenByte": 4,
+        "steamWorkshopId": "2822531337",
+        "name": "Zenarchist's Virus Mod"
+      },
+      {
+        "hash": 3586008070,
+        "idLenByte": 4,
+        "steamWorkshopId": "2404753599",
+        "name": "Tombstone Vanilla"
+      },
+      {
+        "hash": 3237879048,
+        "idLenByte": 4,
+        "steamWorkshopId": "3568515525",
+        "name": "GoreZ FPS"
+      },
+      {
+        "hash": 3706572375,
+        "idLenByte": 4,
+        "steamWorkshopId": "1648967877",
+        "name": "GoreZ"
+      },
+      {
+        "hash": 14818243,
+        "idLenByte": 4,
+        "steamWorkshopId": "3360710736",
+        "name": "BBPwellFix"
+      },
+      {
+        "hash": 2374871728,
+        "idLenByte": 4,
+        "steamWorkshopId": "2585683326",
+        "name": "Custom Emblem Tags"
+      },
+      {
+        "hash": 3762789573,
+        "idLenByte": 4,
+        "steamWorkshopId": "3144144476",
+        "name": "VTD TraderPlus PDA HUD"
+      },
+      {
+        "hash": 916652705,
+        "idLenByte": 4,
+        "steamWorkshopId": "3002946084",
+        "name": "Blacks Alpha Armor"
+      },
+      {
+        "hash": 1696632224,
+        "idLenByte": 4,
+        "steamWorkshopId": "3689070257",
+        "name": "ToxicSlimeInventory"
+      },
+      {
+        "hash": 1360679797,
+        "idLenByte": 4,
+        "steamWorkshopId": "3422227460",
+        "name": "AutoCarFlip"
+      },
+      {
+        "hash": 1025081120,
+        "idLenByte": 4,
+        "steamWorkshopId": "3066153200",
+        "name": "OPEN INVENTORY CAR"
+      },
+      {
+        "hash": 4018605944,
+        "idLenByte": 4,
+        "steamWorkshopId": "3527632041",
+        "name": "Hiro's BBP Mural Additions"
+      },
+      {
+        "hash": 870327780,
+        "idLenByte": 4,
+        "steamWorkshopId": "3148873554",
+        "name": "TraderPlus Car Deploy Fix"
+      },
+      {
+        "hash": 2677896839,
+        "idLenByte": 4,
+        "steamWorkshopId": "3688189591",
+        "name": "SF Leaderboard + Kill Streak Rewards/Shop System"
+      },
+      {
+        "hash": 2752732198,
+        "idLenByte": 4,
+        "steamWorkshopId": "3707574995",
+        "name": "LF_VStorage"
+      },
+      {
+        "hash": 411777143,
+        "idLenByte": 4,
+        "steamWorkshopId": "3512401515",
+        "name": "Spring-Chernarus"
+      },
+      {
+        "hash": 1132241019,
+        "idLenByte": 4,
+        "steamWorkshopId": "3166814349",
+        "name": "WLM No Fall Damage"
+      },
+      {
+        "hash": 3994337985,
+        "idLenByte": 4,
+        "steamWorkshopId": "2106663048",
+        "name": "NatureOverhaul"
+      },
+      {
+        "hash": 2415289050,
+        "idLenByte": 4,
+        "steamWorkshopId": "2065443797",
+        "name": "AirRaid"
+      },
+      {
+        "hash": 2901824405,
+        "idLenByte": 4,
+        "steamWorkshopId": "3690289718",
+        "name": "AgricultureCore"
+      },
+      {
+        "hash": 3205018661,
+        "idLenByte": 4,
+        "steamWorkshopId": "3529074158",
+        "name": "MaharlikaPH_MilitaryPack"
+      },
+      {
+        "hash": 4267087413,
+        "idLenByte": 4,
+        "steamWorkshopId": "2471347750",
+        "name": "DayZ Dog"
+      },
+      {
+        "hash": 399174310,
+        "idLenByte": 4,
+        "steamWorkshopId": "3453337558",
+        "name": "MBM_SuzukiGSXR750"
+      },
+      {
+        "hash": 2259543846,
+        "idLenByte": 4,
+        "steamWorkshopId": "3665840738",
+        "name": "MBM_HarleyDavidsonFatBoy"
+      },
+      {
+        "hash": 3966533059,
+        "idLenByte": 4,
+        "steamWorkshopId": "3702420204",
+        "name": "Zenarchist's Core Mod"
+      },
+      {
+        "hash": 599334690,
+        "idLenByte": 4,
+        "steamWorkshopId": "2918418331",
+        "name": "Survivor Animations"
+      },
+      {
+        "hash": 2119256184,
+        "idLenByte": 4,
+        "steamWorkshopId": "3623230752",
+        "name": "BetterMilkyWay"
+      },
+      {
+        "hash": 798194759,
+        "idLenByte": 4,
+        "steamWorkshopId": "1710977250",
+        "name": "BaseBuildingPlus"
+      },
+      {
+        "hash": 2887882221,
+        "idLenByte": 4,
+        "steamWorkshopId": "3010267444",
+        "name": "Paragon Storage"
+      },
+      {
+        "hash": 2370039978,
+        "idLenByte": 4,
+        "steamWorkshopId": "3369106986",
+        "name": "RestartWarner"
+      },
+      {
+        "hash": 1157771297,
+        "idLenByte": 4,
+        "steamWorkshopId": "3308974611",
+        "name": "Car_Key_Slot"
+      },
+      {
+        "hash": 1542010983,
+        "idLenByte": 4,
+        "steamWorkshopId": "3491661516",
+        "name": "DudeWheresMyCar"
+      },
+      {
+        "hash": 3079831580,
+        "idLenByte": 4,
+        "steamWorkshopId": "3419019141",
+        "name": "MBM_HondaCRF450R"
+      },
+      {
+        "hash": 823027340,
+        "idLenByte": 4,
+        "steamWorkshopId": "3221373203",
+        "name": "CBD Invasions"
+      },
+      {
+        "hash": 1741293150,
+        "idLenByte": 4,
+        "steamWorkshopId": "2794626429",
+        "name": "DayZ Mining System with Ores and Gems"
+      },
+      {
+        "hash": 1621029302,
+        "idLenByte": 4,
+        "steamWorkshopId": "3310715247",
+        "name": "RaG_Dragons"
+      },
+      {
+        "hash": 2601954769,
+        "idLenByte": 4,
+        "steamWorkshopId": "3410781054",
+        "name": "WL_Collection_of_models"
+      },
+      {
+        "hash": 2888283845,
+        "idLenByte": 4,
+        "steamWorkshopId": "2757509117",
+        "name": "gebsfish"
+      },
+      {
+        "hash": 3076232266,
+        "idLenByte": 4,
+        "steamWorkshopId": "2170927235",
+        "name": "DrugsPLUS"
+      },
+      {
+        "hash": 3862706538,
+        "idLenByte": 4,
+        "steamWorkshopId": "1932611410",
+        "name": "CannabisPlus"
+      },
+      {
+        "hash": 1421841977,
+        "idLenByte": 4,
+        "steamWorkshopId": "3303169709",
+        "name": "MBM_MercedesSprinter"
+      },
+      {
+        "hash": 3549475716,
+        "idLenByte": 4,
+        "steamWorkshopId": "1870524790",
+        "name": "Airdrop-Upgraded"
+      },
+      {
+        "hash": 3279417258,
+        "idLenByte": 4,
+        "steamWorkshopId": "3308989311",
+        "name": "RaG_Wheel_Of_Fortune"
+      },
+      {
+        "hash": 3406269602,
+        "idLenByte": 4,
+        "steamWorkshopId": "3051379451",
+        "name": "CZ No-Fly Zones"
+      },
+      {
+        "hash": 3187599772,
+        "idLenByte": 4,
+        "steamWorkshopId": "2536780687",
+        "name": "SkyZ - Skybox Overhaul"
+      },
+      {
+        "hash": 3793730464,
+        "idLenByte": 4,
+        "steamWorkshopId": "2216645010",
+        "name": "PristineRepair"
+      },
+      {
+        "hash": 2492691680,
+        "idLenByte": 4,
+        "steamWorkshopId": "2831742849",
+        "name": "PVEZ Reloaded"
+      },
+      {
+        "hash": 3544829516,
+        "idLenByte": 4,
+        "steamWorkshopId": "2851058261",
+        "name": "CJ187-PokemonCards"
+      },
+      {
+        "hash": 3722183061,
+        "idLenByte": 4,
+        "steamWorkshopId": "2313463968",
+        "name": "OV_Skeletons"
+      },
+      {
+        "hash": 3057417550,
+        "idLenByte": 4,
+        "steamWorkshopId": "1761527221",
+        "name": "CJ187-Zombie-Mod"
+      },
+      {
+        "hash": 2704173083,
+        "idLenByte": 4,
+        "steamWorkshopId": "1964490092",
+        "name": "Lightsword"
+      },
+      {
+        "hash": 2308158554,
+        "idLenByte": 4,
+        "steamWorkshopId": "2931436407",
+        "name": "Drippy Sneakers"
+      },
+      {
+        "hash": 2672457761,
+        "idLenByte": 4,
+        "steamWorkshopId": "2635249250",
+        "name": "Big Grampa - Tree House"
+      },
+      {
+        "hash": 4047916182,
+        "idLenByte": 4,
+        "steamWorkshopId": "1734713776",
+        "name": "Munghards itempack"
+      },
+      {
+        "hash": 2727879179,
+        "idLenByte": 4,
+        "steamWorkshopId": "2393499239",
+        "name": "Terrain Islands"
+      },
+      {
+        "hash": 2765992390,
+        "idLenByte": 4,
+        "steamWorkshopId": "2714183642",
+        "name": "DNA Keycards"
+      },
+      {
+        "hash": 1607691060,
+        "idLenByte": 4,
+        "steamWorkshopId": "2070603516",
+        "name": "Bridges"
+      },
+      {
+        "hash": 3987888551,
+        "idLenByte": 4,
+        "steamWorkshopId": "2277964001",
+        "name": "BuildingsModPack2"
+      },
+      {
+        "hash": 3967797076,
+        "idLenByte": 4,
+        "steamWorkshopId": "2878980498",
+        "name": "RaG_BaseItems"
+      },
+      {
+        "hash": 3687626520,
+        "idLenByte": 4,
+        "steamWorkshopId": "3125203834",
+        "name": "Techs 4x4 All Terrain Vehicles"
+      },
+      {
+        "hash": 1202916318,
+        "idLenByte": 4,
+        "steamWorkshopId": "2270098553",
+        "name": "BuildingsModPack"
+      },
+      {
+        "hash": 1184059677,
+        "idLenByte": 4,
+        "steamWorkshopId": "2307384999",
+        "name": "Joes Role Play Uniforms - UPDATED"
+      },
+      {
+        "hash": 2847567548,
+        "idLenByte": 4,
+        "steamWorkshopId": "3413364741",
+        "name": "AJs Creatures V2"
+      },
+      {
+        "hash": 226453924,
+        "idLenByte": 4,
+        "steamWorkshopId": "3319998922",
+        "name": "MBM_Emergency_Services_Mercedes_Sprinter"
+      },
+      {
+        "hash": 3770603623,
+        "idLenByte": 4,
+        "steamWorkshopId": "3363783478",
+        "name": "3D Printer"
+      },
+      {
+        "hash": 2676515162,
+        "idLenByte": 4,
+        "steamWorkshopId": "3117613872",
+        "name": "RaG_Hunting_Cabin"
+      },
+      {
+        "hash": 709350119,
+        "idLenByte": 4,
+        "steamWorkshopId": "3297432863",
+        "name": "Map Assets Pak"
+      },
+      {
+        "hash": 3005467200,
+        "idLenByte": 4,
+        "steamWorkshopId": "1723938994",
+        "name": "Disease Injectors"
+      },
+      {
+        "hash": 3271073478,
+        "idLenByte": 4,
+        "steamWorkshopId": "2486237187",
+        "name": "Location Text"
+      },
+      {
+        "hash": 503340630,
+        "idLenByte": 4,
+        "steamWorkshopId": "2049002856",
+        "name": "MuchCarKey"
+      },
+      {
+        "hash": 2600104985,
+        "idLenByte": 4,
+        "steamWorkshopId": "2810820431",
+        "name": "ToFu Virtual Storage"
+      },
+      {
+        "hash": 1195945242,
+        "idLenByte": 4,
+        "steamWorkshopId": "2794690371",
+        "name": "BBPItemPack"
+      },
+      {
+        "hash": 706148980,
+        "idLenByte": 4,
+        "steamWorkshopId": "2810212624",
+        "name": "Custom Keycards"
+      },
+      {
+        "hash": 984365867,
+        "idLenByte": 4,
+        "steamWorkshopId": "2345073965",
+        "name": "CJ187-LootChest"
+      },
+      {
+        "hash": 2427494324,
+        "idLenByte": 4,
+        "steamWorkshopId": "3047952845",
+        "name": "Paragon Arsenal"
+      },
+      {
+        "hash": 1581387985,
+        "idLenByte": 4,
+        "steamWorkshopId": "1565871491",
+        "name": "BuilderItems"
+      },
+      {
+        "hash": 301846940,
+        "idLenByte": 4,
+        "steamWorkshopId": "3366474877",
+        "name": "Paragon Optics"
+      },
+      {
+        "hash": 2887790898,
+        "idLenByte": 4,
+        "steamWorkshopId": "2820370970",
+        "name": "Paragon Gear and Armor"
+      },
+      {
+        "hash": 1048867469,
+        "idLenByte": 4,
+        "steamWorkshopId": "2443122116",
+        "name": "SNAFU_Weapons"
+      },
+      {
+        "hash": 1833561340,
+        "idLenByte": 4,
+        "steamWorkshopId": "1797720064",
+        "name": "WindstrideClothing"
+      },
+      {
+        "hash": 1150239971,
+        "idLenByte": 4,
+        "steamWorkshopId": "2458896948",
+        "name": "TraderPlus"
+      },
+      {
+        "hash": 517675035,
+        "idLenByte": 4,
+        "steamWorkshopId": "1646187754",
+        "name": "CodeLock"
+      },
+      {
+        "hash": 2162641813,
+        "idLenByte": 4,
+        "steamWorkshopId": "2663169692",
+        "name": "MMG - Mightys Military Gear"
+      },
+      {
+        "hash": 2338892402,
+        "idLenByte": 4,
+        "steamWorkshopId": "3556131153",
+        "name": "RaG_Core"
+      },
+      {
+        "hash": 3498085502,
+        "idLenByte": 4,
+        "steamWorkshopId": "3492739269",
+        "name": "MSP_PatchFix"
+      },
+      {
+        "hash": 1050947703,
+        "idLenByte": 4,
+        "steamWorkshopId": "1991570984",
+        "name": "MuchStuffPack"
+      },
+      {
+        "hash": 3620065409,
+        "idLenByte": 4,
+        "steamWorkshopId": "3069507753",
+        "name": "Hunter Mega Pack"
+      },
+      {
+        "hash": 3140954926,
+        "idLenByte": 4,
+        "steamWorkshopId": "3373507396",
+        "name": "Volatile Item Pack"
+      },
+      {
+        "hash": 2105994445,
+        "idLenByte": 4,
+        "steamWorkshopId": "3410435481",
+        "name": "Volatile Server Pack V2"
+      },
+      {
+        "hash": 442364544,
+        "idLenByte": 4,
+        "steamWorkshopId": "1828439124",
+        "name": "VPPAdminTools"
+      },
+      {
+        "hash": 1035444890,
+        "idLenByte": 4,
+        "steamWorkshopId": "2276010135",
+        "name": "DayZ Editor Loader"
+      },
+      {
+        "hash": 1881391517,
+        "idLenByte": 4,
+        "steamWorkshopId": "3171576913",
+        "name": "MuchFramework"
+      },
+      {
+        "hash": 283586215,
+        "idLenByte": 4,
+        "steamWorkshopId": "2545327648",
+        "name": "Dabs Framework"
+      },
+      {
+        "hash": 1756350145,
+        "idLenByte": 4,
+        "steamWorkshopId": "1559212036",
+        "name": "Community Framework"
+      }
+    ],
+    "signatures": [
+      "28MLRPMusic",
+      "4KBOSSKTest",
+      "Aceomg",
+      "aFUBARmod",
+      "AJ45",
+      "akgerinator",
+      "Apex_War_heli",
+      "ApocalypseINV",
+      "Arkensor",
+      "asr_durablesuppressorv3",
+      "AutoRun",
+      "BB",
+      "BBP",
+      "BerzerkZ",
+      "BigGrampa",
+      "bitcoinfix",
+      "BizZzaRGamingsPublicKey",
+      "BLACKS",
+      "Blinded",
+      "BLR_Player_Slots",
+      "BMWM3E46",
+      "bokatan_daisykey",
+      "BridgeSkalisty",
+      "Buffoon",
+      "C4BaseRaidbyDmitri",
+      "Catalyst",
+      "cbdinvasions2",
+      "Celdritch",
+      "cftoolsRoot",
+      "CJ",
+      "CJ187_Public",
+      "COCA_ZN",
+      "CodeLockv3",
+      "CommonError",
+      "containementZone",
+      "CooltrainV3",
+      "covid20",
+      "CraftingRecipes",
+      "Crim",
+      "CROFT_GasolineBR",
+      "CsWalls",
+      "dab",
+      "Dafty",
+      "DaftyVolatile",
+      "DannyDoom",
+      "Darkzone",
+      "dayz",
+      "DayZKot",
+      "dayznchill",
+      "DCG_key",
+      "Dcrclub_Open_Free",
+      "deceased_steam",
+      "DerDevil",
+      "Derkason",
+      "designful",
+      "DevCarlosKey",
+      "DiGiaComTech",
+      "dna_kc",
+      "Dope",
+      "Drippy",
+      "DulsPolicekey",
+      "dz_deceased",
+      "Eagle",
+      "Elcamino",
+      "ElderWoodZIkeozzy",
+      "EonsAutoRun",
+      "Evgeny__N",
+      "FishInAToilet",
+      "FortuneBundle",
+      "FreezesHideout",
+      "Funatic",
+      "GB_Mining",
+      "Geb",
+      "GoodCitizen",
+      "GormirnTI",
+      "Hallugenetic",
+      "Harkness",
+      "Harkness2026",
+      "Harkness_Main",
+      "Helkhiana",
+      "HelkhianaR",
+      "henklr",
+      "Herr_Charismma",
+      "hlyngeV3",
+      "holborn2",
+      "HuffyPublic",
+      "huntermods.online",
+      "Hunterz",
+      "iAmxMrBig",
+      "IceBlade",
+      "iKR0GH",
+      "InfectedRPV3",
+      "inkihh",
+      "IshSafeCase",
+      "Jacob_Mango_V3",
+      "jamako",
+      "JCBillboards",
+      "JewellIV_HeliRescuePlus",
+      "JG",
+      "JOEJOESclothingpolice",
+      "johnnyboy_",
+      "Kaffeina",
+      "KCR",
+      "KitKatti",
+      "krilinmods",
+      "lakompake",
+      "LamboS2N",
+      "Lazurick",
+      "LBmasterPub_v3",
+      "Lightsword-V3",
+      "liquidrock",
+      "maharlikav2",
+      "Makarov72",
+      "MastaHiggins",
+      "MBMemsKey",
+      "MBMv2",
+      "MBMv3",
+      "MDC",
+      "MeruCarPack",
+      "MFP",
+      "MightyMoitzbert",
+      "MPG",
+      "MrTiger",
+      "Munghard",
+      "Nachos",
+      "nepahxcmasterkey",
+      "NewHiro",
+      "nigen",
+      "nomad",
+      "NotABananaV3",
+      "OneMoreDay(z)",
+      "Overdos",
+      "Owen",
+      "PaCoIX",
+      "Paragon",
+      "Paragon_Bottle_Fix",
+      "psyopgirl",
+      "PublicMODby5treet",
+      "PwwNSemi",
+      "PwwN_FlightSystem",
+      "R4NDO",
+      "rag_tyson",
+      "Rampage",
+      "RecipeBook",
+      "RedFalcon",
+      "Return0",
+      "RFFSHeliz",
+      "Roean",
+      "ruffaz",
+      "SagaHummi",
+      "sb",
+      "sibnic_moddayz",
+      "SinfallModTest",
+      "SmileWoody",
+      "sn0wLow",
+      "SNAFU_Weapons_V1",
+      "SongsLoad",
+      "SpiritOkey",
+      "Starlv",
+      "Steve_aka_Salutesh",
+      "SToNED",
+      "TBCarDealer",
+      "TBLib",
+      "TBRevivePlayer",
+      "TBSecondHandMarket",
+      "Tech_New",
+      "TheDenVx",
+      "TheProjectPublic",
+      "TheRealLowlife",
+      "THYER5",
+      "Tiltushkin",
+      "Tim",
+      "ToxicSlimeINV",
+      "TraderMusic",
+      "TriumphAIConvoy",
+      "tteett-skins",
+      "Tweaks",
+      "T_P",
+      "Varyel",
+      "venik",
+      "Volatile_Gaming",
+      "volatile_gaming_heli",
+      "VPP",
+      "VTD",
+      "Wardog.v3",
+      "WhenAnimalsAttack",
+      "WindstrideV2",
+      "WL_Studio",
+      "worthdog_heli",
+      "WoskI",
+      "WZ",
+      "xdz",
+      "Yuki",
+      "Zayc",
+      "Zenarchist",
+      "zisb_skeleman",
+      "zmg_psac"
+    ],
+    "description": "Survival at its Finest, PVE server with friendly active staff. a strong and helpful community. ",
+    "trailingBytes": 0,
+    "plainRules": {
+      "allowedBuild": "0",
+      "clientPort": "0",
+      "dedicated": "1",
+      "island": "chernarusplus",
+      "language": "65545",
+      "platform": "win",
+      "requiredBuild": "0",
+      "requiredVersion": "129",
+      "timeLeft": "15"
+    }
+  },
+  "players": {
+    "count": 4,
+    "players": [
+      {
+        "index": 0,
+        "name": "",
+        "score": 0,
+        "duration": 2864.52490234375
+      },
+      {
+        "index": 0,
+        "name": "",
+        "score": 0,
+        "duration": 2240.89306640625
+      },
+      {
+        "index": 0,
+        "name": "",
+        "score": 0,
+        "duration": 1660.8466796875
+      },
+      {
+        "index": 0,
+        "name": "",
+        "score": 0,
+        "duration": 1158.4554443359375
+      }
+    ],
+    "trailingBytes": 0
+  }
+}

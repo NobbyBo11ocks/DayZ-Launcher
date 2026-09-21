@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="windows-1252" ?>
+<FavoriteServers>
+    <Server IpAddress="1669946347" Port="5002" QueryEndPoint="99.137.91.235:5003" ConnectionEndPoint="99.137.91.235:5002" Name="Bro-Nation PvP | Deathmatch | Designed for 2-10 players" Description="" Map="chernarusplus" Mission="" MaxPlayers="10" ServerVersion="129163451" RequiredVersion="129" RequiredBuild="0" AllowedBuild="0" RequirePassword="0" IsVacEnabled="1" Tags="battleye,no3rd,external,privHive,shardABC123,lqs0,entm1.000000,11:54" IsThirdPersonViewEnabled="0" RequiresExpansionTerrain="0" />
+</FavoriteServers>

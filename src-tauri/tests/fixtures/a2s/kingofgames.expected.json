@@ -1,0 +1,949 @@
+{
+  "target": "188.24.17.159:27016",
+  "capturedAt": "2026-09-21T11:53:11.473Z",
+  "info": {
+    "protocol": 17,
+    "name": "[EU] King of Games (EN/RO) PVE/PVP - THE BEST SERVER",
+    "map": "chernarusplus",
+    "folder": "dayz",
+    "game": "",
+    "appId16": 0,
+    "players": 2,
+    "maxPlayers": 100,
+    "bots": 0,
+    "serverType": "d",
+    "environment": "w",
+    "password": false,
+    "vac": true,
+    "version": "1.29.163709",
+    "edf": 177,
+    "gamePort": 2302,
+    "steamId": "90293139027193862",
+    "keywords": "battleye,external,privHive,shard123ABC,lqs0,etm6.000000,entm64.000000,allowedFilePatching,mod,08:25",
+    "gameId": "221100",
+    "trailingBytes": 0,
+    "tags": {
+      "unknown": [
+        "allowedFilePatching"
+      ],
+      "battleye": true,
+      "external": true,
+      "privateHive": true,
+      "shard": "123ABC",
+      "queue": 0,
+      "timeMultiplier": 6,
+      "nightMultiplier": 64,
+      "modded": true,
+      "time": "08:25"
+    }
+  },
+  "rulesDatagrams": 1,
+  "rulesSplit": {
+    "split": false,
+    "total": 1,
+    "splitSize": null,
+    "compressed": false
+  },
+  "rules": {
+    "ruleCount": 43,
+    "chunkCount": 34,
+    "chunkKeys": [
+      "1/34",
+      "2/34",
+      "3/34",
+      "4/34",
+      "5/34",
+      "6/34",
+      "7/34",
+      "8/34",
+      "9/34",
+      "10/34",
+      "11/34",
+      "12/34",
+      "13/34",
+      "14/34",
+      "15/34",
+      "16/34",
+      "17/34",
+      "18/34",
+      "19/34",
+      "20/34",
+      "21/34",
+      "22/34",
+      "23/34",
+      "24/34",
+      "25/34",
+      "26/34",
+      "27/34",
+      "28/34",
+      "29/34",
+      "30/34",
+      "31/34",
+      "32/34",
+      "33/34",
+      "34/34"
+    ],
+    "rawLen": 4307,
+    "unescapedLen": 4295,
+    "protocolVersion": 2,
+    "overflow": 0,
+    "dlcFlags": 0,
+    "dlcHashes": [],
+    "mods": [
+      {
+        "hash": 1894482512,
+        "idLenByte": 4,
+        "steamWorkshopId": "3023834511",
+        "name": "GF_Barrels"
+      },
+      {
+        "hash": 61341655,
+        "idLenByte": 4,
+        "steamWorkshopId": "3709741013",
+        "name": "NoxZ SkinManager"
+      },
+      {
+        "hash": 1711789457,
+        "idLenByte": 4,
+        "steamWorkshopId": "2880254695",
+        "name": "RaG_Vehicle_Pack"
+      },
+      {
+        "hash": 2676515162,
+        "idLenByte": 4,
+        "steamWorkshopId": "3117613872",
+        "name": "RaG_Hunting_Cabin"
+      },
+      {
+        "hash": 1218753839,
+        "idLenByte": 4,
+        "steamWorkshopId": "3105330157",
+        "name": "RaG_Immersive_Vehicles"
+      },
+      {
+        "hash": 55649826,
+        "idLenByte": 4,
+        "steamWorkshopId": "3406196859",
+        "name": "RaG_Immersive_Wells"
+      },
+      {
+        "hash": 1621029302,
+        "idLenByte": 4,
+        "steamWorkshopId": "3310715247",
+        "name": "RaG_Dragons"
+      },
+      {
+        "hash": 3279417258,
+        "idLenByte": 4,
+        "steamWorkshopId": "3308989311",
+        "name": "RaG_Wheel_Of_Fortune"
+      },
+      {
+        "hash": 3967797076,
+        "idLenByte": 4,
+        "steamWorkshopId": "2878980498",
+        "name": "RaG_BaseItems"
+      },
+      {
+        "hash": 2338892402,
+        "idLenByte": 4,
+        "steamWorkshopId": "3556131153",
+        "name": "RaG_Core"
+      },
+      {
+        "hash": 3966533059,
+        "idLenByte": 4,
+        "steamWorkshopId": "3702420204",
+        "name": "Zenarchist's Core Mod"
+      },
+      {
+        "hash": 2901824405,
+        "idLenByte": 4,
+        "steamWorkshopId": "3690289718",
+        "name": "AgricultureCore"
+      },
+      {
+        "hash": 1416594989,
+        "idLenByte": 4,
+        "steamWorkshopId": "3514535641",
+        "name": "AV_Water Sources"
+      },
+      {
+        "hash": 3618951816,
+        "idLenByte": 4,
+        "steamWorkshopId": "3682348844",
+        "name": "AIB_Unleashed"
+      },
+      {
+        "hash": 3477793811,
+        "idLenByte": 4,
+        "steamWorkshopId": "3628006769",
+        "name": "AI Bandits"
+      },
+      {
+        "hash": 3400534536,
+        "idLenByte": 4,
+        "steamWorkshopId": "3604049451",
+        "name": "DayZ Mining System with Ores and Gems V2"
+      },
+      {
+        "hash": 3704926503,
+        "idLenByte": 4,
+        "steamWorkshopId": "3012092863",
+        "name": "Portable Houses (codelock version)"
+      },
+      {
+        "hash": 93719653,
+        "idLenByte": 4,
+        "steamWorkshopId": "3623510671",
+        "name": "Psyerns Sound System"
+      },
+      {
+        "hash": 1383277083,
+        "idLenByte": 4,
+        "steamWorkshopId": "3332001143",
+        "name": "QuickMoveItemsByCategory"
+      },
+      {
+        "hash": 3732303002,
+        "idLenByte": 4,
+        "steamWorkshopId": "3487506464",
+        "name": "HealthBar-Ninjins"
+      },
+      {
+        "hash": 3557226724,
+        "idLenByte": 4,
+        "steamWorkshopId": "3172149916",
+        "name": "MuchCarPark"
+      },
+      {
+        "hash": 599334690,
+        "idLenByte": 4,
+        "steamWorkshopId": "2918418331",
+        "name": "Survivor Animations"
+      },
+      {
+        "hash": 2513850413,
+        "idLenByte": 4,
+        "steamWorkshopId": "1807898863",
+        "name": "LittleQuieter"
+      },
+      {
+        "hash": 725623948,
+        "idLenByte": 4,
+        "steamWorkshopId": "3472298147",
+        "name": "Airborne AI"
+      },
+      {
+        "hash": 2301294810,
+        "idLenByte": 4,
+        "steamWorkshopId": "2912241382",
+        "name": "Admirals Parachute Mod"
+      },
+      {
+        "hash": 1886933607,
+        "idLenByte": 4,
+        "steamWorkshopId": "2762884963",
+        "name": "Erapulsar_Zombies_2"
+      },
+      {
+        "hash": 1611144593,
+        "idLenByte": 4,
+        "steamWorkshopId": "1838477746",
+        "name": "Erapulsar_Zombies"
+      },
+      {
+        "hash": 1409228461,
+        "idLenByte": 4,
+        "steamWorkshopId": "3566639764",
+        "name": "Erapulsar_ZombiesFramework"
+      },
+      {
+        "hash": 413659800,
+        "idLenByte": 4,
+        "steamWorkshopId": "2116151222",
+        "name": "DayZ-Expansion"
+      },
+      {
+        "hash": 2761036315,
+        "idLenByte": 4,
+        "steamWorkshopId": "2792982513",
+        "name": "DayZ-Expansion-BaseBuilding"
+      },
+      {
+        "hash": 3038961266,
+        "idLenByte": 4,
+        "steamWorkshopId": "2116157322",
+        "name": "DayZ-Expansion-Licensed"
+      },
+      {
+        "hash": 864284506,
+        "idLenByte": 4,
+        "steamWorkshopId": "2828487396",
+        "name": "DayZ-Expansion-Hardline"
+      },
+      {
+        "hash": 356818071,
+        "idLenByte": 4,
+        "steamWorkshopId": "2792982897",
+        "name": "DayZ-Expansion-Chat"
+      },
+      {
+        "hash": 2130355178,
+        "idLenByte": 4,
+        "steamWorkshopId": "2804241648",
+        "name": "DayZ-Expansion-Spawn-Selection"
+      },
+      {
+        "hash": 597412736,
+        "idLenByte": 4,
+        "steamWorkshopId": "2792984722",
+        "name": "DayZ-Expansion-Navigation"
+      },
+      {
+        "hash": 1336150601,
+        "idLenByte": 4,
+        "steamWorkshopId": "2576460232",
+        "name": "DayZ-Expansion-Name-Tags"
+      },
+      {
+        "hash": 3990296070,
+        "idLenByte": 4,
+        "steamWorkshopId": "2828486817",
+        "name": "DayZ-Expansion-Quests"
+      },
+      {
+        "hash": 1418101783,
+        "idLenByte": 4,
+        "steamWorkshopId": "2291785308",
+        "name": "DayZ-Expansion-Core"
+      },
+      {
+        "hash": 524683529,
+        "idLenByte": 4,
+        "steamWorkshopId": "2792983364",
+        "name": "DayZ-Expansion-Groups"
+      },
+      {
+        "hash": 1345082964,
+        "idLenByte": 4,
+        "steamWorkshopId": "2572324799",
+        "name": "DayZ-Expansion-Book"
+      },
+      {
+        "hash": 482543965,
+        "idLenByte": 4,
+        "steamWorkshopId": "2792982069",
+        "name": "DayZ-Expansion-AI"
+      },
+      {
+        "hash": 3963035428,
+        "idLenByte": 4,
+        "steamWorkshopId": "2792983824",
+        "name": "DayZ-Expansion-Map-Assets"
+      },
+      {
+        "hash": 258199649,
+        "idLenByte": 4,
+        "steamWorkshopId": "2792984177",
+        "name": "DayZ-Expansion-Missions"
+      },
+      {
+        "hash": 786707903,
+        "idLenByte": 4,
+        "steamWorkshopId": "2572328470",
+        "name": "DayZ-Expansion-Market"
+      },
+      {
+        "hash": 1635056239,
+        "idLenByte": 4,
+        "steamWorkshopId": "3251017367",
+        "name": "Fungi Neon Signs"
+      },
+      {
+        "hash": 3663996186,
+        "idLenByte": 4,
+        "steamWorkshopId": "2007900691",
+        "name": "PvZmoD  The Dark Horde"
+      },
+      {
+        "hash": 3723592297,
+        "idLenByte": 4,
+        "steamWorkshopId": "2051775667",
+        "name": "PvZmoD Customisable Zombies"
+      },
+      {
+        "hash": 2423314089,
+        "idLenByte": 4,
+        "steamWorkshopId": "2314102677",
+        "name": "WickedRV"
+      },
+      {
+        "hash": 544749776,
+        "idLenByte": 4,
+        "steamWorkshopId": "2803314484",
+        "name": "Nissan GTR 2015"
+      },
+      {
+        "hash": 1928563444,
+        "idLenByte": 4,
+        "steamWorkshopId": "2741527521",
+        "name": "RFFS Heli CarCover Addon"
+      },
+      {
+        "hash": 3968831619,
+        "idLenByte": 4,
+        "steamWorkshopId": "2858884268",
+        "name": "Lean_Fix"
+      },
+      {
+        "hash": 3025645412,
+        "idLenByte": 4,
+        "steamWorkshopId": "3448819170",
+        "name": "Glowing Barrels Pack"
+      },
+      {
+        "hash": 899691272,
+        "idLenByte": 4,
+        "steamWorkshopId": "3392453426",
+        "name": "MBM_Polaris500XC"
+      },
+      {
+        "hash": 2246309342,
+        "idLenByte": 4,
+        "steamWorkshopId": "2709289485",
+        "name": "Admirals Diving Mod"
+      },
+      {
+        "hash": 3079831580,
+        "idLenByte": 4,
+        "steamWorkshopId": "3419019141",
+        "name": "MBM_HondaCRF450R"
+      },
+      {
+        "hash": 2658145339,
+        "idLenByte": 4,
+        "steamWorkshopId": "2906371600",
+        "name": "RedFalcon Watercraft"
+      },
+      {
+        "hash": 1263760574,
+        "idLenByte": 4,
+        "steamWorkshopId": "3027684553",
+        "name": "MA Mobile Base"
+      },
+      {
+        "hash": 725750244,
+        "idLenByte": 4,
+        "steamWorkshopId": "3325200572",
+        "name": "Haralds Armory"
+      },
+      {
+        "hash": 1766660292,
+        "idLenByte": 4,
+        "steamWorkshopId": "3425994533",
+        "name": "VehicleRecovery"
+      },
+      {
+        "hash": 2104410649,
+        "idLenByte": 4,
+        "steamWorkshopId": "3403240749",
+        "name": "MA Container Base"
+      },
+      {
+        "hash": 25347070,
+        "idLenByte": 4,
+        "steamWorkshopId": "3210162677",
+        "name": "MMG Base Storage"
+      },
+      {
+        "hash": 1157771297,
+        "idLenByte": 4,
+        "steamWorkshopId": "3308974611",
+        "name": "Car_Key_Slot"
+      },
+      {
+        "hash": 2888283845,
+        "idLenByte": 4,
+        "steamWorkshopId": "2757509117",
+        "name": "gebsfish"
+      },
+      {
+        "hash": 2847567548,
+        "idLenByte": 4,
+        "steamWorkshopId": "3413364741",
+        "name": "AJs Creatures V2"
+      },
+      {
+        "hash": 1254488649,
+        "idLenByte": 4,
+        "steamWorkshopId": "2791039835",
+        "name": "bl_CasinoMachines"
+      },
+      {
+        "hash": 994587587,
+        "idLenByte": 4,
+        "steamWorkshopId": "1940425039",
+        "name": "DayZCasinoV2"
+      },
+      {
+        "hash": 290260893,
+        "idLenByte": 4,
+        "steamWorkshopId": "2903106028",
+        "name": "SimpleTraderSigns"
+      },
+      {
+        "hash": 3796721856,
+        "idLenByte": 4,
+        "steamWorkshopId": "3017771544",
+        "name": "THYER5 Hunting Ghillies N Suppressors"
+      },
+      {
+        "hash": 2153541115,
+        "idLenByte": 4,
+        "steamWorkshopId": "3142031973",
+        "name": "Equipment System OLD"
+      },
+      {
+        "hash": 4059840905,
+        "idLenByte": 4,
+        "steamWorkshopId": "3004707934",
+        "name": "Towing Service"
+      },
+      {
+        "hash": 1826640326,
+        "idLenByte": 4,
+        "steamWorkshopId": "3029439021",
+        "name": "Underground Bases"
+      },
+      {
+        "hash": 2887882221,
+        "idLenByte": 4,
+        "steamWorkshopId": "3010267444",
+        "name": "Paragon Storage"
+      },
+      {
+        "hash": 469871286,
+        "idLenByte": 4,
+        "steamWorkshopId": "3030756548",
+        "name": "Zen's Car Workbench"
+      },
+      {
+        "hash": 4092929660,
+        "idLenByte": 4,
+        "steamWorkshopId": "3025337619",
+        "name": "Zen's Chessboard"
+      },
+      {
+        "hash": 4002838626,
+        "idLenByte": 4,
+        "steamWorkshopId": "2470924704",
+        "name": "Gas-Pump-Refueling"
+      },
+      {
+        "hash": 380625072,
+        "idLenByte": 4,
+        "steamWorkshopId": "1832448183",
+        "name": "FlipTransport"
+      },
+      {
+        "hash": 2639515703,
+        "idLenByte": 4,
+        "steamWorkshopId": "2143128974",
+        "name": "Advanced Weapon Scopes"
+      },
+      {
+        "hash": 2492691680,
+        "idLenByte": 4,
+        "steamWorkshopId": "2831742849",
+        "name": "PVEZ Reloaded"
+      },
+      {
+        "hash": 1469641764,
+        "idLenByte": 4,
+        "steamWorkshopId": "1680019590",
+        "name": "Server Information Panel"
+      },
+      {
+        "hash": 371263533,
+        "idLenByte": 4,
+        "steamWorkshopId": "1736675168",
+        "name": "Saline Bag+"
+      },
+      {
+        "hash": 2506473354,
+        "idLenByte": 4,
+        "steamWorkshopId": "1735947752",
+        "name": "NoVehicleDamage"
+      },
+      {
+        "hash": 1706646168,
+        "idLenByte": 4,
+        "steamWorkshopId": "3200745813",
+        "name": "Search For Loot Improved"
+      },
+      {
+        "hash": 4267087413,
+        "idLenByte": 4,
+        "steamWorkshopId": "2471347750",
+        "name": "DayZ Dog"
+      },
+      {
+        "hash": 2467338278,
+        "idLenByte": 4,
+        "steamWorkshopId": "2947349326",
+        "name": "Dayz-Cat"
+      },
+      {
+        "hash": 1048867469,
+        "idLenByte": 4,
+        "steamWorkshopId": "2443122116",
+        "name": "SNAFU_Weapons"
+      },
+      {
+        "hash": 113367813,
+        "idLenByte": 4,
+        "steamWorkshopId": "2303483532",
+        "name": "CarCover"
+      },
+      {
+        "hash": 984365867,
+        "idLenByte": 4,
+        "steamWorkshopId": "2345073965",
+        "name": "CJ187-LootChest"
+      },
+      {
+        "hash": 3183347598,
+        "idLenByte": 4,
+        "steamWorkshopId": "3552718924",
+        "name": "SGSPModEXP"
+      },
+      {
+        "hash": 1903764747,
+        "idLenByte": 4,
+        "steamWorkshopId": "2270215132",
+        "name": "Basic Map"
+      },
+      {
+        "hash": 2142623613,
+        "idLenByte": 4,
+        "steamWorkshopId": "2629595854",
+        "name": "Modular Vest System - Reworked"
+      },
+      {
+        "hash": 3862622179,
+        "idLenByte": 4,
+        "steamWorkshopId": "1869021368",
+        "name": "[CrSk] BMW 525i E34"
+      },
+      {
+        "hash": 2162641813,
+        "idLenByte": 4,
+        "steamWorkshopId": "2663169692",
+        "name": "MMG - Mightys Military Gear"
+      },
+      {
+        "hash": 3296793686,
+        "idLenByte": 4,
+        "steamWorkshopId": "2718144914",
+        "name": "Audi_RS7"
+      },
+      {
+        "hash": 3359681482,
+        "idLenByte": 4,
+        "steamWorkshopId": "2617615106",
+        "name": "DBN_BMW_X6M"
+      },
+      {
+        "hash": 2584355237,
+        "idLenByte": 4,
+        "steamWorkshopId": "2809757799",
+        "name": "DBN_FordRaptor_Scorpio"
+      },
+      {
+        "hash": 3076232266,
+        "idLenByte": 4,
+        "steamWorkshopId": "2170927235",
+        "name": "DrugsPLUS"
+      },
+      {
+        "hash": 3862706538,
+        "idLenByte": 4,
+        "steamWorkshopId": "1932611410",
+        "name": "CannabisPlus"
+      },
+      {
+        "hash": 3530144703,
+        "idLenByte": 4,
+        "steamWorkshopId": "3013430583",
+        "name": "Crocodile"
+      },
+      {
+        "hash": 83211522,
+        "idLenByte": 4,
+        "steamWorkshopId": "2466713208",
+        "name": "DZNC_Zombies"
+      },
+      {
+        "hash": 1050947703,
+        "idLenByte": 4,
+        "steamWorkshopId": "1991570984",
+        "name": "MuchStuffPack"
+      },
+      {
+        "hash": 2993592685,
+        "idLenByte": 4,
+        "steamWorkshopId": "2692979668",
+        "name": "RedFalcon Flight System Heliz"
+      },
+      {
+        "hash": 2819976587,
+        "idLenByte": 4,
+        "steamWorkshopId": "2786823675",
+        "name": "RareAnimals"
+      },
+      {
+        "hash": 2377327459,
+        "idLenByte": 4,
+        "steamWorkshopId": "2913803769",
+        "name": "MPG_BearsPack"
+      },
+      {
+        "hash": 2765992390,
+        "idLenByte": 4,
+        "steamWorkshopId": "2714183642",
+        "name": "DNA Keycards"
+      },
+      {
+        "hash": 56000909,
+        "idLenByte": 4,
+        "steamWorkshopId": "2111275052",
+        "name": "Bed-Respawning"
+      },
+      {
+        "hash": 503340630,
+        "idLenByte": 4,
+        "steamWorkshopId": "2049002856",
+        "name": "MuchCarKey"
+      },
+      {
+        "hash": 1675301478,
+        "idLenByte": 4,
+        "steamWorkshopId": "1890912719",
+        "name": "Forever_Burning_Campfire"
+      },
+      {
+        "hash": 2064848928,
+        "idLenByte": 4,
+        "steamWorkshopId": "3065185420",
+        "name": "AdvancedBanking V2"
+      },
+      {
+        "hash": 517675035,
+        "idLenByte": 4,
+        "steamWorkshopId": "1646187754",
+        "name": "CodeLock"
+      },
+      {
+        "hash": 3014502804,
+        "idLenByte": 4,
+        "steamWorkshopId": "2832884779",
+        "name": "AmmoStackBullet"
+      },
+      {
+        "hash": 3086192710,
+        "idLenByte": 4,
+        "steamWorkshopId": "2925837634",
+        "name": "MiniMap Zoomed Out While In Vehicles"
+      },
+      {
+        "hash": 2853962180,
+        "idLenByte": 4,
+        "steamWorkshopId": "2381686295",
+        "name": "MiniMap"
+      },
+      {
+        "hash": 494914966,
+        "idLenByte": 4,
+        "steamWorkshopId": "3446823299",
+        "name": "HGC Leveling System"
+      },
+      {
+        "hash": 583066911,
+        "idLenByte": 4,
+        "steamWorkshopId": "3321340470",
+        "name": "Zen's Expansion Audio AI"
+      },
+      {
+        "hash": 1001653559,
+        "idLenByte": 4,
+        "steamWorkshopId": "1590841260",
+        "name": "Trader Mod"
+      },
+      {
+        "hash": 488540209,
+        "idLenByte": 4,
+        "steamWorkshopId": "1843000706",
+        "name": "Fast Travel"
+      },
+      {
+        "hash": 442364544,
+        "idLenByte": 4,
+        "steamWorkshopId": "1828439124",
+        "name": "VPPAdminTools"
+      },
+      {
+        "hash": 1881391517,
+        "idLenByte": 4,
+        "steamWorkshopId": "3171576913",
+        "name": "MuchFramework"
+      },
+      {
+        "hash": 798194759,
+        "idLenByte": 4,
+        "steamWorkshopId": "1710977250",
+        "name": "BaseBuildingPlus"
+      },
+      {
+        "hash": 283586215,
+        "idLenByte": 4,
+        "steamWorkshopId": "2545327648",
+        "name": "Dabs Framework"
+      },
+      {
+        "hash": 1756350145,
+        "idLenByte": 4,
+        "steamWorkshopId": "1559212036",
+        "name": "Community Framework"
+      }
+    ],
+    "signatures": [
+      "ADM",
+      "AdvancedBanking",
+      "affenb3rtV2",
+      "agent001.airborneAI",
+      "agent001.KnockKnockZombies",
+      "agent001.MadBomberAI",
+      "AJ45",
+      "Allure",
+      "AstyarKryLVL",
+      "atonce",
+      "AV_WaterSources",
+      "BBP",
+      "BLR_Portable_Houses",
+      "boomlay",
+      "Catalyst",
+      "CiderDrinker",
+      "CJ187_Public",
+      "CodeLockv3",
+      "CrushingSkirmishV3",
+      "cybermonkey",
+      "cynep",
+      "dab",
+      "daemonforge",
+      "DannyDoom",
+      "dayz",
+      "dayznchill",
+      "dayztrader",
+      "Deadcraft",
+      "DeadmansEchoPsyern",
+      "DeathZoneUK",
+      "dna_kc",
+      "DonBondino",
+      "eLoneX",
+      "Enclave",
+      "Expansion",
+      "FataliTea",
+      "FISH_HUNTER",
+      "FMS_V2Key",
+      "Freecar",
+      "FreezeHideoutV2.1",
+      "FreezeHideoutV2.8",
+      "Geb",
+      "guiasselin",
+      "Harald",
+      "Helkhiana",
+      "henklr",
+      "Hunterz",
+      "IceBlade",
+      "IMPERIVM",
+      "inkihh",
+      "Inkota",
+      "Jacob_Mango_V3",
+      "KCR",
+      "L4DS",
+      "LamboS2N",
+      "LankyCraig2022",
+      "Lean_Fix",
+      "liquidrock",
+      "Liven",
+      "lykos",
+      "m0e_dev",
+      "MACustomItemsClothing",
+      "MBMv3",
+      "merkzone_public",
+      "MightyMoitzbert",
+      "MPG",
+      "MrGreenFox",
+      "MRT101_v2",
+      "nigen",
+      "Ninjin",
+      "NinjinsPvPPvE",
+      "NoVehicleDamage",
+      "NoxZ",
+      "Olipro",
+      "Owen",
+      "Paragon",
+      "rag_tyson",
+      "RedFalcon",
+      "RFFSHeliz",
+      "Rookstar83",
+      "SagaHummi",
+      "ServerPanel_V3",
+      "SNAFU_Weapons_V1",
+      "SobrMods",
+      "SprayZ",
+      "StanislavSay",
+      "STS",
+      "SurviveTillTomorrowServerPack",
+      "TheBuster",
+      "THYER5",
+      "VPP",
+      "Wardog.v3",
+      "wickedrv",
+      "Xin_Car",
+      "Zenarchist"
+    ],
+    "description": "",
+    "trailingBytes": 0,
+    "plainRules": {
+      "allowedBuild": "0",
+      "clientPort": "0",
+      "dedicated": "1",
+      "island": "chernarusplus",
+      "language": "65545",
+      "platform": "win",
+      "requiredBuild": "0",
+      "requiredVersion": "129",
+      "timeLeft": "15"
+    }
+  },
+  "players": {
+    "count": 2,
+    "players": [
+      {
+        "index": 0,
+        "name": "",
+        "score": 0,
+        "duration": 1963.8057861328125
+      },
+      {
+        "index": 0,
+        "name": "",
+        "score": 0,
+        "duration": 946.1306762695312
+      }
+    ],
+    "trailingBytes": 0
+  }
+}

@@ -1,0 +1,168 @@
+{
+  "target": "51.81.8.81:27017",
+  "capturedAt": "2026-09-21T11:35:54.246Z",
+  "info": {
+    "protocol": 17,
+    "name": "WILDLANDZ Green County Greatness",
+    "map": "GreenCounty",
+    "folder": "dayz",
+    "game": "PvP | Survival | No Bases",
+    "appId16": 0,
+    "players": 0,
+    "maxPlayers": 50,
+    "bots": 0,
+    "serverType": "d",
+    "environment": "w",
+    "password": false,
+    "vac": true,
+    "version": "1.29.163709",
+    "edf": 177,
+    "gamePort": 2402,
+    "steamId": "90293138942181394",
+    "keywords": "battleye,no3rd,external,privHive,shardABC123,lqs0,etm4.000000,entm6.000000,mod,18:12",
+    "gameId": "221100",
+    "trailingBytes": 0,
+    "tags": {
+      "unknown": [],
+      "battleye": true,
+      "firstPersonOnly": true,
+      "external": true,
+      "privateHive": true,
+      "shard": "ABC123",
+      "queue": 0,
+      "timeMultiplier": 4,
+      "nightMultiplier": 6,
+      "modded": true,
+      "time": "18:12"
+    }
+  },
+  "rulesDatagrams": 1,
+  "rulesSplit": {
+    "split": false,
+    "total": 1,
+    "splitSize": null,
+    "compressed": false
+  },
+  "rules": {
+    "ruleCount": 13,
+    "chunkCount": 4,
+    "chunkKeys": [
+      "1/4",
+      "2/4",
+      "3/4",
+      "4/4"
+    ],
+    "rawLen": 447,
+    "unescapedLen": 443,
+    "protocolVersion": 2,
+    "overflow": 0,
+    "dlcFlags": 0,
+    "dlcHashes": [],
+    "mods": [
+      {
+        "hash": 1218956183,
+        "idLenByte": 4,
+        "steamWorkshopId": "3747295862",
+        "name": "Summer In America"
+      },
+      {
+        "hash": 4178192086,
+        "idLenByte": 4,
+        "steamWorkshopId": "3669560078",
+        "name": "WZ Green County"
+      },
+      {
+        "hash": 2840200059,
+        "idLenByte": 4,
+        "steamWorkshopId": "3669559886",
+        "name": "WZ Anniversary"
+      },
+      {
+        "hash": 2090762698,
+        "idLenByte": 4,
+        "steamWorkshopId": "3669559715",
+        "name": "WZ Core"
+      },
+      {
+        "hash": 3765698699,
+        "idLenByte": 4,
+        "steamWorkshopId": "2857994912",
+        "name": "Zenarchist's Notes Mod"
+      },
+      {
+        "hash": 3966533059,
+        "idLenByte": 4,
+        "steamWorkshopId": "3702420204",
+        "name": "Zenarchist's Core Mod"
+      },
+      {
+        "hash": 784864143,
+        "idLenByte": 4,
+        "steamWorkshopId": "1819514788",
+        "name": "Ear Plugs"
+      },
+      {
+        "hash": 1035444890,
+        "idLenByte": 4,
+        "steamWorkshopId": "2276010135",
+        "name": "DayZ Editor Loader"
+      },
+      {
+        "hash": 283586215,
+        "idLenByte": 4,
+        "steamWorkshopId": "2545327648",
+        "name": "Dabs Framework"
+      },
+      {
+        "hash": 442364544,
+        "idLenByte": 4,
+        "steamWorkshopId": "1828439124",
+        "name": "VPPAdminTools"
+      },
+      {
+        "hash": 1756350145,
+        "idLenByte": 4,
+        "steamWorkshopId": "1559212036",
+        "name": "Community Framework"
+      },
+      {
+        "hash": 4196840580,
+        "idLenByte": 4,
+        "steamWorkshopId": "2128098372",
+        "name": "Green County"
+      }
+    ],
+    "signatures": [
+      "CooltrainV3",
+      "dab",
+      "dayz",
+      "GreenCounty",
+      "Hopps",
+      "Jacob_Mango_V3",
+      "KoT9pA",
+      "LankyCraig2026",
+      "MastaHiggins",
+      "Traqu",
+      "VPP",
+      "Zenarchist"
+    ],
+    "description": "PvP | Survival | No Bases",
+    "trailingBytes": 0,
+    "plainRules": {
+      "allowedBuild": "0",
+      "clientPort": "49591",
+      "dedicated": "1",
+      "island": "GreenCounty",
+      "language": "65545",
+      "platform": "win",
+      "requiredBuild": "0",
+      "requiredVersion": "129",
+      "timeLeft": "15"
+    }
+  },
+  "players": {
+    "count": 0,
+    "players": [],
+    "trailingBytes": 0
+  }
+}

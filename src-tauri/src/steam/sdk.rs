@@ -1,0 +1,833 @@
+//! Steamworks client thread (ADR-002, docs/05 §1–3).
+//!
+//! One OS thread owns the `steamworks::Client` (initialised as app 221100, which
+//! makes Steam show the user as in DayZ, exactly like the official launcher), pumps
+//! `run_callbacks()`, and serves server-list refreshes. The server-list callbacks
+//! are `Rc`-based in steamworks 0.13.1, so everything touching them stays on this
+//! thread; results leave through an unbounded channel in batches of up to 100 ms.
+//!
+//! Steam caps one internet list request at 10 000 servers (D-041) while ~12 500
+//! DayZ servers are live, so a refresh runs a sequence of *partitions* (filter
+//! sets) and merges them: populated servers first because they matter most and
+//! arrive fastest, then empty ones.
+
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use serde::Serialize;
+use steamworks::{Client, GameServerItem, ItemState, MatchmakingServers, PublishedFileId, ServerListCallbacks, ServerListRequest, ServerResponse, UGC};
+use tokio::sync::mpsc::UnboundedSender;
+
+use crate::a2s::DayzTags;
+use crate::browser::ServerRow;
+
+use super::DAYZ_APP_ID;
+
+const BATCH_INTERVAL: Duration = Duration::from_millis(100);
+const TICK_ACTIVE: Duration = Duration::from_millis(10);
+const TICK_IDLE: Duration = Duration::from_millis(50);
+/// Steam's per-request ceiling; a partition returning exactly this many is truncated.
+pub const STEAM_LIST_CAP: usize = 10_000;
+/// A non-forced refresh is ignored when the last one completed more recently than this.
+pub const MIN_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+
+pub type Filters = HashMap<String, String>;
+
+/// Maps with the most genuinely empty servers (cache statistics 2026-09-21, D-044);
+/// each `noplayers` + `map` partition stays far below the 10 000 cap.
+pub const EMPTY_PARTITION_MAPS: [&str; 10] = [
+    "chernarusplus",
+    "deerisle",
+    "enoch",
+    "namalsk",
+    "sakhal",
+    "banov",
+    "Bitterroot",
+    "Pripyat",
+    "takistanplus",
+    "esseker",
+];
+
+/// Pause between partition requests: back-to-back requests made Steam's master
+/// answer `NoServersListedOnMasterServer` for the last four of twelve (D-046).
+const PARTITION_GAP: Duration = Duration::from_secs(3);
+/// Stop a multi-partition refresh after this many consecutive empty master answers.
+const MAX_CONSECUTIVE_EMPTY: usize = 2;
+
+/// Default (automatic) refresh: only servers with authenticated players. That is
+/// every server a player could join, arrives in ~40 s, and skips the ~27 000 fake
+/// entries that dominate Steam's empty-server partitions (D-046). Keys are Steam
+/// filter *operation codes*; the value is ignored for flag filters.
+pub fn default_partitions() -> Vec<Filters> {
+    vec![HashMap::from([("hasplayers".to_string(), "1".to_string())])]
+}
+
+/// Manual "full" refresh: populated servers, then empty servers per major map,
+/// then a generic `noplayers` catch-all that is allowed to hit the cap. Duplicates
+/// merge by id. Expect several minutes; fakes are flagged by rule R0 as they arrive.
+pub fn full_partitions() -> Vec<Filters> {
+    let flag = |k: &str| (k.to_string(), "1".to_string());
+    let mut parts = default_partitions();
+    for map in EMPTY_PARTITION_MAPS {
+        parts.push(HashMap::from([flag("noplayers"), ("map".to_string(), map.to_string())]));
+    }
+    parts.push(HashMap::from([flag("noplayers")]));
+    parts
+}
+
+/// What Steam's master server says about players for rows of this partition.
+fn steam_empty_for(filters: &Filters) -> Option<bool> {
+    if filters.contains_key("noplayers") {
+        Some(true)
+    } else if filters.contains_key("hasplayers") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SteamStatus {
+    pub initialized: bool,
+    pub error: Option<String>,
+    pub app_id: u32,
+    pub steam_id: Option<u64>,
+    pub persona: Option<String>,
+    pub refreshing: bool,
+    /// Seconds since the last completed refresh, if any.
+    pub last_refresh_secs_ago: Option<u64>,
+    /// The Steamworks client was released after inactivity (Q16, D-057); the
+    /// next command re-initialises it transparently.
+    pub idle: bool,
+}
+
+/// Release Steamworks after this long without a command or active job. Disabled by
+/// default: measured on 2026-09-21, `SteamAPI_Shutdown` unloads `steamclient64.dll`
+/// but the host's private bytes stayed at 61 MB (D-057), so the reconnect latency
+/// and "In-Game" status flapping buy nothing. `DAYZ_STEAM_IDLE_SECS=<n>` enables it
+/// for experiments.
+fn idle_timeout() -> Option<Duration> {
+    std::env::var("DAYZ_STEAM_IDLE_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|s| *s > 0)
+        .map(Duration::from_secs)
+}
+
+/// Everything derived from one `SteamAPI_Init`; dropping it shuts Steamworks down.
+struct Session {
+    client: Client,
+    mms: MatchmakingServers,
+    ugc: UGC,
+}
+
+fn open_session() -> Result<Session, String> {
+    let client = Client::init_app(DAYZ_APP_ID).map_err(|e| e.to_string())?;
+    let mms = client.matchmaking_servers();
+    let ugc = client.ugc();
+    Ok(Session { client, mms, ugc })
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PartitionResult {
+    pub filters: Filters,
+    pub total: usize,
+    pub responded: usize,
+    pub failed: usize,
+    /// Rows flagged by rule R0 (Steam says empty, INFO claims players).
+    pub inflated: usize,
+    pub elapsed_ms: u64,
+    pub response: String,
+    /// `total == STEAM_LIST_CAP`: Steam truncated this partition.
+    pub capped: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RefreshDone {
+    pub total: usize,
+    pub responded: usize,
+    pub failed: usize,
+    pub inflated: usize,
+    pub elapsed_ms: u64,
+    pub partitions: Vec<PartitionResult>,
+    pub capped: bool,
+    /// Remaining partitions were skipped after repeated empty master answers (throttling).
+    pub stopped_early: bool,
+}
+
+/// Workshop item metadata from `ISteamUGC` details query (M5 join plan).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemDetails {
+    pub id: u64,
+    pub title: String,
+    pub file_size: u64,
+    pub time_updated: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemProgress {
+    pub id: u64,
+    /// `subscribing | subscribed | pending | downloading | needs_update | installed | failed`
+    pub state: String,
+    pub downloaded: u64,
+    pub total: u64,
+    pub folder: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncProgress {
+    pub job: u64,
+    pub items: Vec<ItemProgress>,
+    pub installed: usize,
+    pub total: usize,
+    pub elapsed_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncDone {
+    pub job: u64,
+    pub ok: bool,
+    pub error: Option<String>,
+    pub items: Vec<ItemProgress>,
+    pub elapsed_ms: u64,
+}
+
+#[derive(Debug)]
+pub enum SteamEvent {
+    Status(SteamStatus),
+    Batch(Vec<ServerRow>),
+    Done(RefreshDone),
+    SyncProgress(SyncProgress),
+    SyncDone(SyncDone),
+}
+
+enum Cmd {
+    Refresh(Vec<Filters>),
+    Sync { job: u64, ids: Vec<u64> },
+    ItemDetails { ids: Vec<u64>, reply: mpsc::Sender<Result<Vec<ItemDetails>, String>> },
+    Shutdown,
+}
+
+/// Steam answers at most this many items per details request (`kNumUGCResultsPerPage`).
+const DETAILS_PAGE: usize = 50;
+const SYNC_EMIT_INTERVAL: Duration = Duration::from_millis(250);
+/// Re-issue `DownloadItem` when Steam has not started within this time.
+const SYNC_KICK_INTERVAL: Duration = Duration::from_secs(5);
+const SYNC_TIMEOUT: Duration = Duration::from_secs(45 * 60);
+
+/// Handle owned by the Tauri state; cheap to clone the status, commands go over a channel.
+pub struct SteamWorker {
+    cmd: mpsc::Sender<Cmd>,
+    status: Arc<Mutex<SteamStatus>>,
+    /// Unix seconds of the last completed refresh; seeded from the cache so the
+    /// throttle survives restarts (D-042).
+    last_done: Arc<Mutex<Option<i64>>>,
+    /// Only the original handle shuts the thread down when dropped.
+    owner: bool,
+}
+
+impl SteamWorker {
+    pub fn spawn(events: UnboundedSender<SteamEvent>, last_refresh_unix: Option<i64>) -> Self {
+        let (cmd, rx) = mpsc::channel();
+        let status = Arc::new(Mutex::new(SteamStatus {
+            app_id: DAYZ_APP_ID,
+            ..Default::default()
+        }));
+        let last_done = Arc::new(Mutex::new(last_refresh_unix));
+        let shared = Shared {
+            status: Arc::clone(&status),
+            last_done: Arc::clone(&last_done),
+        };
+        std::thread::Builder::new()
+            .name("steamworks".into())
+            .spawn(move || run(rx, events, shared))
+            .expect("spawn steamworks thread");
+        Self {
+            cmd,
+            status,
+            last_done,
+            owner: true,
+        }
+    }
+
+    /// A command-only handle usable from blocking tasks (e.g. `item_details`).
+    pub fn clone_handle(&self) -> SteamWorker {
+        SteamWorker {
+            cmd: self.cmd.clone(),
+            status: Arc::clone(&self.status),
+            last_done: Arc::clone(&self.last_done),
+            owner: false,
+        }
+    }
+
+    pub fn status(&self) -> SteamStatus {
+        let mut s = self.status.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        s.last_refresh_secs_ago = self
+            .last_done
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .map(|t| (ServerRow::now_unix() - t).max(0) as u64);
+        s
+    }
+
+    /// Queues a refresh. Empty `partitions` means [`default_partitions`]. Returns
+    /// `Ok(false)` when skipped because one is running or the last one is younger
+    /// than [`MIN_REFRESH_INTERVAL`] and `force` is off.
+    pub fn refresh(&self, partitions: Vec<Filters>, force: bool) -> Result<bool, String> {
+        let s = self.status();
+        if !s.initialized {
+            return Err(s.error.unwrap_or_else(|| "Steam is not initialised".into()));
+        }
+        if s.refreshing {
+            return Ok(false);
+        }
+        if !force && s.last_refresh_secs_ago.is_some_and(|ago| ago < MIN_REFRESH_INTERVAL.as_secs()) {
+            return Ok(false);
+        }
+        let parts = if partitions.is_empty() { default_partitions() } else { partitions };
+        self.cmd.send(Cmd::Refresh(parts)).map_err(|_| "steamworks thread has stopped".to_string())?;
+        Ok(true)
+    }
+
+    /// Subscribes, downloads and installs Workshop items; progress arrives as
+    /// `SteamEvent::SyncProgress`, completion as `SteamEvent::SyncDone`.
+    pub fn sync(&self, job: u64, ids: Vec<u64>) -> Result<(), String> {
+        let s = self.status();
+        if !s.initialized {
+            return Err(s.error.unwrap_or_else(|| "Steam is not initialised".into()));
+        }
+        if ids.is_empty() {
+            return Err("nothing to sync".into());
+        }
+        self.cmd.send(Cmd::Sync { job, ids }).map_err(|_| "steamworks thread has stopped".to_string())
+    }
+
+    /// Workshop titles and sizes, fetched in pages of 50. Blocking: call from a blocking task.
+    pub fn item_details(&self, ids: &[u64]) -> Result<Vec<ItemDetails>, String> {
+        let s = self.status();
+        if !s.initialized {
+            return Err(s.error.unwrap_or_else(|| "Steam is not initialised".into()));
+        }
+        let mut out = Vec::with_capacity(ids.len());
+        for page in ids.chunks(DETAILS_PAGE) {
+            let (reply, rx) = mpsc::channel();
+            self.cmd
+                .send(Cmd::ItemDetails { ids: page.to_vec(), reply })
+                .map_err(|_| "steamworks thread has stopped".to_string())?;
+            let got = rx
+                .recv_timeout(Duration::from_secs(15))
+                .map_err(|_| "Steam did not answer the Workshop details query in 15 s".to_string())??;
+            out.extend(got);
+        }
+        Ok(out)
+    }
+}
+
+impl Drop for SteamWorker {
+    fn drop(&mut self) {
+        if self.owner {
+            let _ = self.cmd.send(Cmd::Shutdown);
+        }
+    }
+}
+
+struct Shared {
+    status: Arc<Mutex<SteamStatus>>,
+    last_done: Arc<Mutex<Option<i64>>>,
+}
+
+impl Shared {
+    fn set_status(&self, events: &UnboundedSender<SteamEvent>, f: impl FnOnce(&mut SteamStatus)) {
+        let snapshot = {
+            let mut s = self.status.lock().unwrap_or_else(|e| e.into_inner());
+            f(&mut s);
+            s.clone()
+        };
+        let _ = events.send(SteamEvent::Status(snapshot));
+    }
+}
+
+struct ActivePartition {
+    filters: Filters,
+    req: Arc<Mutex<ServerListRequest>>,
+    rows: Rc<RefCell<Vec<ServerRow>>>,
+    responded: Rc<Cell<usize>>,
+    failed: Rc<Cell<usize>>,
+    inflated: Rc<Cell<usize>>,
+    done: Rc<Cell<Option<ServerResponse>>>,
+    started: Instant,
+    last_flush: Instant,
+}
+
+struct ActiveRefresh {
+    pending: Vec<Filters>,
+    current: Option<ActivePartition>,
+    results: Vec<PartitionResult>,
+    started: Instant,
+    /// Earliest time the next partition may be requested.
+    next_allowed: Instant,
+    consecutive_empty: usize,
+    stopped_early: bool,
+}
+
+struct ActiveSync {
+    job: u64,
+    ids: Vec<u64>,
+    started: Instant,
+    last_emit: Instant,
+    /// Subscribe results arrive through Steam call-result callbacks on this thread.
+    sub_results: mpsc::Receiver<(u64, Result<(), String>)>,
+    failed: HashMap<u64, String>,
+    kicked: HashMap<u64, Instant>,
+}
+
+fn start_sync(ugc: &UGC, job: u64, ids: Vec<u64>) -> ActiveSync {
+    let (tx, rx) = mpsc::channel();
+    let mut kicked = HashMap::with_capacity(ids.len());
+    for &id in &ids {
+        let file = PublishedFileId(id);
+        let st = ugc.item_state(file);
+        if !st.contains(ItemState::SUBSCRIBED) {
+            let txc = tx.clone();
+            ugc.subscribe_item(file, move |r| {
+                let _ = txc.send((id, r.map_err(|e| format!("{e:?}"))));
+            });
+        }
+        // High priority: start now instead of waiting for Steam's scheduler.
+        let _ = ugc.download_item(file, true);
+        kicked.insert(id, Instant::now());
+    }
+    ActiveSync {
+        job,
+        ids,
+        started: Instant::now(),
+        last_emit: Instant::now() - SYNC_EMIT_INTERVAL,
+        sub_results: rx,
+        failed: HashMap::new(),
+        kicked,
+    }
+}
+
+fn item_progress(ugc: &UGC, id: u64, failed: Option<&String>) -> ItemProgress {
+    let file = PublishedFileId(id);
+    let st = ugc.item_state(file);
+    let (downloaded, total) = ugc.item_download_info(file).unwrap_or((0, 0));
+    let info = ugc.item_install_info(file);
+    let state = if failed.is_some() {
+        "failed"
+    } else if st.contains(ItemState::DOWNLOADING) {
+        "downloading"
+    } else if st.contains(ItemState::DOWNLOAD_PENDING) {
+        "pending"
+    } else if st.contains(ItemState::NEEDS_UPDATE) {
+        "needs_update"
+    } else if st.contains(ItemState::INSTALLED) {
+        "installed"
+    } else if st.contains(ItemState::SUBSCRIBED) {
+        "subscribed"
+    } else {
+        "subscribing"
+    };
+    ItemProgress {
+        id,
+        state: state.into(),
+        downloaded,
+        total: total.max(info.as_ref().map_or(0, |i| i.size_on_disk)),
+        folder: info.map(|i| i.folder),
+        error: failed.cloned(),
+    }
+}
+
+/// One scheduler tick for the active sync. Returns the completion event when finished.
+fn tick_sync(ugc: &UGC, sync: &mut ActiveSync, events: &UnboundedSender<SteamEvent>) -> Option<SyncDone> {
+    while let Ok((id, r)) = sync.sub_results.try_recv() {
+        match r {
+            Ok(()) => {
+                let _ = ugc.download_item(PublishedFileId(id), true);
+                sync.kicked.insert(id, Instant::now());
+            }
+            Err(e) => {
+                sync.failed.insert(id, e);
+            }
+        }
+    }
+    let items: Vec<ItemProgress> = sync.ids.iter().map(|&id| item_progress(ugc, id, sync.failed.get(&id))).collect();
+    for p in &items {
+        if matches!(p.state.as_str(), "subscribed" | "needs_update") {
+            let last = sync.kicked.get(&p.id).copied().unwrap_or(sync.started);
+            if last.elapsed() >= SYNC_KICK_INTERVAL {
+                let _ = ugc.download_item(PublishedFileId(p.id), true);
+                sync.kicked.insert(p.id, Instant::now());
+            }
+        }
+    }
+    let installed = items.iter().filter(|p| p.state == "installed").count();
+    let elapsed_ms = sync.started.elapsed().as_millis() as u64;
+    let finished = installed == items.len();
+    let failed = !sync.failed.is_empty();
+    let timed_out = sync.started.elapsed() > SYNC_TIMEOUT;
+    if finished || failed || timed_out {
+        return Some(SyncDone {
+            job: sync.job,
+            ok: finished,
+            error: if finished {
+                None
+            } else if failed {
+                sync.failed.values().next().cloned()
+            } else {
+                Some("Steam did not finish the download within 45 minutes".into())
+            },
+            items,
+            elapsed_ms,
+        });
+    }
+    if sync.last_emit.elapsed() >= SYNC_EMIT_INTERVAL {
+        sync.last_emit = Instant::now();
+        let _ = events.send(SteamEvent::SyncProgress(SyncProgress {
+            job: sync.job,
+            items,
+            installed,
+            total: sync.ids.len(),
+            elapsed_ms,
+        }));
+    }
+    None
+}
+
+fn query_details(ugc: &UGC, ids: Vec<u64>, reply: mpsc::Sender<Result<Vec<ItemDetails>, String>>) {
+    let files: Vec<PublishedFileId> = ids.into_iter().map(PublishedFileId).collect();
+    match ugc.query_items(files) {
+        Ok(handle) => handle.fetch(move |res| {
+            let out = res
+                .map(|results| {
+                    (0..results.returned_results())
+                        .filter_map(|i| results.get(i))
+                        .map(|q| ItemDetails {
+                            id: q.published_file_id.0,
+                            title: q.title,
+                            file_size: q.file_size as u64,
+                            time_updated: q.time_updated,
+                        })
+                        .collect()
+                })
+                .map_err(|e| format!("{e:?}"));
+            let _ = reply.send(out);
+        }),
+        Err(e) => {
+            let _ = reply.send(Err(format!("{e:?}")));
+        }
+    }
+}
+
+fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Shared) {
+    let mut session = match open_session() {
+        Ok(s) => Some(s),
+        Err(e) => {
+            shared.set_status(&events, |s| s.error = Some(e));
+            while let Ok(cmd) = rx.recv() {
+                if matches!(cmd, Cmd::Shutdown) {
+                    break;
+                }
+            }
+            return;
+        }
+    };
+    {
+        let s = session.as_ref().expect("session just opened");
+        let steam_id = s.client.user().steam_id().raw();
+        let persona = s.client.friends().name();
+        shared.set_status(&events, |st| {
+            st.initialized = true;
+            st.steam_id = Some(steam_id);
+            st.persona = Some(persona);
+        });
+    }
+
+    let idle_after = idle_timeout();
+    let mut last_activity = Instant::now();
+    let mut active: Option<ActiveRefresh> = None;
+    let mut sync: Option<ActiveSync> = None;
+
+    loop {
+        if let Some(s) = &session {
+            s.client.run_callbacks();
+        }
+
+        loop {
+            let cmd = match rx.try_recv() {
+                Ok(cmd) => cmd,
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => return,
+            };
+            last_activity = Instant::now();
+            if session.is_none() && !matches!(cmd, Cmd::Shutdown) {
+                match open_session() {
+                    Ok(s) => {
+                        session = Some(s);
+                        shared.set_status(&events, |st| {
+                            st.idle = false;
+                            st.error = None;
+                        });
+                    }
+                    Err(e) => {
+                        shared.set_status(&events, |st| st.error = Some(e.clone()));
+                        match cmd {
+                            Cmd::ItemDetails { reply, .. } => {
+                                let _ = reply.send(Err(e));
+                            }
+                            Cmd::Sync { job, .. } => {
+                                let _ = events.send(SteamEvent::SyncDone(SyncDone {
+                                    job,
+                                    ok: false,
+                                    error: Some(e),
+                                    items: Vec::new(),
+                                    elapsed_ms: 0,
+                                }));
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+                }
+            }
+            let Some(s) = session.as_ref() else { return }; // only reachable for Shutdown
+            let (mms, ugc) = (&s.mms, &s.ugc);
+            match cmd {
+                Cmd::Sync { job, ids } => {
+                    if let Some(old) = sync.take() {
+                        let _ = events.send(SteamEvent::SyncDone(SyncDone {
+                            job: old.job,
+                            ok: false,
+                            error: Some("superseded by a newer sync".into()),
+                            items: Vec::new(),
+                            elapsed_ms: old.started.elapsed().as_millis() as u64,
+                        }));
+                    }
+                    sync = Some(start_sync(ugc, job, ids));
+                }
+                Cmd::ItemDetails { ids, reply } => query_details(ugc, ids, reply),
+                Cmd::Refresh(mut parts) => {
+                    if active.is_some() {
+                        continue;
+                    }
+                    let _ = mms; // partitions start below on the same session
+                    parts.reverse(); // pop() takes from the end
+                    active = Some(ActiveRefresh {
+                        pending: parts,
+                        current: None,
+                        results: Vec::new(),
+                        started: Instant::now(),
+                        next_allowed: Instant::now(),
+                        consecutive_empty: 0,
+                        stopped_early: false,
+                    });
+                    shared.set_status(&events, |s| {
+                        s.refreshing = true;
+                        s.error = None;
+                    });
+                }
+                Cmd::Shutdown => return,
+            }
+        }
+
+        let busy = active.is_some() || sync.is_some();
+        if busy {
+            last_activity = Instant::now();
+        } else if session.is_some() && idle_after.is_some_and(|d| last_activity.elapsed() >= d) {
+            // Drops Client/MatchmakingServers/UGC → SteamAPI_Shutdown; frees the
+            // Steam client heaps (Q16). Any later command re-opens the session.
+            session = None;
+            shared.set_status(&events, |st| st.idle = true);
+        }
+
+        let Some(s) = session.as_ref() else {
+            std::thread::sleep(TICK_IDLE);
+            continue;
+        };
+        let (mms, ugc) = (&s.mms, &s.ugc);
+
+        if let Some(r) = active.as_mut() {
+            // Start the next partition when none is running and the gap has passed.
+            if r.current.is_none() && Instant::now() >= r.next_allowed {
+                if r.consecutive_empty >= MAX_CONSECUTIVE_EMPTY && !r.pending.is_empty() {
+                    r.pending.clear();
+                    r.stopped_early = true;
+                }
+                match r.pending.pop() {
+                    Some(filters) => match start_partition(mms, filters) {
+                        Ok(p) => r.current = Some(p),
+                        Err(e) => shared.set_status(&events, |s| s.error = Some(e)),
+                    },
+                    None => {
+                        let done = RefreshDone {
+                            total: r.results.iter().map(|p| p.total).sum(),
+                            responded: r.results.iter().map(|p| p.responded).sum(),
+                            failed: r.results.iter().map(|p| p.failed).sum(),
+                            inflated: r.results.iter().map(|p| p.inflated).sum(),
+                            elapsed_ms: r.started.elapsed().as_millis() as u64,
+                            capped: r.results.iter().any(|p| p.capped),
+                            stopped_early: r.stopped_early,
+                            partitions: std::mem::take(&mut r.results),
+                        };
+                        let _ = events.send(SteamEvent::Done(done));
+                        *shared.last_done.lock().unwrap_or_else(|e| e.into_inner()) = Some(ServerRow::now_unix());
+                        active = None;
+                        shared.set_status(&events, |s| s.refreshing = false);
+                    }
+                }
+            }
+            if let Some(r) = active.as_mut() {
+                if let Some(p) = r.current.as_mut() {
+                    let finished = p.done.get();
+                    if finished.is_some() || p.last_flush.elapsed() >= BATCH_INTERVAL {
+                        let batch: Vec<ServerRow> = std::mem::take(&mut *p.rows.borrow_mut());
+                        if !batch.is_empty() {
+                            let _ = events.send(SteamEvent::Batch(batch));
+                        }
+                        p.last_flush = Instant::now();
+                    }
+                    if let Some(response) = finished {
+                        let total = p.req.lock().map(|q| q.get_server_count().unwrap_or(0)).unwrap_or(0).max(0) as usize;
+                        if let Ok(mut q) = p.req.lock() {
+                            let _ = q.release();
+                        }
+                        let p = r.current.take().expect("current partition");
+                        r.next_allowed = Instant::now() + PARTITION_GAP;
+                        if total == 0 && response == ServerResponse::NoServersListedOnMasterServer {
+                            r.consecutive_empty += 1;
+                        } else {
+                            r.consecutive_empty = 0;
+                        }
+                        r.results.push(PartitionResult {
+                            filters: p.filters,
+                            total,
+                            responded: p.responded.get(),
+                            failed: p.failed.get(),
+                            inflated: p.inflated.get(),
+                            elapsed_ms: p.started.elapsed().as_millis() as u64,
+                            response: format!("{response:?}"),
+                            capped: total >= STEAM_LIST_CAP,
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some(job) = sync.as_mut() {
+            if let Some(done) = tick_sync(ugc, job, &events) {
+                let _ = events.send(SteamEvent::SyncDone(done));
+                sync = None;
+            }
+        }
+
+        std::thread::sleep(if active.is_some() || sync.is_some() { TICK_ACTIVE } else { TICK_IDLE });
+    }
+}
+
+fn start_partition(mms: &MatchmakingServers, filters: Filters) -> Result<ActivePartition, String> {
+    let rows = Rc::new(RefCell::new(Vec::with_capacity(256)));
+    let responded = Rc::new(Cell::new(0usize));
+    let failed = Rc::new(Cell::new(0usize));
+    let inflated = Rc::new(Cell::new(0usize));
+    let done: Rc<Cell<Option<ServerResponse>>> = Rc::new(Cell::new(None));
+
+    let steam_empty = steam_empty_for(&filters);
+    let (rows_cb, responded_cb, failed_cb, inflated_cb, done_cb) =
+        (Rc::clone(&rows), Rc::clone(&responded), Rc::clone(&failed), Rc::clone(&inflated), Rc::clone(&done));
+    let callbacks = ServerListCallbacks::new(
+        Box::new(move |list: Arc<Mutex<ServerListRequest>>, index: i32| {
+            let item = list.lock().ok().and_then(|q| q.get_server_details(index).ok());
+            if let Some(item) = item {
+                responded_cb.set(responded_cb.get() + 1);
+                let row = row_from(item, steam_empty);
+                if row.inflated() {
+                    inflated_cb.set(inflated_cb.get() + 1);
+                }
+                rows_cb.borrow_mut().push(row);
+            }
+        }),
+        Box::new(move |_list: Arc<Mutex<ServerListRequest>>, _index: i32| {
+            failed_cb.set(failed_cb.get() + 1);
+        }),
+        Box::new(move |_list: Arc<Mutex<ServerListRequest>>, response: ServerResponse| {
+            done_cb.set(Some(response));
+        }),
+    );
+
+    let borrowed: HashMap<&str, &str> = filters.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+    let req = mms
+        .internet_server_list(DAYZ_APP_ID, &borrowed, callbacks)
+        .map_err(|()| "server list filter key or value exceeds 255 bytes".to_string())?;
+    Ok(ActivePartition {
+        filters,
+        req,
+        rows,
+        responded,
+        failed,
+        inflated,
+        done,
+        started: Instant::now(),
+        last_flush: Instant::now(),
+    })
+}
+
+fn row_from(item: GameServerItem, steam_empty: Option<bool>) -> ServerRow {
+    let ip = item.addr.to_string();
+    let tags = DayzTags::parse(&item.tags);
+    ServerRow {
+        id: ServerRow::id_for(&ip, item.query_port),
+        ip,
+        game_port: item.connection_port,
+        query_port: item.query_port,
+        name: item.server_name,
+        map: item.map,
+        description: item.game_description,
+        players: item.players,
+        max_players: item.max_players,
+        bots: item.bot_players,
+        password: item.have_password,
+        secure: item.secure,
+        server_version: item.server_version,
+        version: ServerRow::version_string(item.server_version),
+        ping_ms: item.ping.as_millis() as u32,
+        keywords: item.tags,
+        tags,
+        steam_id: item.steamid,
+        last_seen: ServerRow::now_unix(),
+        verified_players: None,
+        steam_empty,
+        verified_at: None,
+        verdict: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn partitions_order_and_flags() {
+        let d = default_partitions();
+        assert_eq!(d.len(), 1);
+        assert!(d[0].contains_key("hasplayers"));
+        let p = full_partitions();
+        assert_eq!(p.len(), 2 + EMPTY_PARTITION_MAPS.len());
+        assert!(p[0].contains_key("hasplayers"));
+        assert_eq!(steam_empty_for(&p[0]), Some(false));
+        assert_eq!(p[1].get("map").map(String::as_str), Some("chernarusplus"));
+        assert_eq!(steam_empty_for(&p[1]), Some(true));
+        assert!(p.last().unwrap().contains_key("noplayers") && !p.last().unwrap().contains_key("map"));
+        assert_eq!(steam_empty_for(&HashMap::new()), None);
+    }
+}
