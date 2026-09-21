@@ -35,7 +35,7 @@
       <p class="muted">Press <kbd>F</kbd> on a server or click its star. The official launcher's favourites can be imported with the button above.</p>
     </div>
   {:else}
-    <div class="main">
+    <div class="main" class:with-pane={servers.selected != null}>
       <ServerTable
         rows={servers.favouriteRows}
         selectedId={servers.selectedId}
@@ -48,7 +48,9 @@
         onActivate={(id) => (servers.joiningId = id)}
         onFavourite={(id) => servers.toggleFavourite(id)}
       />
-      <DetailsPane row={servers.selected} localVersion={servers.localVersion} />
+      {#if servers.selected}
+        <DetailsPane row={servers.selected} localVersion={servers.localVersion} />
+      {/if}
     </div>
   {/if}
 </div>
@@ -64,10 +66,12 @@
   .empty { margin: auto; text-align: center; }
   .empty p { margin: 4px 0; }
   kbd { padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-row); font-size: 11px; }
-  .main { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 360px; }
+  /* The details pane only exists while a row is selected; the table takes the full width otherwise. */
+  .main { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr; }
+  .main.with-pane { grid-template-columns: 1fr 360px; }
   .error { color: var(--danger); }
   @media (max-width: 1000px) {
-    .main { grid-template-columns: 1fr; }
+    .main.with-pane { grid-template-columns: 1fr; }
     .main > :global(aside) { display: none; }
   }
 </style>

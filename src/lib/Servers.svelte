@@ -71,7 +71,7 @@
     </div>
   </div>
 
-  <div class="main">
+  <div class="main" class:with-pane={servers.selected != null}>
     <ServerTable
       rows={servers.list}
       selectedId={servers.selectedId}
@@ -84,7 +84,9 @@
       onActivate={(id) => (servers.joiningId = id)}
       onFavourite={(id) => servers.toggleFavourite(id)}
     />
-    <DetailsPane row={servers.selected} localVersion={servers.localVersion} />
+    {#if servers.selected}
+      <DetailsPane row={servers.selected} localVersion={servers.localVersion} />
+    {/if}
   </div>
 </div>
 
@@ -100,11 +102,13 @@
   .direct { display: inline-flex; gap: 4px; margin-left: 8px; }
   .direct input { width: 190px; padding: 5px 8px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg); font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
   .direct input:focus-visible { outline: 2px solid var(--accent); }
-  .main { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 360px; }
+  /* The details pane only exists while a row is selected; the table takes the full width otherwise. */
+  .main { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr; }
+  .main.with-pane { grid-template-columns: 1fr 360px; }
   .warn { color: var(--warn); }
   .error { color: var(--danger); }
   @media (max-width: 1000px) {
-    .main { grid-template-columns: 1fr; }
+    .main.with-pane { grid-template-columns: 1fr; }
     .main > :global(aside) { display: none; }
   }
 </style>

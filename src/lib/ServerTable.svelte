@@ -21,7 +21,8 @@
     sort: { key: SortKey; dir: 1 | -1 };
     localVersion: string | null;
     favourites: Set<string>;
-    onSelect: (id: string) => void;
+    /** null clears the selection (click on the selected row again, or Escape). */
+    onSelect: (id: string | null) => void;
     onSort: (key: SortKey) => void;
     onVisible: (ids: string[]) => void;
     onActivate: (id: string) => void;
@@ -87,6 +88,13 @@
   }
 
   function onKey(e: KeyboardEvent) {
+    if (e.key === "Escape") {
+      if (selectedId) {
+        e.preventDefault();
+        onSelect(null);
+      }
+      return;
+    }
     if (e.key === "f" || e.key === "F") {
       if (selectedId) {
         e.preventDefault();
@@ -150,8 +158,17 @@
             role="row"
             tabindex="-1"
             aria-selected={r.id === selectedId}
-            onclick={() => onSelect(r.id)}
-            ondblclick={() => onActivate(r.id)}
+            onclick={(e) => {
+              // A click on the selected row clears the selection and collapses the
+              // details pane. The second click of a double-click (detail 2) is ignored
+              // so that double-click keeps the row selected and activates it.
+              if (e.detail > 1) return;
+              onSelect(r.id === selectedId ? null : r.id);
+            }}
+            ondblclick={() => {
+              onSelect(r.id);
+              onActivate(r.id);
+            }}
             onkeydown={onKey}
           >
             <div class="cell c-name" title={r.description || r.name}>
@@ -192,7 +209,6 @@
                         ? `Verified head-count (${clock(r.tags.timeMinutes)} in game)`
                         : "Reported by the server, not yet verified"}
             >
-              <span class="bar" style="width: {r.maxPlayers > 0 ? Math.min(100, (100 * pop) / r.maxPlayers) : 0}%"></span>
               <span class="txt" class:muted={r.verdict == null && !untrusted}>
                 {#if untrusted}<span class="warn">⚠</span>{/if}
                 {pop}/{r.maxPlayers}{#if r.tags.queue}<span class="muted"> +{r.tags.queue}</span>{/if}
@@ -239,9 +255,6 @@
   .pill { font-size: 10px; line-height: 14px; padding: 0 5px; border-radius: 4px; background: var(--bg-row); color: var(--fg-muted); border: 1px solid var(--border); }
   .name { overflow: hidden; text-overflow: ellipsis; }
   .c-num { text-align: right; }
-  .players { position: relative; }
-  .players .bar { position: absolute; left: 4px; bottom: 6px; height: 2px; background: color-mix(in srgb, var(--accent) 60%, transparent); border-radius: 1px; pointer-events: none; }
-  .players .txt { position: relative; }
   .c-time .glyph { color: var(--fg-muted); margin-right: 3px; }
   .ok { color: var(--ok); }
   .warn { color: var(--warn); }
