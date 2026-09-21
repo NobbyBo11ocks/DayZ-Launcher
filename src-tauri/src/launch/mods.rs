@@ -25,7 +25,9 @@ pub fn junction_name(id: u64, meta_name: Option<&str>) -> String {
     let cleaned: String = meta_name
         .unwrap_or("")
         .chars()
-        .filter(|c| !matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') && !c.is_control())
+        .filter(|c| {
+            !matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') && !c.is_control()
+        })
         .collect::<String>()
         .trim()
         .trim_end_matches('.')
@@ -38,16 +40,25 @@ pub fn junction_name(id: u64, meta_name: Option<&str>) -> String {
 }
 
 /// Ensures a junction exists for each `(id, item folder, meta name)`; returns them in input order.
-pub fn ensure_junctions(game_dir: &Path, items: &[(u64, PathBuf, Option<String>)]) -> AppResult<Vec<ModLink>> {
+pub fn ensure_junctions(
+    game_dir: &Path,
+    items: &[(u64, PathBuf, Option<String>)],
+) -> AppResult<Vec<ModLink>> {
     let workshop = game_dir.join("!Workshop");
     std::fs::create_dir_all(&workshop).map_err(|e| AppError::io(&workshop, e))?;
     let mut out = Vec::with_capacity(items.len());
     for (id, source, meta_name) in items {
         if !source.is_dir() {
-            return Err(AppError::Internal(format!("Workshop item {id} has no folder at {}", source.display())));
+            return Err(AppError::Internal(format!(
+                "Workshop item {id} has no folder at {}",
+                source.display()
+            )));
         }
         let base = junction_name(*id, meta_name.as_deref());
-        let candidates = [workshop.join(&base), workshop.join(format!("{base} ({id})"))];
+        let candidates = [
+            workshop.join(&base),
+            workshop.join(format!("{base} ({id})")),
+        ];
         let mut chosen: Option<(PathBuf, bool)> = None;
         for path in &candidates {
             match std::fs::symlink_metadata(path) {
@@ -68,7 +79,10 @@ pub fn ensure_junctions(game_dir: &Path, items: &[(u64, PathBuf, Option<String>)
             }
         }
         let (junction, created) = chosen.ok_or_else(|| {
-            AppError::Internal(format!("cannot create a junction for mod {id}: {} and its sibling are taken", candidates[0].display()))
+            AppError::Internal(format!(
+                "cannot create a junction for mod {id}: {} and its sibling are taken",
+                candidates[0].display()
+            ))
         })?;
         out.push(ModLink {
             id: *id,
@@ -97,7 +111,10 @@ mod tests {
     #[test]
     fn names_follow_official_convention() {
         assert_eq!(junction_name(1_559_212_036, Some("CF")), "@CF");
-        assert_eq!(junction_name(2_545_327_648, Some("Dabs Framework")), "@Dabs Framework");
+        assert_eq!(
+            junction_name(2_545_327_648, Some("Dabs Framework")),
+            "@Dabs Framework"
+        );
         assert_eq!(junction_name(7, Some("Bad:Name?/")), "@BadName");
         assert_eq!(junction_name(7, Some("   ")), "@7");
         assert_eq!(junction_name(7, None), "@7");
@@ -105,7 +122,10 @@ mod tests {
 
     #[test]
     fn same_dir_ignores_case_prefix_and_trailing_slash() {
-        assert!(same_dir(Path::new(r"\\?\G:\SteamLibrary\steamapps\workshop\content\221100\1559212036"), Path::new(r"g:\steamlibrary\steamapps\workshop\content\221100\1559212036\")));
+        assert!(same_dir(
+            Path::new(r"\\?\G:\SteamLibrary\steamapps\workshop\content\221100\1559212036"),
+            Path::new(r"g:\steamlibrary\steamapps\workshop\content\221100\1559212036\")
+        ));
         assert!(!same_dir(Path::new(r"G:\a\1"), Path::new(r"G:\a\2")));
     }
 
@@ -125,11 +145,17 @@ mod tests {
         assert!(junction::exists(&first[0].junction).unwrap());
 
         let again = ensure_junctions(&game, &[(111, src_a.clone(), Some("Same".into()))]).unwrap();
-        assert!(!again[0].created, "existing junction with the right target is reused");
+        assert!(
+            !again[0].created,
+            "existing junction with the right target is reused"
+        );
 
         let clash = ensure_junctions(&game, &[(222, src_b.clone(), Some("Same".into()))]).unwrap();
         assert!(clash[0].created);
-        assert_eq!(clash[0].junction, game.join("!Workshop").join("@Same (222)"));
+        assert_eq!(
+            clash[0].junction,
+            game.join("!Workshop").join("@Same (222)")
+        );
 
         for l in [&first[0], &clash[0]] {
             let _ = junction::delete(&l.junction);

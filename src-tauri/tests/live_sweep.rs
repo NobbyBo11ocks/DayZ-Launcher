@@ -13,7 +13,10 @@ use std::time::{Duration, Instant};
 use dayz_launcher_lib::a2s::{A2sError, Client};
 
 fn env_or<T: std::str::FromStr>(key: &str, default: T) -> T {
-    std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -22,7 +25,11 @@ async fn live_sweep() {
     let path = std::env::var("DAYZ_SWEEP_LIST").expect("DAYZ_SWEEP_LIST=<file> is required");
     let text = std::fs::read_to_string(&path).expect("read list");
     let limit: usize = env_or("DAYZ_SWEEP_LIMIT", usize::MAX);
-    let addrs: Vec<SocketAddr> = text.lines().filter_map(|l| l.trim().parse().ok()).take(limit).collect();
+    let addrs: Vec<SocketAddr> = text
+        .lines()
+        .filter_map(|l| l.trim().parse().ok())
+        .take(limit)
+        .collect();
     let concurrency: usize = env_or("DAYZ_SWEEP_CONCURRENCY", 256);
     let timeout_ms: u64 = env_or("DAYZ_SWEEP_TIMEOUT_MS", 1000);
     let retries: u8 = env_or("DAYZ_SWEEP_RETRIES", 0);
@@ -69,7 +76,12 @@ async fn live_sweep() {
                     over_max += 1;
                 }
                 if i.players >= 60 && suspects.len() < 8 {
-                    suspects.push(format!("{addr} {}/{} {:?}", i.players, i.max_players, i.name.chars().take(40).collect::<String>()));
+                    suspects.push(format!(
+                        "{addr} {}/{} {:?}",
+                        i.players,
+                        i.max_players,
+                        i.name.chars().take(40).collect::<String>()
+                    ));
                 }
                 *versions.entry(i.version.clone()).or_default() += 1;
             }
@@ -91,15 +103,40 @@ async fn live_sweep() {
         }
     }
     rtts.sort_unstable();
-    let pct = |p: f64| rtts.get(((rtts.len() as f64 - 1.0) * p) as usize).copied().unwrap_or(0);
+    let pct = |p: f64| {
+        rtts.get(((rtts.len() as f64 - 1.0) * p) as usize)
+            .copied()
+            .unwrap_or(0)
+    };
     let mut top: Vec<_> = versions.into_iter().collect();
     top.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
     let budget = Duration::from_secs_f64(15.0 * addrs.len() as f64 / 20_000.0);
 
-    println!("sweep: {} addresses, concurrency {}, timeout {} ms, retries {}, pacing {} pps", addrs.len(), concurrency, timeout_ms, retries, pps);
-    println!("elapsed: {:.2} s ({:.0} addr/s); pro-rata 20k/15s budget would be {:.1} s", elapsed.as_secs_f64(), addrs.len() as f64 / elapsed.as_secs_f64(), budget.as_secs_f64());
-    println!("ok: {ok} (dayz app id: {dayz})  errors: {errs:?}  first io: {}", first_io.as_deref().unwrap_or("-"));
-    println!("rtt ms: p50 {} p90 {} p99 {} max {}", pct(0.5), pct(0.9), pct(0.99), rtts.last().copied().unwrap_or(0));
+    println!(
+        "sweep: {} addresses, concurrency {}, timeout {} ms, retries {}, pacing {} pps",
+        addrs.len(),
+        concurrency,
+        timeout_ms,
+        retries,
+        pps
+    );
+    println!(
+        "elapsed: {:.2} s ({:.0} addr/s); pro-rata 20k/15s budget would be {:.1} s",
+        elapsed.as_secs_f64(),
+        addrs.len() as f64 / elapsed.as_secs_f64(),
+        budget.as_secs_f64()
+    );
+    println!(
+        "ok: {ok} (dayz app id: {dayz})  errors: {errs:?}  first io: {}",
+        first_io.as_deref().unwrap_or("-")
+    );
+    println!(
+        "rtt ms: p50 {} p90 {} p99 {} max {}",
+        pct(0.5),
+        pct(0.9),
+        pct(0.99),
+        rtts.last().copied().unwrap_or(0)
+    );
     println!("players: sum {players_sum}, histogram {hist:?}, players>max {over_max}");
     println!("suspects (players>=60): {suspects:#?}");
     println!("top versions: {:?}", &top[..top.len().min(5)]);

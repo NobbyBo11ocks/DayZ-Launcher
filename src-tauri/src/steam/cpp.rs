@@ -84,7 +84,10 @@ mod tests {
         assert_eq!(m.get("version"), Some("1.5.8"));
         assert_eq!(m.get("author"), Some("CF Mod Team"));
         assert_eq!(m.get("authorID"), Some("76561198103677868"));
-        assert!(m.get("overview").unwrap().starts_with("This is a Community Framework"));
+        assert!(m
+            .get("overview")
+            .unwrap()
+            .starts_with("This is a Community Framework"));
     }
 
     #[test]

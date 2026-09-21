@@ -126,7 +126,8 @@ pub fn collect() -> AppResult<Diagnostics> {
         }
         let has_be = g.battleye_exe().is_file();
         if !has_be {
-            warnings.push("DayZ_BE.exe is missing; BattlEye servers will reject the client.".into());
+            warnings
+                .push("DayZ_BE.exe is missing; BattlEye servers will reject the client.".into());
         }
         dayz = Some(GameInfo {
             library: s(&g.library.path),
@@ -145,9 +146,15 @@ pub fn collect() -> AppResult<Diagnostics> {
         if let Some(ws) = workshop::read(&g.library.path)? {
             let missing = ws.items.iter().filter(|i| i.folder.is_none()).count();
             if missing > 0 {
-                warnings.push(format!("{missing} Workshop item(s) are listed as installed but have no folder."));
+                warnings.push(format!(
+                    "{missing} Workshop item(s) are listed as installed but have no folder."
+                ));
             }
-            for i in ws.items.iter().filter(|i| matches!(i.meta_published_id, Some(p) if p != i.id)) {
+            for i in ws
+                .items
+                .iter()
+                .filter(|i| matches!(i.meta_published_id, Some(p) if p != i.id))
+            {
                 warnings.push(format!(
                     "Workshop folder {} contains meta.cpp for publishedid {} (mismatch).",
                     i.id,
@@ -187,10 +194,14 @@ pub fn collect() -> AppResult<Diagnostics> {
             .collect();
         let dangling = junctions.iter().filter(|j| !j.target_exists).count();
         if dangling > 0 {
-            warnings.push(format!("{dangling} junction(s) in !Workshop point at missing folders."));
+            warnings.push(format!(
+                "{dangling} junction(s) in !Workshop point at missing folders."
+            ));
         }
     } else if steam.path.is_some() {
-        warnings.push(format!("DayZ (app {DAYZ_APP_ID}) is not installed in any Steam library."));
+        warnings.push(format!(
+            "DayZ (app {DAYZ_APP_ID}) is not installed in any Steam library."
+        ));
     }
 
     Ok(Diagnostics {
@@ -231,6 +242,10 @@ mod tests {
     fn live_diagnostics() {
         let d = collect().expect("collect");
         println!("{}", serde_json::to_string_pretty(&d).unwrap());
-        assert!(d.timing_ms < 2_000, "diagnostics must stay fast: {} ms", d.timing_ms);
+        assert!(
+            d.timing_ms < 2_000,
+            "diagnostics must stay fast: {} ms",
+            d.timing_ms
+        );
     }
 }

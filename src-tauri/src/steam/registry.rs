@@ -49,7 +49,8 @@ pub fn detect() -> SteamInfo {
 
     if info.path.is_none() {
         let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-        if let Ok(key) = hklm.open_subkey_with_flags(r"SOFTWARE\WOW6432Node\Valve\Steam", KEY_READ) {
+        if let Ok(key) = hklm.open_subkey_with_flags(r"SOFTWARE\WOW6432Node\Valve\Steam", KEY_READ)
+        {
             if let Some(p) = read_path(&key, "InstallPath") {
                 info.exe = Some(p.join("steam.exe"));
                 info.path = Some(p);
@@ -102,10 +103,12 @@ mod process {
 
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
     };
     use windows_sys::Win32::System::Threading::{
-        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+        PROCESS_QUERY_LIMITED_INFORMATION,
     };
 
     /// PID of a live `steam.exe`. When `steam_path` is known the image must live
@@ -115,7 +118,11 @@ mod process {
         for pid in pids_named("steam.exe") {
             match (&want_prefix, image_path(pid)) {
                 (None, _) => return Some(pid),
-                (Some(prefix), Some(img)) if img.to_ascii_lowercase().starts_with(prefix.as_str()) => return Some(pid),
+                (Some(prefix), Some(img))
+                    if img.to_ascii_lowercase().starts_with(prefix.as_str()) =>
+                {
+                    return Some(pid)
+                }
                 _ => continue,
             }
         }
@@ -134,7 +141,11 @@ mod process {
             entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
             if Process32FirstW(snap, &mut entry) != 0 {
                 loop {
-                    let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+                    let len = entry
+                        .szExeFile
+                        .iter()
+                        .position(|&c| c == 0)
+                        .unwrap_or(entry.szExeFile.len());
                     let name = String::from_utf16_lossy(&entry.szExeFile[..len]);
                     if name.eq_ignore_ascii_case(exe) {
                         out.push(entry.th32ProcessID);
@@ -158,7 +169,8 @@ mod process {
             }
             let mut buf = [0u16; 1024];
             let mut len = buf.len() as u32;
-            let ok = QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, buf.as_mut_ptr(), &mut len) != 0;
+            let ok =
+                QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, buf.as_mut_ptr(), &mut len) != 0;
             CloseHandle(h);
             ok.then(|| String::from_utf16_lossy(&buf[..len as usize]))
         }

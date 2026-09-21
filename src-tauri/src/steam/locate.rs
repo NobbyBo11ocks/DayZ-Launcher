@@ -45,13 +45,21 @@ pub fn parse_libraryfolders(text: &str, path: &Path) -> AppResult<Vec<Library>> 
         .ok_or_else(|| AppError::parse(path, "root is not an object"))?;
     let mut libs = Vec::new();
     for (key, values) in root.iter() {
-        let Ok(index) = key.parse::<u32>() else { continue };
-        let Some(obj) = values.first().and_then(|v| v.get_obj()) else { continue };
-        let Some(p) = vdf::get_str(obj, "path") else { continue };
+        let Ok(index) = key.parse::<u32>() else {
+            continue;
+        };
+        let Some(obj) = values.first().and_then(|v| v.get_obj()) else {
+            continue;
+        };
+        let Some(p) = vdf::get_str(obj, "path") else {
+            continue;
+        };
         let mut apps = BTreeMap::new();
         if let Some(a) = vdf::get_obj(obj, "apps") {
             for (id, sz) in a.iter() {
-                if let (Ok(id), Some(sz)) = (id.parse::<u32>(), sz.first().and_then(|v| v.get_str())) {
+                if let (Ok(id), Some(sz)) =
+                    (id.parse::<u32>(), sz.first().and_then(|v| v.get_str()))
+                {
                     apps.insert(id, sz.parse().unwrap_or(0));
                 }
             }
@@ -128,11 +136,14 @@ pub fn find_dayz(libs: &[Library]) -> AppResult<Option<GameInstall>> {
         .filter(|l| l.has(DAYZ_APP_ID))
         .chain(libs.iter().filter(|l| !l.has(DAYZ_APP_ID)));
     for lib in ordered {
-        let manifest_path = lib.steamapps().join(format!("appmanifest_{DAYZ_APP_ID}.acf"));
+        let manifest_path = lib
+            .steamapps()
+            .join(format!("appmanifest_{DAYZ_APP_ID}.acf"));
         if !manifest_path.is_file() {
             continue;
         }
-        let text = std::fs::read_to_string(&manifest_path).map_err(|e| AppError::io(&manifest_path, e))?;
+        let text =
+            std::fs::read_to_string(&manifest_path).map_err(|e| AppError::io(&manifest_path, e))?;
         let manifest = parse_appmanifest(&text, &manifest_path)?;
         let folder = lib.steamapps().join("common").join(&manifest.install_dir);
         return Ok(Some(GameInstall {

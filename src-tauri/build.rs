@@ -20,7 +20,9 @@ fn copy_steam_dll() {
     }
     // OUT_DIR = <target>/<profile>/build/<pkg>-<hash>/out
     let out = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
-    let Some(profile_dir) = out.ancestors().nth(3) else { return };
+    let Some(profile_dir) = out.ancestors().nth(3) else {
+        return;
+    };
     for dir in [profile_dir.to_path_buf(), profile_dir.join("deps")] {
         let _ = fs::create_dir_all(&dir);
         let dst = dir.join("steam_api64.dll");

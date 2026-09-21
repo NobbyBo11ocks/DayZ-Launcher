@@ -19,7 +19,12 @@ use super::{A2sError, A2sResult};
 pub const DAYZ_PROTOCOL_VERSION: u8 = 2;
 
 /// DayZ DLC bit → name (S-12 `dlc.go`).
-pub const DAYZ_DLC: [(u16, &str); 4] = [(0x1, "Livonia"), (0x2, "Frost Line"), (0x4, "Badlands"), (0x8, "Survivor GameZ")];
+pub const DAYZ_DLC: [(u16, &str); 4] = [
+    (0x1, "Livonia"),
+    (0x2, "Frost Line"),
+    (0x4, "Badlands"),
+    (0x8, "Survivor GameZ"),
+];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -153,7 +158,10 @@ pub fn decode_dayz(p: &[u8]) -> A2sResult<DayzRules> {
     for bit in 0..16u16 {
         let mask = 1u16 << bit;
         if dlc_flags & mask != 0 {
-            let name = DAYZ_DLC.iter().find(|(m, _)| *m == mask).map_or("Unknown DLC", |(_, n)| n);
+            let name = DAYZ_DLC
+                .iter()
+                .find(|(m, _)| *m == mask)
+                .map_or("Unknown DLC", |(_, n)| n);
             dlc.push(Dlc {
                 bit: mask,
                 name,
@@ -206,17 +214,29 @@ mod tests {
 
     #[test]
     fn unescape_table() {
-        assert_eq!(unescape(&[0x41, 0x01, 0x01, 0x01, 0x02, 0x01, 0x03, 0x42, 0x01]), vec![0x41, 0x01, 0x00, 0xFF, 0x42, 0x01]);
-        assert_eq!(unescape(&[0x01, 0x07]), vec![0x01, 0x07], "unknown escape passes through");
+        assert_eq!(
+            unescape(&[0x41, 0x01, 0x01, 0x01, 0x02, 0x01, 0x03, 0x42, 0x01]),
+            vec![0x41, 0x01, 0x00, 0xFF, 0x42, 0x01]
+        );
+        assert_eq!(
+            unescape(&[0x01, 0x07]),
+            vec![0x01, 0x07],
+            "unknown escape passes through"
+        );
     }
 
     #[test]
     fn decodes_live_fixture_byte_for_byte() {
-        let Datagram::Single(payload) = classify(WILDLANDZ).unwrap() else { panic!("single") };
+        let Datagram::Single(payload) = classify(WILDLANDZ).unwrap() else {
+            panic!("single")
+        };
         let rules = parse(payload).unwrap();
         assert_eq!(rules.rule_count, 13);
         assert_eq!(rules.fragment_count, 4);
-        assert_eq!(rules.plain.get("island").map(String::as_str), Some("GreenCounty"));
+        assert_eq!(
+            rules.plain.get("island").map(String::as_str),
+            Some("GreenCounty")
+        );
         assert_eq!(rules.plain.get("platform").map(String::as_str), Some("win"));
         assert_eq!(rules.plain_u32("requiredVersion"), Some(129));
         assert_eq!(rules.plain.len(), 9);
@@ -247,7 +267,11 @@ mod tests {
                 2_128_098_372
             ]
         );
-        let cf = d.mods.iter().find(|m| m.workshop_id == 1_559_212_036).unwrap();
+        let cf = d
+            .mods
+            .iter()
+            .find(|m| m.workshop_id == 1_559_212_036)
+            .unwrap();
         assert_eq!(cf.name, "Community Framework");
         assert_eq!(cf.hash, 0x68AF_C6C1);
         assert_eq!(cf.id_len, 4);
@@ -263,8 +287,14 @@ mod tests {
 
     #[test]
     fn decodes_single_datagram_with_121_mods() {
-        assert_eq!(KINGOFGAMES.len(), 4587, "DayZ answers in one datagram well above 1400 bytes (D-033)");
-        let Datagram::Single(payload) = classify(KINGOFGAMES).unwrap() else { panic!("single") };
+        assert_eq!(
+            KINGOFGAMES.len(),
+            4587,
+            "DayZ answers in one datagram well above 1400 bytes (D-033)"
+        );
+        let Datagram::Single(payload) = classify(KINGOFGAMES).unwrap() else {
+            panic!("single")
+        };
         let r = parse(payload).unwrap();
         assert_eq!(r.rule_count, 43);
         assert_eq!(r.fragment_count, 34);
@@ -274,19 +304,28 @@ mod tests {
         assert_eq!(d.mods[0].name, "GF_Barrels");
         assert_eq!(d.mods[0].workshop_id, 3_023_834_511);
         assert_eq!(d.mods[120].workshop_id, 1_559_212_036);
-        assert_eq!(d.mods[120].hash, 0x68AF_C6C1, "same CF hash as the WILDLANDZ capture: it is a content hash (D-035)");
+        assert_eq!(
+            d.mods[120].hash, 0x68AF_C6C1,
+            "same CF hash as the WILDLANDZ capture: it is a content hash (D-035)"
+        );
         assert!(d.mods.iter().all(|m| m.id_len == 4));
         assert_eq!(d.signatures.len(), 95);
         assert_eq!(d.signatures[0], "ADM");
         assert_eq!(d.signatures[94], "Zenarchist");
-        assert_eq!(d.description.as_deref(), Some(""), "empty description is still length-prefixed");
+        assert_eq!(
+            d.description.as_deref(),
+            Some(""),
+            "empty description is still length-prefixed"
+        );
         assert_eq!(d.trailing, 0);
     }
 
     #[test]
     fn decodes_single_datagram_with_105_mods_and_197_keys() {
         assert_eq!(VOLATILE.len(), 5309);
-        let Datagram::Single(payload) = classify(VOLATILE).unwrap() else { panic!("single") };
+        let Datagram::Single(payload) = classify(VOLATILE).unwrap() else {
+            panic!("single")
+        };
         let r = parse(payload).unwrap();
         assert_eq!(r.rule_count, 49);
         assert_eq!(r.fragment_count, 40);
@@ -297,12 +336,19 @@ mod tests {
         assert_eq!(d.signatures.len(), 197);
         assert_eq!(d.signatures[0], "28MLRPMusic");
         assert_eq!(d.signatures[196], "zmg_psac");
-        assert!(d.description.as_deref().unwrap().starts_with("Survival at its Finest"));
+        assert!(d
+            .description
+            .as_deref()
+            .unwrap()
+            .starts_with("Survival at its Finest"));
         assert_eq!(d.trailing, 0);
     }
 
     #[test]
     fn rejects_wrong_version() {
-        assert!(matches!(decode_dayz(&[3, 0, 0, 0, 0]), Err(A2sError::Malformed("dayz protocol version"))));
+        assert!(matches!(
+            decode_dayz(&[3, 0, 0, 0, 0]),
+            Err(A2sError::Malformed("dayz protocol version"))
+        ));
     }
 }

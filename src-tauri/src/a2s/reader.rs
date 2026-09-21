@@ -27,7 +27,10 @@ impl<'a> Reader<'a> {
 
     pub fn bytes(&mut self, n: usize) -> A2sResult<&'a [u8]> {
         if self.remaining() < n {
-            return Err(A2sError::Truncated { need: n, at: self.pos });
+            return Err(A2sError::Truncated {
+                need: n,
+                at: self.pos,
+            });
         }
         let s = &self.buf[self.pos..self.pos + n];
         self.pos += n;
@@ -54,7 +57,9 @@ impl<'a> Reader<'a> {
 
     pub fn u64(&mut self) -> A2sResult<u64> {
         let b = self.bytes(8)?;
-        Ok(u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
+        Ok(u64::from_le_bytes([
+            b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+        ]))
     }
 
     pub fn f32(&mut self) -> A2sResult<f32> {
@@ -76,7 +81,10 @@ impl<'a> Reader<'a> {
         let end = rest
             .iter()
             .position(|&b| b == 0)
-            .ok_or(A2sError::Truncated { need: 1, at: self.buf.len() })?;
+            .ok_or(A2sError::Truncated {
+                need: 1,
+                at: self.buf.len(),
+            })?;
         let s = &rest[..end];
         self.pos += end + 1;
         Ok(s)
@@ -105,7 +113,10 @@ mod tests {
         assert_eq!(r.cstr().unwrap(), "hi");
         assert_eq!(r.u32().unwrap(), 0x1234_5678);
         assert!(r.is_empty());
-        assert!(matches!(r.u8(), Err(A2sError::Truncated { need: 1, at: 10 })));
+        assert!(matches!(
+            r.u8(),
+            Err(A2sError::Truncated { need: 1, at: 10 })
+        ));
     }
 
     #[test]

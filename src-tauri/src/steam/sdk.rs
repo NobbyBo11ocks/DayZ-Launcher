@@ -18,7 +18,10 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use steamworks::{Client, GameServerItem, ItemState, MatchmakingServers, PublishedFileId, ServerListCallbacks, ServerListRequest, ServerResponse, UGC};
+use steamworks::{
+    Client, GameServerItem, ItemState, MatchmakingServers, PublishedFileId, ServerListCallbacks,
+    ServerListRequest, ServerResponse, UGC,
+};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::a2s::DayzTags;
@@ -72,7 +75,10 @@ pub fn full_partitions() -> Vec<Filters> {
     let flag = |k: &str| (k.to_string(), "1".to_string());
     let mut parts = default_partitions();
     for map in EMPTY_PARTITION_MAPS {
-        parts.push(HashMap::from([flag("noplayers"), ("map".to_string(), map.to_string())]));
+        parts.push(HashMap::from([
+            flag("noplayers"),
+            ("map".to_string(), map.to_string()),
+        ]));
     }
     parts.push(HashMap::from([flag("noplayers")]));
     parts
@@ -214,8 +220,14 @@ pub enum SteamEvent {
 
 enum Cmd {
     Refresh(Vec<Filters>),
-    Sync { job: u64, ids: Vec<u64> },
-    ItemDetails { ids: Vec<u64>, reply: mpsc::Sender<Result<Vec<ItemDetails>, String>> },
+    Sync {
+        job: u64,
+        ids: Vec<u64>,
+    },
+    ItemDetails {
+        ids: Vec<u64>,
+        reply: mpsc::Sender<Result<Vec<ItemDetails>, String>>,
+    },
     Shutdown,
 }
 
@@ -272,7 +284,11 @@ impl SteamWorker {
     }
 
     pub fn status(&self) -> SteamStatus {
-        let mut s = self.status.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let mut s = self
+            .status
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         s.last_refresh_secs_ago = self
             .last_done
             .lock()
@@ -292,11 +308,20 @@ impl SteamWorker {
         if s.refreshing {
             return Ok(false);
         }
-        if !force && s.last_refresh_secs_ago.is_some_and(|ago| ago < MIN_REFRESH_INTERVAL.as_secs()) {
+        if !force
+            && s.last_refresh_secs_ago
+                .is_some_and(|ago| ago < MIN_REFRESH_INTERVAL.as_secs())
+        {
             return Ok(false);
         }
-        let parts = if partitions.is_empty() { default_partitions() } else { partitions };
-        self.cmd.send(Cmd::Refresh(parts)).map_err(|_| "steamworks thread has stopped".to_string())?;
+        let parts = if partitions.is_empty() {
+            default_partitions()
+        } else {
+            partitions
+        };
+        self.cmd
+            .send(Cmd::Refresh(parts))
+            .map_err(|_| "steamworks thread has stopped".to_string())?;
         Ok(true)
     }
 
@@ -310,7 +335,9 @@ impl SteamWorker {
         if ids.is_empty() {
             return Err("nothing to sync".into());
         }
-        self.cmd.send(Cmd::Sync { job, ids }).map_err(|_| "steamworks thread has stopped".to_string())
+        self.cmd
+            .send(Cmd::Sync { job, ids })
+            .map_err(|_| "steamworks thread has stopped".to_string())
     }
 
     /// Workshop titles and sizes, fetched in pages of 50. Blocking: call from a blocking task.
@@ -323,11 +350,14 @@ impl SteamWorker {
         for page in ids.chunks(DETAILS_PAGE) {
             let (reply, rx) = mpsc::channel();
             self.cmd
-                .send(Cmd::ItemDetails { ids: page.to_vec(), reply })
+                .send(Cmd::ItemDetails {
+                    ids: page.to_vec(),
+                    reply,
+                })
                 .map_err(|_| "steamworks thread has stopped".to_string())?;
-            let got = rx
-                .recv_timeout(Duration::from_secs(15))
-                .map_err(|_| "Steam did not answer the Workshop details query in 15 s".to_string())??;
+            let got = rx.recv_timeout(Duration::from_secs(15)).map_err(|_| {
+                "Steam did not answer the Workshop details query in 15 s".to_string()
+            })??;
             out.extend(got);
         }
         Ok(out)
@@ -450,7 +480,11 @@ fn item_progress(ugc: &UGC, id: u64, failed: Option<&String>) -> ItemProgress {
 }
 
 /// One scheduler tick for the active sync. Returns the completion event when finished.
-fn tick_sync(ugc: &UGC, sync: &mut ActiveSync, events: &UnboundedSender<SteamEvent>) -> Option<SyncDone> {
+fn tick_sync(
+    ugc: &UGC,
+    sync: &mut ActiveSync,
+    events: &UnboundedSender<SteamEvent>,
+) -> Option<SyncDone> {
     while let Ok((id, r)) = sync.sub_results.try_recv() {
         match r {
             Ok(()) => {
@@ -462,7 +496,11 @@ fn tick_sync(ugc: &UGC, sync: &mut ActiveSync, events: &UnboundedSender<SteamEve
             }
         }
     }
-    let items: Vec<ItemProgress> = sync.ids.iter().map(|&id| item_progress(ugc, id, sync.failed.get(&id))).collect();
+    let items: Vec<ItemProgress> = sync
+        .ids
+        .iter()
+        .map(|&id| item_progress(ugc, id, sync.failed.get(&id)))
+        .collect();
     for p in &items {
         if matches!(p.state.as_str(), "subscribed" | "needs_update") {
             let last = sync.kicked.get(&p.id).copied().unwrap_or(sync.started);
@@ -681,7 +719,8 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                             partitions: std::mem::take(&mut r.results),
                         };
                         let _ = events.send(SteamEvent::Done(done));
-                        *shared.last_done.lock().unwrap_or_else(|e| e.into_inner()) = Some(ServerRow::now_unix());
+                        *shared.last_done.lock().unwrap_or_else(|e| e.into_inner()) =
+                            Some(ServerRow::now_unix());
                         active = None;
                         shared.set_status(&events, |s| s.refreshing = false);
                     }
@@ -698,7 +737,12 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                         p.last_flush = Instant::now();
                     }
                     if let Some(response) = finished {
-                        let total = p.req.lock().map(|q| q.get_server_count().unwrap_or(0)).unwrap_or(0).max(0) as usize;
+                        let total = p
+                            .req
+                            .lock()
+                            .map(|q| q.get_server_count().unwrap_or(0))
+                            .unwrap_or(0)
+                            .max(0) as usize;
                         if let Ok(mut q) = p.req.lock() {
                             let _ = q.release();
                         }
@@ -731,7 +775,11 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
             }
         }
 
-        std::thread::sleep(if active.is_some() || sync.is_some() { TICK_ACTIVE } else { TICK_IDLE });
+        std::thread::sleep(if active.is_some() || sync.is_some() {
+            TICK_ACTIVE
+        } else {
+            TICK_IDLE
+        });
     }
 }
 
@@ -743,11 +791,19 @@ fn start_partition(mms: &MatchmakingServers, filters: Filters) -> Result<ActiveP
     let done: Rc<Cell<Option<ServerResponse>>> = Rc::new(Cell::new(None));
 
     let steam_empty = steam_empty_for(&filters);
-    let (rows_cb, responded_cb, failed_cb, inflated_cb, done_cb) =
-        (Rc::clone(&rows), Rc::clone(&responded), Rc::clone(&failed), Rc::clone(&inflated), Rc::clone(&done));
+    let (rows_cb, responded_cb, failed_cb, inflated_cb, done_cb) = (
+        Rc::clone(&rows),
+        Rc::clone(&responded),
+        Rc::clone(&failed),
+        Rc::clone(&inflated),
+        Rc::clone(&done),
+    );
     let callbacks = ServerListCallbacks::new(
         Box::new(move |list: Arc<Mutex<ServerListRequest>>, index: i32| {
-            let item = list.lock().ok().and_then(|q| q.get_server_details(index).ok());
+            let item = list
+                .lock()
+                .ok()
+                .and_then(|q| q.get_server_details(index).ok());
             if let Some(item) = item {
                 responded_cb.set(responded_cb.get() + 1);
                 let row = row_from(item, steam_empty);
@@ -760,12 +816,17 @@ fn start_partition(mms: &MatchmakingServers, filters: Filters) -> Result<ActiveP
         Box::new(move |_list: Arc<Mutex<ServerListRequest>>, _index: i32| {
             failed_cb.set(failed_cb.get() + 1);
         }),
-        Box::new(move |_list: Arc<Mutex<ServerListRequest>>, response: ServerResponse| {
-            done_cb.set(Some(response));
-        }),
+        Box::new(
+            move |_list: Arc<Mutex<ServerListRequest>>, response: ServerResponse| {
+                done_cb.set(Some(response));
+            },
+        ),
     );
 
-    let borrowed: HashMap<&str, &str> = filters.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+    let borrowed: HashMap<&str, &str> = filters
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
     let req = mms
         .internet_server_list(DAYZ_APP_ID, &borrowed, callbacks)
         .map_err(|()| "server list filter key or value exceeds 255 bytes".to_string())?;
@@ -827,7 +888,9 @@ mod tests {
         assert_eq!(steam_empty_for(&p[0]), Some(false));
         assert_eq!(p[1].get("map").map(String::as_str), Some("chernarusplus"));
         assert_eq!(steam_empty_for(&p[1]), Some(true));
-        assert!(p.last().unwrap().contains_key("noplayers") && !p.last().unwrap().contains_key("map"));
+        assert!(
+            p.last().unwrap().contains_key("noplayers") && !p.last().unwrap().contains_key("map")
+        );
         assert_eq!(steam_empty_for(&HashMap::new()), None);
     }
 }

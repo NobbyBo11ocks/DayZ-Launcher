@@ -57,7 +57,9 @@ mod tests {
 
     #[test]
     fn decodes_live_fixture() {
-        let Datagram::Single(payload) = classify(WILDLANDZ).unwrap() else { panic!("single") };
+        let Datagram::Single(payload) = classify(WILDLANDZ).unwrap() else {
+            panic!("single")
+        };
         let p = parse(payload).unwrap();
         assert_eq!(p.players.len() as u8, p.count);
     }
@@ -70,11 +72,16 @@ mod tests {
     #[test]
     fn populated_servers_return_anonymous_entries_with_durations() {
         for (bytes, expected) in [(KINGOFGAMES, 2u8), (VOLATILE, 4u8)] {
-            let Datagram::Single(payload) = classify(bytes).unwrap() else { panic!("single") };
+            let Datagram::Single(payload) = classify(bytes).unwrap() else {
+                panic!("single")
+            };
             let p = parse(payload).unwrap();
             assert_eq!(p.count, expected);
             assert_eq!(p.players.len(), expected as usize);
-            assert!(p.players.iter().all(|x| x.name.is_empty() && x.score == 0 && x.duration_secs > 60.0));
+            assert!(p
+                .players
+                .iter()
+                .all(|x| x.name.is_empty() && x.score == 0 && x.duration_secs > 60.0));
         }
     }
 

@@ -82,7 +82,10 @@ pub struct DiagnosticsExport {
 /// Writes a support report (app info, Steam status, settings, full diagnostics)
 /// as JSON into the app's local data folder and returns its path.
 #[tauri::command]
-pub async fn diagnostics_export(app: AppHandle, state: State<'_, AppState>) -> AppResult<DiagnosticsExport> {
+pub async fn diagnostics_export(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<DiagnosticsExport> {
     let dir = app
         .path()
         .app_local_data_dir()
@@ -91,10 +94,14 @@ pub async fn diagnostics_export(app: AppHandle, state: State<'_, AppState>) -> A
     let settings = state.settings.get();
     let last_refresh = {
         let c = Arc::clone(&state.cache);
-        tauri::async_runtime::spawn_blocking(move || c.lock().ok().and_then(|c| c.get_meta("last_refresh").ok().flatten()))
-            .await
-            .ok()
-            .flatten()
+        tauri::async_runtime::spawn_blocking(move || {
+            c.lock()
+                .ok()
+                .and_then(|c| c.get_meta("last_refresh").ok().flatten())
+        })
+        .await
+        .ok()
+        .flatten()
     };
     let diag = tauri::async_runtime::spawn_blocking(diagnostics::collect)
         .await
@@ -107,7 +114,8 @@ pub async fn diagnostics_export(app: AppHandle, state: State<'_, AppState>) -> A
         "lastRefresh": last_refresh,
         "diagnostics": diag,
     });
-    let json = serde_json::to_vec_pretty(&report).map_err(|e| AppError::Internal(format!("json: {e}")))?;
+    let json =
+        serde_json::to_vec_pretty(&report).map_err(|e| AppError::Internal(format!("json: {e}")))?;
     let path = dir.join(format!("diagnostics-{}.json", ServerRow::now_unix()));
     std::fs::create_dir_all(&dir).map_err(|e| AppError::io(&dir, e))?;
     std::fs::write(&path, &json).map_err(|e| AppError::io(&path, e))?;
@@ -145,14 +153,20 @@ pub fn settings_get(state: State<'_, AppState>) -> Settings {
 /// Replaces the launch options only; UI preferences are written through `ui_prefs_set`.
 #[tauri::command]
 pub fn settings_set(state: State<'_, AppState>, settings: Settings) -> AppResult<()> {
-    state.settings.set_launch(settings).map_err(|e| AppError::Internal(format!("settings: {e}")))
+    state
+        .settings
+        .set_launch(settings)
+        .map_err(|e| AppError::Internal(format!("settings: {e}")))
 }
 
 /// Merges a partial UI-preferences object (theme, accent, filters, onboarded,
 /// lastUpdateCheckMs) into the settings file and returns the stored result (D-070).
 #[tauri::command]
 pub fn ui_prefs_set(state: State<'_, AppState>, patch: serde_json::Value) -> AppResult<UiPrefs> {
-    state.settings.patch_ui(patch).map_err(|e| AppError::Internal(format!("ui prefs: {e}")))
+    state
+        .settings
+        .patch_ui(patch)
+        .map_err(|e| AppError::Internal(format!("ui prefs: {e}")))
 }
 
 #[derive(Serialize)]
@@ -168,9 +182,17 @@ pub struct CachedServers {
 pub async fn servers_cached(state: State<'_, AppState>) -> AppResult<CachedServers> {
     let cache = Arc::clone(&state.cache);
     let out = tauri::async_runtime::spawn_blocking(move || {
-        let c = cache.lock().map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
-        let rows = c.load_all().map_err(|e| AppError::Internal(format!("cache: {e}")))?;
-        let last_refresh = c.get_meta("last_refresh").ok().flatten().and_then(|v| v.parse().ok());
+        let c = cache
+            .lock()
+            .map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
+        let rows = c
+            .load_all()
+            .map_err(|e| AppError::Internal(format!("cache: {e}")))?;
+        let last_refresh = c
+            .get_meta("last_refresh")
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse().ok());
         Ok::<_, AppError>(CachedServers { rows, last_refresh })
     })
     .await
@@ -201,7 +223,10 @@ pub fn servers_refresh(
         _ if full.unwrap_or(false) => crate::steam::sdk::full_partitions(),
         _ => Vec::new(),
     };
-    state.steam.refresh(parts, force.unwrap_or(false)).map_err(AppError::Internal)
+    state
+        .steam
+        .refresh(parts, force.unwrap_or(false))
+        .map_err(AppError::Internal)
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -220,12 +245,19 @@ pub struct VerifySummary {
 /// chunk and persists. With `announce`, also emits `servers:verify-done`
 /// (VerifySummary); only the automatic post-refresh pass announces, so on-demand
 /// checks of visible rows never masquerade as the full pass.
-pub async fn run_verification(app: AppHandle, cache: Arc<Mutex<Cache>>, client: Client, targets: Vec<Target>, announce: bool) -> VerifySummary {
+pub async fn run_verification(
+    app: AppHandle,
+    cache: Arc<Mutex<Cache>>,
+    client: Client,
+    targets: Vec<Target>,
+    announce: bool,
+) -> VerifySummary {
     let t0 = Instant::now();
     // The automatic pass (announce) relies on Steam's fresh INFO and sends PLAYER only;
     // on-demand checks of visible rows also refresh ping and clock.
     let with_info = !announce;
-    let by_id: HashMap<String, Target> = targets.iter().map(|t| (t.id.clone(), t.clone())).collect();
+    let by_id: HashMap<String, Target> =
+        targets.iter().map(|t| (t.id.clone(), t.clone())).collect();
     let mut latest: HashMap<String, Verdict> = HashMap::with_capacity(targets.len());
     let mut offline: Vec<Target> = Vec::new();
     for chunk in targets.chunks(500) {
@@ -242,7 +274,9 @@ pub async fn run_verification(app: AppHandle, cache: Arc<Mutex<Cache>>, client: 
     // Second chance for targets that did not answer: a longer timeout, INFO included,
     // so a server that is merely slow or drops PLAYER is not reported as down.
     if !offline.is_empty() {
-        let patient = client.clone().with_timeout(std::time::Duration::from_millis(2500));
+        let patient = client
+            .clone()
+            .with_timeout(std::time::Duration::from_millis(2500));
         let results = verify::verify_many(&patient, offline, true).await;
         publish(&app, &cache, &mut latest, results).await;
     }
@@ -281,7 +315,12 @@ pub async fn run_verification(app: AppHandle, cache: Arc<Mutex<Cache>>, client: 
 /// Emits and persists one batch of verification results, recording the latest
 /// verdict per server so a retry supersedes an earlier "offline". Verified
 /// head-counts also become population samples (M6 sparkline).
-async fn publish(app: &AppHandle, cache: &Arc<Mutex<Cache>>, latest: &mut HashMap<String, Verdict>, results: Vec<Verification>) {
+async fn publish(
+    app: &AppHandle,
+    cache: &Arc<Mutex<Cache>>,
+    latest: &mut HashMap<String, Verdict>,
+    results: Vec<Verification>,
+) {
     for v in &results {
         latest.insert(v.id.clone(), v.verdict);
     }
@@ -312,11 +351,17 @@ async fn publish(app: &AppHandle, cache: &Arc<Mutex<Cache>>, latest: &mut HashMa
 
 /// On-demand verification of specific servers (rows on screen, favourites).
 #[tauri::command]
-pub async fn servers_verify(app: AppHandle, state: State<'_, AppState>, ids: Vec<String>) -> AppResult<VerifySummary> {
+pub async fn servers_verify(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+) -> AppResult<VerifySummary> {
     let cache = Arc::clone(&state.cache);
     let lookup = Arc::clone(&cache);
     let targets: Vec<Target> = tauri::async_runtime::spawn_blocking(move || {
-        let c = lookup.lock().map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
+        let c = lookup
+            .lock()
+            .map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
         Ok::<_, AppError>(
             ids.iter()
                 .filter_map(|id| c.get(id).ok().flatten())
@@ -343,14 +388,26 @@ pub struct ServerDetails {
 
 /// Live INFO + RULES + PLAYER for one server (details pane, join flow).
 #[tauri::command]
-pub async fn server_details(app: AppHandle, state: State<'_, AppState>, id: String) -> AppResult<ServerDetails> {
-    let addr: SocketAddr = id.parse().map_err(|_| AppError::Internal(format!("bad server id {id}")))?;
+pub async fn server_details(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<ServerDetails> {
+    let addr: SocketAddr = id
+        .parse()
+        .map_err(|_| AppError::Internal(format!("bad server id {id}")))?;
     let client = state.a2s.clone();
     let cache = Arc::clone(&state.cache);
     let (reported, max_players) = cached_counts(&cache, &id).await;
 
-    let (info, rules, players) = tokio::join!(client.info(addr), client.rules(addr), client.players(addr));
-    let (verdict, verified, reason) = verify::judge(info.as_ref().ok().map(|r| &r.value), players.as_ref().map(|r| &r.value), reported, max_players);
+    let (info, rules, players) =
+        tokio::join!(client.info(addr), client.rules(addr), client.players(addr));
+    let (verdict, verified, reason) = verify::judge(
+        info.as_ref().ok().map(|r| &r.value),
+        players.as_ref().map(|r| &r.value),
+        reported,
+        max_players,
+    );
     let (reported, max_players) = info
         .as_ref()
         .ok()
@@ -391,14 +448,19 @@ pub async fn server_details(app: AppHandle, state: State<'_, AppState>, id: Stri
 async fn cached_row(cache: &Arc<Mutex<Cache>>, id: &str) -> Option<ServerRow> {
     let c = Arc::clone(cache);
     let key = id.to_string();
-    tauri::async_runtime::spawn_blocking(move || c.lock().ok().and_then(|c| c.get(&key).ok().flatten()))
-        .await
-        .ok()
-        .flatten()
+    tauri::async_runtime::spawn_blocking(move || {
+        c.lock().ok().and_then(|c| c.get(&key).ok().flatten())
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 async fn cached_counts(cache: &Arc<Mutex<Cache>>, id: &str) -> (i32, i32) {
-    cached_row(cache, id).await.map(|r| (r.players, r.max_players)).unwrap_or((0, 0))
+    cached_row(cache, id)
+        .await
+        .map(|r| (r.players, r.max_players))
+        .unwrap_or((0, 0))
 }
 
 // ---------------------------------------------------------------------------
@@ -449,7 +511,9 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
     let row = cached_row(&state.cache, &id)
         .await
         .ok_or_else(|| AppError::Internal(format!("unknown server {id}")))?;
-    let addr: SocketAddr = id.parse().map_err(|_| AppError::Internal(format!("bad server id {id}")))?;
+    let addr: SocketAddr = id
+        .parse()
+        .map_err(|_| AppError::Internal(format!("bad server id {id}")))?;
     let rules = state.a2s.rules(addr).await;
     let diag = tauri::async_runtime::spawn_blocking(diagnostics::collect)
         .await
@@ -457,16 +521,33 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
 
     let mut warnings = Vec::new();
     let required: Vec<(u64, String)> = match &rules {
-        Ok(r) => r.value.dayz.as_ref().map(|d| d.mods.iter().map(|m| (m.workshop_id, m.name.clone())).collect()).unwrap_or_default(),
+        Ok(r) => r
+            .value
+            .dayz
+            .as_ref()
+            .map(|d| {
+                d.mods
+                    .iter()
+                    .map(|m| (m.workshop_id, m.name.clone()))
+                    .collect()
+            })
+            .unwrap_or_default(),
         Err(e) => {
-            warnings.push(format!("Could not read the server's mod list ({e}); launching without mods."));
+            warnings.push(format!(
+                "Could not read the server's mod list ({e}); launching without mods."
+            ));
             Vec::new()
         }
     };
     let inventory: HashMap<u64, (Option<String>, bool)> = diag
         .workshop
         .as_ref()
-        .map(|w| w.items.iter().map(|i| (i.id, (i.folder.clone(), i.needs_update))).collect())
+        .map(|w| {
+            w.items
+                .iter()
+                .map(|i| (i.id, (i.folder.clone(), i.needs_update)))
+                .collect()
+        })
         .unwrap_or_default();
 
     let mut mods: Vec<ModPlanItem> = required
@@ -493,7 +574,8 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
             let cmd = state.steam.clone_handle();
             match tauri::async_runtime::spawn_blocking(move || cmd.item_details(&ids)).await {
                 Ok(Ok(details)) => {
-                    let by_id: HashMap<u64, ItemDetails> = details.into_iter().map(|d| (d.id, d)).collect();
+                    let by_id: HashMap<u64, ItemDetails> =
+                        details.into_iter().map(|d| (d.id, d)).collect();
                     for m in &mut mods {
                         if let Some(d) = by_id.get(&m.id) {
                             m.title = Some(d.title.clone());
@@ -508,8 +590,15 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
     }
 
     let missing = mods.iter().filter(|m| !m.installed).count();
-    let updates = mods.iter().filter(|m| m.installed && m.needs_update).count();
-    let download_bytes = mods.iter().filter(|m| !m.installed || m.needs_update).filter_map(|m| m.size).sum();
+    let updates = mods
+        .iter()
+        .filter(|m| m.installed && m.needs_update)
+        .count();
+    let download_bytes = mods
+        .iter()
+        .filter(|m| !m.installed || m.needs_update)
+        .filter_map(|m| m.size)
+        .sum();
     let local_version = diag.dayz.as_ref().and_then(|g| g.game_version.clone());
     let version_mismatch = local_version.as_deref().is_some_and(|v| v != row.version);
     if version_mismatch {
@@ -565,14 +654,31 @@ pub fn mods_sync(state: State<'_, AppState>, job: u64, ids: Vec<u64>) -> AppResu
 /// Builds junctions and the argument line, then starts `DayZ_BE.exe`. Emits
 /// `launch:started` (Launched) now and `launch:exited` ({pid, code}) later.
 #[tauri::command]
-pub async fn launch_game(app: AppHandle, state: State<'_, AppState>, id: String, password: Option<String>) -> AppResult<Launched> {
+pub async fn launch_game(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    password: Option<String>,
+) -> AppResult<Launched> {
     let row = cached_row(&state.cache, &id)
         .await
         .ok_or_else(|| AppError::Internal(format!("unknown server {id}")))?;
-    let addr: SocketAddr = id.parse().map_err(|_| AppError::Internal(format!("bad server id {id}")))?;
+    let addr: SocketAddr = id
+        .parse()
+        .map_err(|_| AppError::Internal(format!("bad server id {id}")))?;
     let rules = state.a2s.rules(addr).await;
     let required: Vec<(u64, String)> = match &rules {
-        Ok(r) => r.value.dayz.as_ref().map(|d| d.mods.iter().map(|m| (m.workshop_id, m.name.clone())).collect()).unwrap_or_default(),
+        Ok(r) => r
+            .value
+            .dayz
+            .as_ref()
+            .map(|d| {
+                d.mods
+                    .iter()
+                    .map(|m| (m.workshop_id, m.name.clone()))
+                    .collect()
+            })
+            .unwrap_or_default(),
         Err(_) => Vec::new(),
     };
     let settings = state.settings.get();
@@ -585,19 +691,28 @@ pub async fn launch_game(app: AppHandle, state: State<'_, AppState>, id: String,
         if !steam.running {
             return Err(AppError::Internal("Steam is not running".into()));
         }
-        let path = steam.path.ok_or_else(|| AppError::Internal("Steam is not installed".into()))?;
+        let path = steam
+            .path
+            .ok_or_else(|| AppError::Internal("Steam is not installed".into()))?;
         let libs = locate::libraries(&path)?;
-        let game = locate::find_dayz(&libs)?.ok_or_else(|| AppError::Internal("DayZ is not installed".into()))?;
+        let game = locate::find_dayz(&libs)?
+            .ok_or_else(|| AppError::Internal("DayZ is not installed".into()))?;
         let ws = workshop::read(&game.library.path)?;
         let by_id: HashMap<u64, (PathBuf, Option<String>)> = ws
-            .map(|w| w.items.into_iter().filter_map(|i| i.folder.map(|f| (i.id, (f, i.meta_name)))).collect())
+            .map(|w| {
+                w.items
+                    .into_iter()
+                    .filter_map(|i| i.folder.map(|f| (i.id, (f, i.meta_name))))
+                    .collect()
+            })
             .unwrap_or_default();
         let mut items = Vec::with_capacity(required.len());
         for (id, name) in &required {
-            let (folder, meta) = by_id
-                .get(id)
-                .cloned()
-                .ok_or_else(|| AppError::Internal(format!("mod {name} ({id}) is not installed; sync mods first")))?;
+            let (folder, meta) = by_id.get(id).cloned().ok_or_else(|| {
+                AppError::Internal(format!(
+                    "mod {name} ({id}) is not installed; sync mods first"
+                ))
+            })?;
             items.push((*id, folder, meta));
         }
         let links = launch::ensure_junctions(&game.folder, &items)?;
@@ -606,7 +721,11 @@ pub async fn launch_game(app: AppHandle, state: State<'_, AppState>, id: String,
             ip: row.ip.clone(),
             game_port: row.game_port,
             password,
-            profile_name: Some(if settings.profile_name.trim().is_empty() { persona.unwrap_or_default() } else { settings.profile_name.clone() }),
+            profile_name: Some(if settings.profile_name.trim().is_empty() {
+                persona.unwrap_or_default()
+            } else {
+                settings.profile_name.clone()
+            }),
             skip_intro: settings.skip_intro,
             no_splash: settings.no_splash,
             no_pause: settings.no_pause,
@@ -631,7 +750,13 @@ pub async fn launch_game(app: AppHandle, state: State<'_, AppState>, id: String,
         .await;
     }
     #[cfg(debug_assertions)]
-    eprintln!("[launch] pid {} with {} mod junction(s) ({} created): {}", launched.pid, links.len(), links.iter().filter(|l| l.created).count(), launched.command_line);
+    eprintln!(
+        "[launch] pid {} with {} mod junction(s) ({} created): {}",
+        launched.pid,
+        links.len(),
+        links.iter().filter(|l| l.created).count(),
+        launched.command_line
+    );
     let _ = app.emit("launch:started", &launched);
     let pid = launched.pid;
     tauri::async_runtime::spawn_blocking(move || {
@@ -665,9 +790,16 @@ pub struct Favourite {
 pub async fn favourites_list(state: State<'_, AppState>) -> AppResult<Vec<Favourite>> {
     let c = Arc::clone(&state.cache);
     tauri::async_runtime::spawn_blocking(move || {
-        let c = c.lock().map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
-        let list = c.favourites().map_err(|e| AppError::Internal(format!("cache: {e}")))?;
-        Ok(list.into_iter().map(|(id, added_at)| Favourite { id, added_at }).collect())
+        let c = c
+            .lock()
+            .map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
+        let list = c
+            .favourites()
+            .map_err(|e| AppError::Internal(format!("cache: {e}")))?;
+        Ok(list
+            .into_iter()
+            .map(|(id, added_at)| Favourite { id, added_at })
+            .collect())
     })
     .await
     .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?
@@ -677,20 +809,29 @@ pub async fn favourites_list(state: State<'_, AppState>) -> AppResult<Vec<Favour
 pub async fn favourite_set(state: State<'_, AppState>, id: String, on: bool) -> AppResult<()> {
     let c = Arc::clone(&state.cache);
     tauri::async_runtime::spawn_blocking(move || {
-        let c = c.lock().map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
-        c.favourite_set(&id, on).map_err(|e| AppError::Internal(format!("cache: {e}")))
+        let c = c
+            .lock()
+            .map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
+        c.favourite_set(&id, on)
+            .map_err(|e| AppError::Internal(format!("cache: {e}")))
     })
     .await
     .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?
 }
 
 #[tauri::command]
-pub async fn history_list(state: State<'_, AppState>, limit: Option<usize>) -> AppResult<Vec<HistoryEntry>> {
+pub async fn history_list(
+    state: State<'_, AppState>,
+    limit: Option<usize>,
+) -> AppResult<Vec<HistoryEntry>> {
     let c = Arc::clone(&state.cache);
     let limit = limit.unwrap_or(50).min(500);
     tauri::async_runtime::spawn_blocking(move || {
-        let c = c.lock().map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
-        c.history(limit).map_err(|e| AppError::Internal(format!("cache: {e}")))
+        let c = c
+            .lock()
+            .map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
+        c.history(limit)
+            .map_err(|e| AppError::Internal(format!("cache: {e}")))
     })
     .await
     .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?
@@ -698,12 +839,19 @@ pub async fn history_list(state: State<'_, AppState>, limit: Option<usize>) -> A
 
 /// Verified head-count samples for one server over the last `hours` (default 72).
 #[tauri::command]
-pub async fn population_history(state: State<'_, AppState>, id: String, hours: Option<u32>) -> AppResult<Vec<PopulationSample>> {
+pub async fn population_history(
+    state: State<'_, AppState>,
+    id: String,
+    hours: Option<u32>,
+) -> AppResult<Vec<PopulationSample>> {
     let c = Arc::clone(&state.cache);
     let since = ServerRow::now_unix() - hours.unwrap_or(72) as i64 * 3600;
     tauri::async_runtime::spawn_blocking(move || {
-        let c = c.lock().map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
-        c.population(&id, since).map_err(|e| AppError::Internal(format!("cache: {e}")))
+        let c = c
+            .lock()
+            .map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
+        c.population(&id, since)
+            .map_err(|e| AppError::Internal(format!("cache: {e}")))
     })
     .await
     .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?
@@ -732,8 +880,16 @@ fn candidate_query_ports(game_port: u16) -> Vec<u16> {
 
 /// INFO-probes `ports` in order; with `expect_game_port`, only a reply whose EDF
 /// game port matches is accepted.
-async fn probe_server(client: &Client, ip: std::net::IpAddr, ports: &[u16], expect_game_port: Option<u16>) -> Option<ServerRow> {
-    let probe = client.clone().with_timeout(std::time::Duration::from_millis(1500)).with_retries(0);
+async fn probe_server(
+    client: &Client,
+    ip: std::net::IpAddr,
+    ports: &[u16],
+    expect_game_port: Option<u16>,
+) -> Option<ServerRow> {
+    let probe = client
+        .clone()
+        .with_timeout(std::time::Duration::from_millis(1500))
+        .with_retries(0);
     for &qport in ports {
         let addr = SocketAddr::new(ip, qport);
         if let Ok(reply) = probe.info(addr).await {
@@ -745,7 +901,12 @@ async fn probe_server(client: &Client, ip: std::net::IpAddr, ports: &[u16], expe
                     continue; // a sibling server on the same host
                 }
             }
-            return Some(ServerRow::from_info(&ip.to_string(), qport, &reply.value, reply.rtt.as_millis() as u32));
+            return Some(ServerRow::from_info(
+                &ip.to_string(),
+                qport,
+                &reply.value,
+                reply.rtt.as_millis() as u32,
+            ));
         }
     }
     None
@@ -754,14 +915,24 @@ async fn probe_server(client: &Client, ip: std::net::IpAddr, ports: &[u16], expe
 /// Adds a server by `host:port` (game or query port, hostname allowed): probes
 /// A2S_INFO on likely query ports, stores the row, emits it as a batch, verifies it.
 #[tauri::command]
-pub async fn direct_connect(app: AppHandle, state: State<'_, AppState>, address: String) -> AppResult<ServerRow> {
+pub async fn direct_connect(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    address: String,
+) -> AppResult<ServerRow> {
     let text = address.trim().trim_start_matches("steam://connect/");
     let (host, port) = match text.rsplit_once(':') {
-        Some((h, p)) => (h.trim_matches(|c| c == '[' || c == ']'), p.parse::<u16>().map_err(|_| AppError::Internal(format!("bad port in {address}")))?),
+        Some((h, p)) => (
+            h.trim_matches(|c| c == '[' || c == ']'),
+            p.parse::<u16>()
+                .map_err(|_| AppError::Internal(format!("bad port in {address}")))?,
+        ),
         None => (text, 2302),
     };
     if host.is_empty() {
-        return Err(AppError::Internal("enter an address like 51.81.8.81:2402".into()));
+        return Err(AppError::Internal(
+            "enter an address like 51.81.8.81:2402".into(),
+        ));
     }
     let ip: std::net::IpAddr = match host.parse() {
         Ok(ip) => ip,
@@ -793,7 +964,13 @@ pub async fn direct_connect(app: AppHandle, state: State<'_, AppState>, address:
     .await;
     let _ = app.emit("servers:batch", &vec![row.clone()]);
     if let Some(t) = Target::from_row(&row) {
-        tauri::async_runtime::spawn(run_verification(app.clone(), Arc::clone(&state.cache), state.a2s.clone(), vec![t], false));
+        tauri::async_runtime::spawn(run_verification(
+            app.clone(),
+            Arc::clone(&state.cache),
+            state.a2s.clone(),
+            vec![t],
+            false,
+        ));
     }
     Ok(row)
 }
@@ -812,9 +989,14 @@ pub struct ImportResult {
 /// Imports the official launcher's favourites (docs/02 §7): probes each server,
 /// stores a row (live or from the XML), and marks it favourite.
 #[tauri::command]
-pub async fn import_official_favourites(app: AppHandle, state: State<'_, AppState>) -> AppResult<ImportResult> {
-    let path = crate::steam::official::favourites_path().ok_or_else(|| AppError::Internal("LOCALAPPDATA is not set".into()))?;
-    let entries = crate::steam::official::read_favourites(&path).map_err(|e| AppError::io(&path, e))?;
+pub async fn import_official_favourites(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<ImportResult> {
+    let path = crate::steam::official::favourites_path()
+        .ok_or_else(|| AppError::Internal("LOCALAPPDATA is not set".into()))?;
+    let entries =
+        crate::steam::official::read_favourites(&path).map_err(|e| AppError::io(&path, e))?;
     let mut result = ImportResult {
         total: entries.len(),
         path: path.to_string_lossy().into_owned(),
@@ -822,9 +1004,17 @@ pub async fn import_official_favourites(app: AppHandle, state: State<'_, AppStat
     };
     let existing: std::collections::HashSet<String> = {
         let c = Arc::clone(&state.cache);
-        tauri::async_runtime::spawn_blocking(move || c.lock().ok().and_then(|c| c.favourites().ok()).unwrap_or_default().into_iter().map(|(id, _)| id).collect())
-            .await
-            .unwrap_or_default()
+        tauri::async_runtime::spawn_blocking(move || {
+            c.lock()
+                .ok()
+                .and_then(|c| c.favourites().ok())
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect()
+        })
+        .await
+        .unwrap_or_default()
     };
     let mut new_rows = Vec::new();
     let mut targets = Vec::new();
@@ -888,7 +1078,13 @@ pub async fn import_official_favourites(app: AppHandle, state: State<'_, AppStat
         })
         .await;
         let _ = app.emit("servers:batch", &new_rows);
-        tauri::async_runtime::spawn(run_verification(app.clone(), Arc::clone(&state.cache), state.a2s.clone(), targets, false));
+        tauri::async_runtime::spawn(run_verification(
+            app.clone(),
+            Arc::clone(&state.cache),
+            state.a2s.clone(),
+            targets,
+            false,
+        ));
     }
     Ok(result)
 }

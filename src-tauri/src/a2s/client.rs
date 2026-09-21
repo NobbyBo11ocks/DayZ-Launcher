@@ -112,7 +112,10 @@ impl Client {
 
     /// INFO for many servers under the client's concurrency and rate bounds.
     /// Results come back in completion order.
-    pub async fn info_many(&self, addrs: impl IntoIterator<Item = SocketAddr>) -> Vec<(SocketAddr, A2sResult<Reply<Info>>)> {
+    pub async fn info_many(
+        &self,
+        addrs: impl IntoIterator<Item = SocketAddr>,
+    ) -> Vec<(SocketAddr, A2sResult<Reply<Info>>)> {
         let mut set = JoinSet::new();
         for addr in addrs {
             let c = self.clone();
@@ -141,7 +144,11 @@ impl Client {
     }
 
     async fn query(&self, addr: SocketAddr, kind: Kind) -> A2sResult<(Vec<u8>, Duration, u8)> {
-        let _permit = self.permits.acquire().await.map_err(|_| A2sError::Timeout)?;
+        let _permit = self
+            .permits
+            .acquire()
+            .await
+            .map_err(|_| A2sError::Timeout)?;
         let mut last = A2sError::Timeout;
         for _ in 0..=self.retries {
             match self.query_once(addr, kind).await {
@@ -154,7 +161,12 @@ impl Client {
     }
 
     async fn query_once(&self, addr: SocketAddr, kind: Kind) -> A2sResult<(Vec<u8>, Duration, u8)> {
-        let sock = UdpSocket::bind(if addr.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" }).await?;
+        let sock = UdpSocket::bind(if addr.is_ipv4() {
+            "0.0.0.0:0"
+        } else {
+            "[::]:0"
+        })
+        .await?;
         sock.connect(addr).await?;
         let mut challenge: Option<[u8; 4]> = None;
         let mut buf = vec![0u8; MAX_DATAGRAM];
@@ -176,7 +188,9 @@ impl Client {
                 }
                 let n = match timeout(remaining, sock.recv(&mut buf)).await {
                     Ok(Ok(n)) => n,
-                    Ok(Err(e)) if e.kind() == std::io::ErrorKind::ConnectionReset => return Err(A2sError::Unreachable),
+                    Ok(Err(e)) if e.kind() == std::io::ErrorKind::ConnectionReset => {
+                        return Err(A2sError::Unreachable)
+                    }
                     Ok(Err(e)) => return Err(e.into()),
                     Err(_) => return Err(A2sError::Timeout),
                 };
@@ -226,7 +240,10 @@ mod tests {
             c.pace().await;
         }
         let dt = t0.elapsed();
-        assert!(dt >= Duration::from_millis(90), "20 slots at 200/s should take ≥ 95 ms, took {dt:?}");
+        assert!(
+            dt >= Duration::from_millis(90),
+            "20 slots at 200/s should take ≥ 95 ms, took {dt:?}"
+        );
         let unpaced = Client::new(64).with_rate(0);
         let t1 = Instant::now();
         for _ in 0..20 {

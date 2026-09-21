@@ -39,7 +39,6 @@ impl Verdict {
             Verdict::Offline => "offline",
         }
     }
-
 }
 
 /// What to verify: cached identity plus the last reported numbers as fallback.
@@ -82,7 +81,12 @@ pub struct Verification {
 }
 
 /// Pure decision function; `info` is the fresh INFO if it answered.
-pub fn judge(info: Option<&Info>, players: Result<&Players, &A2sError>, fallback_reported: i32, fallback_max: i32) -> (Verdict, Option<i32>, String) {
+pub fn judge(
+    info: Option<&Info>,
+    players: Result<&Players, &A2sError>,
+    fallback_reported: i32,
+    fallback_max: i32,
+) -> (Verdict, Option<i32>, String) {
     let (reported, max) = info
         .map(|i| (i.players as i32, i.max_players as i32))
         .unwrap_or((fallback_reported, fallback_max));
@@ -92,15 +96,27 @@ pub fn judge(info: Option<&Info>, players: Result<&Players, &A2sError>, fallback
         Err(_) if info.is_none() => (Verdict::Offline, None, "no PLAYER reply".into()),
         Err(e) => {
             if reported > 0 {
-                (Verdict::Unverifiable, None, format!("INFO reports {reported} but PLAYER did not answer ({e})"))
+                (
+                    Verdict::Unverifiable,
+                    None,
+                    format!("INFO reports {reported} but PLAYER did not answer ({e})"),
+                )
             } else {
-                (Verdict::Verified, Some(0), "INFO reports 0 and PLAYER did not answer".into())
+                (
+                    Verdict::Verified,
+                    Some(0),
+                    "INFO reports 0 and PLAYER did not answer".into(),
+                )
             }
         }
         Ok(p) => {
             let v = p.players.len() as i32;
             if v >= 5 {
-                let distinct: HashSet<i64> = p.players.iter().map(|x| x.duration_secs.round() as i64).collect();
+                let distinct: HashSet<i64> = p
+                    .players
+                    .iter()
+                    .map(|x| x.duration_secs.round() as i64)
+                    .collect();
                 let all_young = p.players.iter().all(|x| x.duration_secs < 60.0);
                 let named = p.players.iter().any(|x| !x.name.is_empty());
                 if distinct.len() <= 2 || all_young || named {
@@ -113,9 +129,17 @@ pub fn judge(info: Option<&Info>, players: Result<&Players, &A2sError>, fallback
             }
             let diff = reported - v;
             if diff >= 5 || (max > 0 && diff * 5 >= max && diff > 0) {
-                (Verdict::Inflated, Some(v), format!("INFO {reported} vs PLAYER {v}"))
+                (
+                    Verdict::Inflated,
+                    Some(v),
+                    format!("INFO {reported} vs PLAYER {v}"),
+                )
             } else {
-                (Verdict::Verified, Some(v), format!("INFO {reported} vs PLAYER {v}"))
+                (
+                    Verdict::Verified,
+                    Some(v),
+                    format!("INFO {reported} vs PLAYER {v}"),
+                )
             }
         }
     }
@@ -125,7 +149,11 @@ pub fn judge(info: Option<&Info>, players: Result<&Players, &A2sError>, fallback
 /// `with_info` also refreshes INFO (ping, clock, reported count); the automatic
 /// post-refresh pass passes `false` because Steam just delivered fresh INFO and
 /// halving the datagrams keeps the burst small (D-047). Results are in completion order.
-pub async fn verify_many(client: &Client, targets: Vec<Target>, with_info: bool) -> Vec<Verification> {
+pub async fn verify_many(
+    client: &Client,
+    targets: Vec<Target>,
+    with_info: bool,
+) -> Vec<Verification> {
     let mut set = JoinSet::new();
     for t in targets {
         let c = client.clone();
@@ -141,9 +169,18 @@ pub async fn verify_many(client: &Client, targets: Vec<Target>, with_info: bool)
 }
 
 pub async fn verify_one(client: &Client, t: Target, with_info: bool) -> Verification {
-    let info = if with_info { client.info(t.addr).await.ok() } else { None };
+    let info = if with_info {
+        client.info(t.addr).await.ok()
+    } else {
+        None
+    };
     let players = client.players(t.addr).await;
-    let (verdict, verified, reason) = judge(info.as_ref().map(|r| &r.value), players.as_ref().map(|r| &r.value), t.reported, t.max_players);
+    let (verdict, verified, reason) = judge(
+        info.as_ref().map(|r| &r.value),
+        players.as_ref().map(|r| &r.value),
+        t.reported,
+        t.max_players,
+    );
     let (reported, max_players) = info
         .as_ref()
         .map(|r| (r.value.players as i32, r.value.max_players as i32))
@@ -166,7 +203,10 @@ pub async fn verify_one(client: &Client, t: Target, with_info: bool) -> Verifica
 mod tests {
     use super::*;
     use crate::a2s::players::Player;
-    use crate::a2s::{info, packet::{classify, Datagram}};
+    use crate::a2s::{
+        info,
+        packet::{classify, Datagram},
+    };
 
     fn players(durations: &[f32], name: &str) -> Players {
         Players {
@@ -185,7 +225,9 @@ mod tests {
 
     fn live_info() -> Info {
         let bytes = include_bytes!("../../tests/fixtures/a2s/kingofgames.info.bin");
-        let Datagram::Single(p) = classify(bytes).unwrap() else { panic!() };
+        let Datagram::Single(p) = classify(bytes).unwrap() else {
+            panic!()
+        };
         info::parse(p).unwrap() // 2/100 players
     }
 
@@ -222,7 +264,14 @@ mod tests {
         let err = A2sError::Timeout;
         assert_eq!(judge(Some(&i), Err(&err), 0, 0).0, Verdict::Unverifiable);
         i.players = 0;
-        assert_eq!(judge(Some(&i), Err(&err), 0, 0), (Verdict::Verified, Some(0), "INFO reports 0 and PLAYER did not answer".into()));
+        assert_eq!(
+            judge(Some(&i), Err(&err), 0, 0),
+            (
+                Verdict::Verified,
+                Some(0),
+                "INFO reports 0 and PLAYER did not answer".into()
+            )
+        );
         assert_eq!(judge(None, Err(&err), 7, 60).0, Verdict::Offline);
     }
 
@@ -230,10 +279,43 @@ mod tests {
     fn synthetic_lists() {
         let mut i = live_info();
         i.players = 6;
-        assert_eq!(judge(Some(&i), Ok(&players(&[5.0; 6], "")), 0, 0).0, Verdict::Synthetic, "identical durations");
-        assert_eq!(judge(Some(&i), Ok(&players(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], "")), 0, 0).0, Verdict::Synthetic, "all under a minute");
-        assert_eq!(judge(Some(&i), Ok(&players(&[100.0, 200.0, 300.0, 400.0, 500.0, 600.0], "Bob")), 0, 0).0, Verdict::Synthetic, "named entries");
-        assert_eq!(judge(Some(&i), Ok(&players(&[100.0, 200.0, 300.0, 400.0, 500.0, 600.0], "")), 0, 0).0, Verdict::Verified);
+        assert_eq!(
+            judge(Some(&i), Ok(&players(&[5.0; 6], "")), 0, 0).0,
+            Verdict::Synthetic,
+            "identical durations"
+        );
+        assert_eq!(
+            judge(
+                Some(&i),
+                Ok(&players(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], "")),
+                0,
+                0
+            )
+            .0,
+            Verdict::Synthetic,
+            "all under a minute"
+        );
+        assert_eq!(
+            judge(
+                Some(&i),
+                Ok(&players(&[100.0, 200.0, 300.0, 400.0, 500.0, 600.0], "Bob")),
+                0,
+                0
+            )
+            .0,
+            Verdict::Synthetic,
+            "named entries"
+        );
+        assert_eq!(
+            judge(
+                Some(&i),
+                Ok(&players(&[100.0, 200.0, 300.0, 400.0, 500.0, 600.0], "")),
+                0,
+                0
+            )
+            .0,
+            Verdict::Verified
+        );
     }
 
     #[test]

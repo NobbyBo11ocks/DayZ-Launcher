@@ -30,7 +30,12 @@ pub struct LaunchSpec {
 pub fn build_args(spec: &LaunchSpec) -> Vec<String> {
     let mut v: Vec<String> = BE_PREFIX.iter().map(|s| s.to_string()).collect();
     if !spec.mod_paths.is_empty() {
-        let joined = spec.mod_paths.iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>().join(";");
+        let joined = spec
+            .mod_paths
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join(";");
         v.push(format!("-mod={joined}"));
     }
     v.push(format!("-connect={}", spec.ip));
@@ -38,7 +43,12 @@ pub fn build_args(spec: &LaunchSpec) -> Vec<String> {
     if let Some(pw) = spec.password.as_deref().filter(|p| !p.is_empty()) {
         v.push(format!("-password={pw}"));
     }
-    if let Some(name) = spec.profile_name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+    if let Some(name) = spec
+        .profile_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+    {
         v.push(format!("-name={name}"));
     }
     if spec.skip_intro {
@@ -117,9 +127,22 @@ mod tests {
         };
         let args = build_args(&spec);
         assert_eq!(&args[..5], &["0", "1", "1", "-exe", "DayZ_x64.exe"]);
-        assert_eq!(args[5], r"-mod=G:\SteamLibrary\steamapps\common\DayZ\!Workshop\@CF;G:\SteamLibrary\steamapps\common\DayZ\!Workshop\@Dabs Framework");
-        assert_eq!(&args[6..], &["-connect=51.81.8.81", "-port=2402", "-name=Survivor", "-skipintro", "-nosplash"]);
-        let line = display_command_line(r"G:\SteamLibrary\steamapps\common\DayZ\DayZ_BE.exe", &args);
+        assert_eq!(
+            args[5],
+            r"-mod=G:\SteamLibrary\steamapps\common\DayZ\!Workshop\@CF;G:\SteamLibrary\steamapps\common\DayZ\!Workshop\@Dabs Framework"
+        );
+        assert_eq!(
+            &args[6..],
+            &[
+                "-connect=51.81.8.81",
+                "-port=2402",
+                "-name=Survivor",
+                "-skipintro",
+                "-nosplash"
+            ]
+        );
+        let line =
+            display_command_line(r"G:\SteamLibrary\steamapps\common\DayZ\DayZ_BE.exe", &args);
         assert!(line.starts_with(r#""G:\SteamLibrary\steamapps\common\DayZ\DayZ_BE.exe" 0 1 1 -exe DayZ_x64.exe "-mod=G:\"#));
         assert!(line.contains(r#"@Dabs Framework" -connect=51.81.8.81 -port=2402"#));
     }
@@ -135,9 +158,24 @@ mod tests {
             ..Default::default()
         };
         let args = build_args(&spec);
-        assert!(!args.iter().any(|a| a.starts_with("-mod=")), "no -mod for vanilla");
-        assert!(!args.iter().any(|a| a.starts_with("-name=")), "blank name is dropped");
-        assert_eq!(&args[5..], &["-connect=1.2.3.4", "-port=2302", "-password=hunter2", "-cpuCount=8", r"-profiles=D:\My Profiles"]);
+        assert!(
+            !args.iter().any(|a| a.starts_with("-mod=")),
+            "no -mod for vanilla"
+        );
+        assert!(
+            !args.iter().any(|a| a.starts_with("-name=")),
+            "blank name is dropped"
+        );
+        assert_eq!(
+            &args[5..],
+            &[
+                "-connect=1.2.3.4",
+                "-port=2302",
+                "-password=hunter2",
+                "-cpuCount=8",
+                r"-profiles=D:\My Profiles"
+            ]
+        );
     }
 
     #[test]

@@ -99,7 +99,9 @@ impl ServerRow {
             return 0;
         };
         match (a.parse::<i32>(), b.parse::<i32>(), c.parse::<i32>()) {
-            (Ok(a), Ok(b), Ok(c)) if b < 100 && c < 1_000_000 => a * 100_000_000 + b * 1_000_000 + c,
+            (Ok(a), Ok(b), Ok(c)) if b < 100 && c < 1_000_000 => {
+                a * 100_000_000 + b * 1_000_000 + c
+            }
             _ => 0,
         }
     }
@@ -130,10 +132,17 @@ mod tests {
     #[test]
     fn version_int_to_string() {
         assert_eq!(ServerRow::version_string(129_163_709), "1.29.163709");
-        assert_eq!(ServerRow::version_string(129_163_451), "1.29.163451", "official launcher FavouriteServers.xml value");
+        assert_eq!(
+            ServerRow::version_string(129_163_451),
+            "1.29.163451",
+            "official launcher FavouriteServers.xml value"
+        );
         assert_eq!(ServerRow::version_string(0), "");
         assert_eq!(ServerRow::version_int("1.29.163709"), 129_163_709);
-        assert_eq!(ServerRow::version_string(ServerRow::version_int("1.30.164014")), "1.30.164014");
+        assert_eq!(
+            ServerRow::version_string(ServerRow::version_int("1.30.164014")),
+            "1.30.164014"
+        );
         assert_eq!(ServerRow::version_int("garbage"), 0);
     }
 }

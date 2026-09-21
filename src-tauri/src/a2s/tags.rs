@@ -60,7 +60,8 @@ impl DayzTags {
 
     /// `HH:MM` for display.
     pub fn time_string(&self) -> Option<String> {
-        self.time_minutes.map(|m| format!("{:02}:{:02}", m / 60, m % 60))
+        self.time_minutes
+            .map(|m| format!("{:02}:{:02}", m / 60, m % 60))
     }
 }
 
@@ -77,7 +78,9 @@ mod tests {
 
     #[test]
     fn live_keywords() {
-        let t = DayzTags::parse("battleye,no3rd,external,privHive,shardABC123,lqs0,etm4.000000,entm6.000000,mod,15:12");
+        let t = DayzTags::parse(
+            "battleye,no3rd,external,privHive,shardABC123,lqs0,etm4.000000,entm6.000000,mod,15:12",
+        );
         assert!(t.battleye && t.first_person_only && t.external && t.private_hive && t.modded);
         assert!(!t.dlc);
         assert_eq!(t.shard.as_deref(), Some("ABC123"));
@@ -91,7 +94,8 @@ mod tests {
 
     #[test]
     fn official_style_keywords() {
-        let t = DayzTags::parse("battleye,shard001,lqs3,etm12.000000,entm4.000000,isDLC,03:07,weird");
+        let t =
+            DayzTags::parse("battleye,shard001,lqs3,etm12.000000,entm4.000000,isDLC,03:07,weird");
         assert_eq!(t.shard.as_deref(), Some("001"));
         assert_eq!(t.queue, Some(3));
         assert!(t.dlc && !t.first_person_only);

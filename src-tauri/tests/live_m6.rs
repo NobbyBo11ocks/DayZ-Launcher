@@ -17,13 +17,28 @@ async fn live_m6() {
     let path = official::favourites_path().expect("LOCALAPPDATA");
     let favs = official::read_favourites(&path).expect("read FavouriteServers.xml");
     println!("official favourites at {}: {}", path.display(), favs.len());
-    assert!(!favs.is_empty(), "this machine has at least one official favourite");
-    let client = Client::new(8).with_timeout(Duration::from_millis(1500)).with_retries(0);
+    assert!(
+        !favs.is_empty(),
+        "this machine has at least one official favourite"
+    );
+    let client = Client::new(8)
+        .with_timeout(Duration::from_millis(1500))
+        .with_retries(0);
     for f in &favs {
         let addr: SocketAddr = format!("{}:{}", f.query_ip, f.query_port).parse().unwrap();
         match client.info(addr).await {
-            Ok(r) => println!("  {} -> live: {} {}/{} {} ms", f.name, r.value.name, r.value.players, r.value.max_players, r.rtt.as_millis()),
-            Err(e) => println!("  {} -> offline now ({e}); would be imported from XML fields", f.name),
+            Ok(r) => println!(
+                "  {} -> live: {} {}/{} {} ms",
+                f.name,
+                r.value.name,
+                r.value.players,
+                r.value.max_players,
+                r.rtt.as_millis()
+            ),
+            Err(e) => println!(
+                "  {} -> offline now ({e}); would be imported from XML fields",
+                f.name
+            ),
         }
     }
 
@@ -32,21 +47,45 @@ async fn live_m6() {
     // typed game port must be matched against the INFO reply (same rule as direct_connect).
     let ip: std::net::IpAddr = "51.81.8.81".parse().unwrap();
     let typed_port: u16 = 2402;
-    assert!(client.info(SocketAddr::new(ip, typed_port)).await.is_err(), "the game port does not answer A2S");
-    let candidates = [typed_port + 1, typed_port + 2, typed_port + 3, 27016, 27017, 27018, 27019, 27020, 27015];
+    assert!(
+        client.info(SocketAddr::new(ip, typed_port)).await.is_err(),
+        "the game port does not answer A2S"
+    );
+    let candidates = [
+        typed_port + 1,
+        typed_port + 2,
+        typed_port + 3,
+        27016,
+        27017,
+        27018,
+        27019,
+        27020,
+        27015,
+    ];
     let mut found: Option<ServerRow> = None;
     for &qport in &candidates {
         if let Ok(r) = client.info(SocketAddr::new(ip, qport)).await {
-            println!("direct connect: query port {qport} answered ({}), game port {:?}", r.value.name, r.value.game_port);
+            println!(
+                "direct connect: query port {qport} answered ({}), game port {:?}",
+                r.value.name, r.value.game_port
+            );
             if r.value.game_port == Some(typed_port) {
-                found = Some(ServerRow::from_info(&ip.to_string(), qport, &r.value, r.rtt.as_millis() as u32));
+                found = Some(ServerRow::from_info(
+                    &ip.to_string(),
+                    qport,
+                    &r.value,
+                    r.rtt.as_millis() as u32,
+                ));
                 break;
             }
         }
     }
     let row = found.expect("a query port advertising game port 2402 answered");
     assert_eq!(row.id, "51.81.8.81:27017");
-    assert_eq!(row.game_port, 2402, "game port comes from the INFO EDF field");
+    assert_eq!(
+        row.game_port, 2402,
+        "game port comes from the INFO EDF field"
+    );
     assert_eq!(row.steam_empty, None);
     assert_eq!(row.version, "1.29.163709");
     assert_eq!(row.server_version, 129_163_709);
@@ -58,7 +97,12 @@ async fn live_m6() {
     cache.favourite_set(&row.id, true).unwrap();
     assert_eq!(cache.favourites().unwrap()[0].0, row.id);
     let now = ServerRow::now_unix();
-    cache.population_add(&[(row.id.clone(), now - 3600, 12, 0), (row.id.clone(), now, 15, 1)]).unwrap();
+    cache
+        .population_add(&[
+            (row.id.clone(), now - 3600, 12, 0),
+            (row.id.clone(), now, 15, 1),
+        ])
+        .unwrap();
     let samples = cache.population(&row.id, now - 72 * 3600).unwrap();
     assert_eq!(samples.len(), 2);
     println!("population samples: {samples:?}");

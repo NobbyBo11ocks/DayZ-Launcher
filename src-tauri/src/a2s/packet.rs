@@ -107,7 +107,13 @@ impl Reassembler {
 
     /// Returns the complete payload (single-packet header stripped) once every
     /// fragment has arrived.
-    pub fn push(&mut self, id: u32, total: u8, number: u8, body: &[u8]) -> A2sResult<Option<Vec<u8>>> {
+    pub fn push(
+        &mut self,
+        id: u32,
+        total: u8,
+        number: u8,
+        body: &[u8],
+    ) -> A2sResult<Option<Vec<u8>>> {
         if self.id != Some(id) {
             self.id = Some(id);
             self.parts = vec![None; total as usize];
@@ -134,7 +140,9 @@ impl Reassembler {
             full.extend_from_slice(p);
         }
         // Reassembled data normally begins with the single-packet header again.
-        if full.len() >= 4 && u32::from_le_bytes([full[0], full[1], full[2], full[3]]) == HEADER_SINGLE {
+        if full.len() >= 4
+            && u32::from_le_bytes([full[0], full[1], full[2], full[3]]) == HEADER_SINGLE
+        {
             full.drain(..4);
         }
         Ok(Some(full))
@@ -165,14 +173,25 @@ mod tests {
 
     #[test]
     fn rules_and_player_requests() {
-        assert_eq!(Kind::Rules.request(None), vec![0xFF, 0xFF, 0xFF, 0xFF, 0x56, 0xFF, 0xFF, 0xFF, 0xFF]);
-        assert_eq!(Kind::Players.request(Some([9, 8, 7, 6])), vec![0xFF, 0xFF, 0xFF, 0xFF, 0x55, 9, 8, 7, 6]);
+        assert_eq!(
+            Kind::Rules.request(None),
+            vec![0xFF, 0xFF, 0xFF, 0xFF, 0x56, 0xFF, 0xFF, 0xFF, 0xFF]
+        );
+        assert_eq!(
+            Kind::Players.request(Some([9, 8, 7, 6])),
+            vec![0xFF, 0xFF, 0xFF, 0xFF, 0x55, 9, 8, 7, 6]
+        );
     }
 
     #[test]
     fn classify_single_and_split() {
-        assert_eq!(classify(&[0xFF, 0xFF, 0xFF, 0xFF, 0x49, 1]).unwrap(), Datagram::Single(&[0x49, 1]));
-        let d = [0xFE, 0xFF, 0xFF, 0xFF, 0x10, 0x00, 0x00, 0x00, 2, 1, 0xE0, 0x04, 0xAA];
+        assert_eq!(
+            classify(&[0xFF, 0xFF, 0xFF, 0xFF, 0x49, 1]).unwrap(),
+            Datagram::Single(&[0x49, 1])
+        );
+        let d = [
+            0xFE, 0xFF, 0xFF, 0xFF, 0x10, 0x00, 0x00, 0x00, 2, 1, 0xE0, 0x04, 0xAA,
+        ];
         assert_eq!(
             classify(&d).unwrap(),
             Datagram::Split {
@@ -183,16 +202,34 @@ mod tests {
                 body: &[0xAA]
             }
         );
-        assert!(matches!(classify(&[0xFE, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0x80, 1, 0, 0, 0]), Err(A2sError::Compressed)));
-        assert!(matches!(classify(&[1, 2, 3, 4]), Err(A2sError::BadHeader(0x0403_0201))));
+        assert!(matches!(
+            classify(&[0xFE, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0x80, 1, 0, 0, 0]),
+            Err(A2sError::Compressed)
+        ));
+        assert!(matches!(
+            classify(&[1, 2, 3, 4]),
+            Err(A2sError::BadHeader(0x0403_0201))
+        ));
     }
 
     #[test]
     fn reassembler_orders_and_strips_header() {
         let mut r = Reassembler::new();
         assert_eq!(r.push(7, 2, 1, b"world").unwrap(), None);
-        assert_eq!(r.push(7, 2, 1, b"world").unwrap(), None, "duplicate ignored");
-        let full = r.push(7, 2, 0, &[0xFF, 0xFF, 0xFF, 0xFF, b'h', b'e', b'l', b'l', b'o', b' ']).unwrap().unwrap();
+        assert_eq!(
+            r.push(7, 2, 1, b"world").unwrap(),
+            None,
+            "duplicate ignored"
+        );
+        let full = r
+            .push(
+                7,
+                2,
+                0,
+                &[0xFF, 0xFF, 0xFF, 0xFF, b'h', b'e', b'l', b'l', b'o', b' '],
+            )
+            .unwrap()
+            .unwrap();
         assert_eq!(full, b"hello world");
     }
 

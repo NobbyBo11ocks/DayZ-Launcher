@@ -17,7 +17,8 @@ use windows_sys::Win32::Storage::FileSystem::{
 const VS_FFI_SIGNATURE: u32 = 0xFEEF_04BD;
 /// Tried after the translations the file declares (US English with Unicode,
 /// Windows-1252 and neutral code pages).
-const FALLBACK_TRANSLATIONS: [(u16, u16); 3] = [(0x0409, 0x04B0), (0x0409, 0x04E4), (0x0409, 0x0000)];
+const FALLBACK_TRANSLATIONS: [(u16, u16); 3] =
+    [(0x0409, 0x04B0), (0x0409, 0x04E4), (0x0409, 0x0000)];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileVersion {
@@ -48,7 +49,11 @@ pub fn game_form(product: &str) -> String {
 }
 
 pub fn read(path: &Path) -> Option<FileVersion> {
-    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
     // SAFETY: the block is sized by the API's own answer and outlives every query;
     // returned pointers are read unaligned/copied and never retained.
     unsafe {
@@ -99,7 +104,9 @@ pub fn read(path: &Path) -> Option<FileVersion> {
             .unwrap_or([0; 4]);
         let product = string_value("ProductVersion").unwrap_or_else(|| join(fixed_product));
         let file = string_value("FileVersion").unwrap_or_else(|| {
-            fixed.map(|f| join(split(f.dwFileVersionMS, f.dwFileVersionLS))).unwrap_or_default()
+            fixed
+                .map(|f| join(split(f.dwFileVersionMS, f.dwFileVersionLS)))
+                .unwrap_or_default()
         });
         if product.is_empty() && fixed.is_none() {
             return None;
@@ -117,12 +124,24 @@ unsafe fn query(block: &[u8], sub: &str) -> Option<(*mut c_void, u32)> {
     let mut ptr: *mut c_void = std::ptr::null_mut();
     let mut len = 0u32;
     // SAFETY: caller guarantees `block` is a complete version-info block.
-    let ok = unsafe { VerQueryValueW(block.as_ptr().cast::<c_void>(), w.as_ptr(), &mut ptr, &mut len) };
+    let ok = unsafe {
+        VerQueryValueW(
+            block.as_ptr().cast::<c_void>(),
+            w.as_ptr(),
+            &mut ptr,
+            &mut len,
+        )
+    };
     (ok != 0 && !ptr.is_null() && len > 0).then_some((ptr, len))
 }
 
 fn split(ms: u32, ls: u32) -> [u16; 4] {
-    [(ms >> 16) as u16, (ms & 0xFFFF) as u16, (ls >> 16) as u16, (ls & 0xFFFF) as u16]
+    [
+        (ms >> 16) as u16,
+        (ms & 0xFFFF) as u16,
+        (ls >> 16) as u16,
+        (ls & 0xFFFF) as u16,
+    ]
 }
 
 fn join(v: [u16; 4]) -> String {
@@ -143,7 +162,13 @@ mod tests {
     #[test]
     fn reads_a_system_binary() {
         let sys = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
-        let v = read(Path::new(&sys).join("System32").join("kernel32.dll").as_path()).expect("kernel32 has a version resource");
+        let v = read(
+            Path::new(&sys)
+                .join("System32")
+                .join("kernel32.dll")
+                .as_path(),
+        )
+        .expect("kernel32 has a version resource");
         assert!(!v.product.is_empty());
         assert!(v.fixed_product[0] >= 6, "Windows major version");
     }

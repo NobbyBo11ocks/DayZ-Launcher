@@ -97,7 +97,10 @@ impl SettingsStore {
     }
 
     pub fn get(&self) -> Settings {
-        self.current.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.current
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Replaces the launch options; the UI preferences on disk are kept, whatever the
@@ -114,7 +117,10 @@ impl SettingsStore {
     /// validates, persists and returns the result.
     pub fn patch_ui(&self, patch: Value) -> std::io::Result<UiPrefs> {
         let Value::Object(patch) = patch else {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "ui patch must be an object"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "ui patch must be an object",
+            ));
         };
         let mut cur = self.current.lock().unwrap_or_else(|e| e.into_inner());
         let mut merged = serde_json::to_value(&cur.ui).map_err(invalid)?;
@@ -184,9 +190,14 @@ mod tests {
     fn launch_update_keeps_ui_prefs() {
         let path = temp_path("keep");
         let store = SettingsStore::load(&path);
-        store.patch_ui(json!({ "accent": "green", "onboarded": true })).unwrap();
+        store
+            .patch_ui(json!({ "accent": "green", "onboarded": true }))
+            .unwrap();
         // A caller holding an old copy of the prefs must not clobber them.
-        let stale = Settings { no_pause: true, ..Settings::default() };
+        let stale = Settings {
+            no_pause: true,
+            ..Settings::default()
+        };
         store.set_launch(stale).unwrap();
         let s = SettingsStore::load(&path).get();
         assert!(s.no_pause);
@@ -199,11 +210,15 @@ mod tests {
     fn ui_patch_merges_validates_and_persists() {
         let path = temp_path("patch");
         let store = SettingsStore::load(&path);
-        let ui = store.patch_ui(json!({ "theme": "light", "filters": { "map": "enoch" } })).unwrap();
+        let ui = store
+            .patch_ui(json!({ "theme": "light", "filters": { "map": "enoch" } }))
+            .unwrap();
         assert_eq!(ui.theme, "light");
         assert_eq!(ui.filters, Some(json!({ "map": "enoch" })));
         // A second partial patch keeps the earlier keys; a bad accent falls back.
-        let ui = store.patch_ui(json!({ "accent": "neon", "lastUpdateCheckMs": 42 })).unwrap();
+        let ui = store
+            .patch_ui(json!({ "accent": "neon", "lastUpdateCheckMs": 42 }))
+            .unwrap();
         assert_eq!(ui.theme, "light");
         assert_eq!(ui.accent, "amber");
         assert_eq!(ui.last_update_check_ms, 42);

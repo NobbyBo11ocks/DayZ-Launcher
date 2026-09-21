@@ -119,14 +119,19 @@ mod tests {
 
     #[test]
     fn decodes_live_fixture() {
-        let Datagram::Single(payload) = classify(WILDLANDZ).unwrap() else { panic!("single") };
+        let Datagram::Single(payload) = classify(WILDLANDZ).unwrap() else {
+            panic!("single")
+        };
         let i = parse(payload).unwrap();
         assert_eq!(i.protocol, 17);
         assert_eq!(i.name, "WILDLANDZ Green County Greatness");
         assert_eq!(i.map, "GreenCounty");
         assert_eq!(i.folder, "dayz");
         assert_eq!(i.game, "PvP | Survival | No Bases");
-        assert_eq!(i.app_id, 221_100, "from GameID, not the overflowed 16-bit field");
+        assert_eq!(
+            i.app_id, 221_100,
+            "from GameID, not the overflowed 16-bit field"
+        );
         assert_eq!(i.max_players, 50);
         assert_eq!(i.server_type, 'd');
         assert_eq!(i.environment, 'w');
@@ -136,7 +141,9 @@ mod tests {
         assert_eq!(i.game_port, Some(2402));
         assert_eq!(i.steam_id, Some(90_293_138_942_181_394));
         assert_eq!(i.game_id, Some(221_100));
-        assert!(i.tags.battleye && i.tags.first_person_only && i.tags.private_hive && i.tags.modded);
+        assert!(
+            i.tags.battleye && i.tags.first_person_only && i.tags.private_hive && i.tags.modded
+        );
         assert_eq!(i.tags.shard.as_deref(), Some("ABC123"));
         assert_eq!(i.tags.time_multiplier, Some(4.0));
     }
@@ -145,7 +152,9 @@ mod tests {
 
     #[test]
     fn decodes_populated_official_style_server() {
-        let Datagram::Single(payload) = classify(KINGOFGAMES).unwrap() else { panic!("single") };
+        let Datagram::Single(payload) = classify(KINGOFGAMES).unwrap() else {
+            panic!("single")
+        };
         let i = parse(payload).unwrap();
         assert!(i.name.starts_with("[EU] King of Games"));
         assert_eq!(i.map, "chernarusplus");
@@ -166,6 +175,12 @@ mod tests {
 
     #[test]
     fn rejects_wrong_type() {
-        assert!(matches!(parse(&[0x45, 0, 0]), Err(A2sError::UnexpectedType { expected: 0x49, got: 0x45 })));
+        assert!(matches!(
+            parse(&[0x45, 0, 0]),
+            Err(A2sError::UnexpectedType {
+                expected: 0x49,
+                got: 0x45
+            })
+        ));
     }
 }

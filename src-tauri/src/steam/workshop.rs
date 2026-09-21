@@ -88,8 +88,12 @@ pub fn parse_appworkshop(text: &str, path: &Path) -> AppResult<Workshop> {
     let mut items = Vec::new();
     if let Some(installed) = vdf::get_obj(root, "WorkshopItemsInstalled") {
         for (id, values) in installed.iter() {
-            let Ok(id_num) = id.parse::<u64>() else { continue };
-            let Some(obj) = values.first().and_then(|v| v.get_obj()) else { continue };
+            let Ok(id_num) = id.parse::<u64>() else {
+                continue;
+            };
+            let Some(obj) = values.first().and_then(|v| v.get_obj()) else {
+                continue;
+            };
             let latest = details
                 .and_then(|d| vdf::get_obj(d, id))
                 .and_then(|d| vdf::get_u64(d, "latest_timeupdated"));
@@ -128,7 +132,8 @@ pub fn enrich(ws: &mut Workshop, content: &Path) {
             item.meta_name = meta.get("name").map(str::to_string);
             item.meta_published_id = meta.get_u64("publishedid");
         }
-        item.mod_name = CppValues::read(&dir.join("mod.cpp")).and_then(|c| c.get("name").map(str::to_string));
+        item.mod_name =
+            CppValues::read(&dir.join("mod.cpp")).and_then(|c| c.get("name").map(str::to_string));
         item.folder = Some(dir);
     }
 }
@@ -154,7 +159,9 @@ pub fn junctions(workshop_dir: &Path) -> Vec<Junction> {
         let path = entry.path();
         // `symlink_metadata` does not follow the link, so dangling junctions (target
         // folder deleted) are still seen. `junction::exists` follows and would drop them.
-        let Ok(meta) = std::fs::symlink_metadata(&path) else { continue };
+        let Ok(meta) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
         if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0 {
             continue;
         }
@@ -194,13 +201,20 @@ mod tests {
         assert_eq!(ws.last_build_id, "24689949");
         assert_eq!(ws.size_on_disk, 193_223_329);
         assert_eq!(ws.items.len(), 4);
-        let cf = ws.items.iter().find(|i| i.id == 1_559_212_036).expect("CF present");
+        let cf = ws
+            .items
+            .iter()
+            .find(|i| i.id == 1_559_212_036)
+            .expect("CF present");
         assert_eq!(cf.size, 527_656);
         assert_eq!(cf.time_updated, 1_771_519_119);
         assert_eq!(cf.latest_time_updated, Some(1_771_519_119));
         assert_eq!(cf.manifest, "4114705373119672275");
         assert!(!cf.needs_update());
-        assert!(ws.items.windows(2).all(|w| w[0].id < w[1].id), "sorted by id");
+        assert!(
+            ws.items.windows(2).all(|w| w[0].id < w[1].id),
+            "sorted by id"
+        );
     }
 
     #[test]

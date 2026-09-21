@@ -21,7 +21,11 @@ pub struct OfficialFavourite {
 
 pub fn favourites_path() -> Option<PathBuf> {
     let local = std::env::var_os("LOCALAPPDATA")?;
-    Some(PathBuf::from(local).join("DayZ Launcher").join("FavouriteServers.xml"))
+    Some(
+        PathBuf::from(local)
+            .join("DayZ Launcher")
+            .join("FavouriteServers.xml"),
+    )
 }
 
 pub fn read_favourites(path: &Path) -> std::io::Result<Vec<OfficialFavourite>> {
@@ -42,7 +46,9 @@ pub fn parse_favourites(xml: &str) -> Vec<OfficialFavourite> {
         let Some(end) = after.find('>') else { break };
         let attrs = parse_attrs(&after[..end]);
         rest = &after[end + 1..];
-        let Some((qip, qport)) = attrs.get("QueryEndPoint").and_then(|s| split_endpoint(s)) else { continue };
+        let Some((qip, qport)) = attrs.get("QueryEndPoint").and_then(|s| split_endpoint(s)) else {
+            continue;
+        };
         let game_port = attrs
             .get("ConnectionEndPoint")
             .and_then(|s| split_endpoint(s))
@@ -55,10 +61,19 @@ pub fn parse_favourites(xml: &str) -> Vec<OfficialFavourite> {
             query_port: qport,
             game_port,
             map: attrs.get("Map").cloned().unwrap_or_default(),
-            max_players: attrs.get("MaxPlayers").and_then(|v| v.parse().ok()).unwrap_or(0),
-            server_version: attrs.get("ServerVersion").and_then(|v| v.parse().ok()).unwrap_or(0),
+            max_players: attrs
+                .get("MaxPlayers")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0),
+            server_version: attrs
+                .get("ServerVersion")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0),
             tags: attrs.get("Tags").cloned().unwrap_or_default(),
-            password: attrs.get("RequirePassword").map(|v| v == "1").unwrap_or(false),
+            password: attrs
+                .get("RequirePassword")
+                .map(|v| v == "1")
+                .unwrap_or(false),
         });
     }
     out
@@ -79,7 +94,11 @@ fn parse_attrs(s: &str) -> HashMap<String, String> {
             i += 1;
         }
         let key_start = i;
-        while i < bytes.len() && bytes[i] != b'=' && !(bytes[i] as char).is_whitespace() && bytes[i] != b'/' {
+        while i < bytes.len()
+            && bytes[i] != b'='
+            && !(bytes[i] as char).is_whitespace()
+            && bytes[i] != b'/'
+        {
             i += 1;
         }
         let key = &s[key_start..i];
@@ -136,8 +155,14 @@ mod tests {
         let f = parse_favourites(LIVE);
         assert_eq!(f.len(), 1);
         let s = &f[0];
-        assert_eq!(s.name, "Bro-Nation PvP | Deathmatch | Designed for 2-10 players");
-        assert_eq!((s.query_ip.as_str(), s.query_port, s.game_port), ("99.137.91.235", 5003, 5002));
+        assert_eq!(
+            s.name,
+            "Bro-Nation PvP | Deathmatch | Designed for 2-10 players"
+        );
+        assert_eq!(
+            (s.query_ip.as_str(), s.query_port, s.game_port),
+            ("99.137.91.235", 5003, 5002)
+        );
         assert_eq!(s.map, "chernarusplus");
         assert_eq!(s.max_players, 10);
         assert_eq!(s.server_version, 129_163_451);

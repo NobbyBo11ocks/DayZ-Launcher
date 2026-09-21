@@ -100,7 +100,9 @@ impl Cache {
             let _ = std::fs::create_dir_all(dir);
         }
         let conn = Connection::open(path)?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY;")?;
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY;",
+        )?;
         Self::migrate(conn)
     }
 
@@ -110,9 +112,15 @@ impl Cache {
     }
 
     fn migrate(conn: Connection) -> rusqlite::Result<Self> {
-        conn.execute_batch("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);")?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+        )?;
         let version: Option<String> = conn
-            .query_row("SELECT value FROM meta WHERE key = 'schema_version'", [], |r| r.get(0))
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'schema_version'",
+                [],
+                |r| r.get(0),
+            )
             .optional()?;
         if version.as_deref() != Some(SCHEMA_VERSION) {
             conn.execute_batch("DROP TABLE IF EXISTS servers;")?;
@@ -131,7 +139,9 @@ impl Cache {
     // ----- favourites --------------------------------------------------------
 
     pub fn favourites(&self) -> rusqlite::Result<Vec<(String, i64)>> {
-        let mut stmt = self.conn.prepare("SELECT id, added_at FROM favourites ORDER BY added_at DESC")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, added_at FROM favourites ORDER BY added_at DESC")?;
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
         rows.collect()
     }
@@ -143,7 +153,8 @@ impl Cache {
                 params![id, ServerRow::now_unix()],
             )?;
         } else {
-            self.conn.execute("DELETE FROM favourites WHERE id = ?1", params![id])?;
+            self.conn
+                .execute("DELETE FROM favourites WHERE id = ?1", params![id])?;
         }
         Ok(())
     }
@@ -190,9 +201,9 @@ impl Cache {
     }
 
     pub fn population(&self, id: &str, since: i64) -> rusqlite::Result<Vec<PopulationSample>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT ts, players, queue FROM population WHERE id = ?1 AND ts >= ?2 ORDER BY ts")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT ts, players, queue FROM population WHERE id = ?1 AND ts >= ?2 ORDER BY ts",
+        )?;
         let rows = stmt.query_map(params![id, since], |r| {
             Ok(PopulationSample {
                 ts: r.get(0)?,
@@ -204,12 +215,15 @@ impl Cache {
     }
 
     pub fn population_prune(&self, max_age_secs: i64) -> rusqlite::Result<usize> {
-        self.conn
-            .execute("DELETE FROM population WHERE ts < ?1", params![ServerRow::now_unix() - max_age_secs])
+        self.conn.execute(
+            "DELETE FROM population WHERE ts < ?1",
+            params![ServerRow::now_unix() - max_age_secs],
+        )
     }
 
     pub fn count(&self) -> rusqlite::Result<i64> {
-        self.conn.query_row("SELECT COUNT(*) FROM servers", [], |r| r.get(0))
+        self.conn
+            .query_row("SELECT COUNT(*) FROM servers", [], |r| r.get(0))
     }
 
     fn row_from(r: &rusqlite::Row<'_>) -> rusqlite::Result<ServerRow> {
@@ -243,16 +257,20 @@ impl Cache {
     }
 
     pub fn load_all(&self) -> rusqlite::Result<Vec<ServerRow>> {
-        let mut stmt = self
-            .conn
-            .prepare(&format!("SELECT {SELECT_COLUMNS} FROM servers ORDER BY last_seen DESC"))?;
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {SELECT_COLUMNS} FROM servers ORDER BY last_seen DESC"
+        ))?;
         let rows = stmt.query_map([], Self::row_from)?;
         rows.collect()
     }
 
     pub fn get(&self, id: &str) -> rusqlite::Result<Option<ServerRow>> {
         self.conn
-            .query_row(&format!("SELECT {SELECT_COLUMNS} FROM servers WHERE id = ?1"), params![id], Self::row_from)
+            .query_row(
+                &format!("SELECT {SELECT_COLUMNS} FROM servers WHERE id = ?1"),
+                params![id],
+                Self::row_from,
+            )
             .optional()
     }
 
@@ -337,12 +355,15 @@ impl Cache {
     /// Drops rows not confirmed for `max_age_secs`; returns how many were removed.
     pub fn prune(&self, max_age_secs: i64) -> rusqlite::Result<usize> {
         let cutoff = ServerRow::now_unix() - max_age_secs;
-        self.conn.execute("DELETE FROM servers WHERE last_seen < ?1", params![cutoff])
+        self.conn
+            .execute("DELETE FROM servers WHERE last_seen < ?1", params![cutoff])
     }
 
     pub fn get_meta(&self, key: &str) -> rusqlite::Result<Option<String>> {
         self.conn
-            .query_row("SELECT value FROM meta WHERE key = ?1", params![key], |r| r.get(0))
+            .query_row("SELECT value FROM meta WHERE key = ?1", params![key], |r| {
+                r.get(0)
+            })
             .optional()
     }
 
@@ -391,7 +412,10 @@ mod tests {
     #[test]
     fn upsert_load_roundtrip_and_prune() {
         let mut c = Cache::open_in_memory().unwrap();
-        assert_eq!(c.get_meta("schema_version").unwrap().as_deref(), Some(SCHEMA_VERSION));
+        assert_eq!(
+            c.get_meta("schema_version").unwrap().as_deref(),
+            Some(SCHEMA_VERSION)
+        );
         c.upsert(&[row(27017, 0), row(27018, 5)]).unwrap();
         assert_eq!(c.count().unwrap(), 2);
         let loaded = c.load_all().unwrap();
@@ -407,14 +431,24 @@ mod tests {
         c.upsert(&[updated]).unwrap();
         let again = row(27017, 9); // None must not erase the stored verification columns
         c.upsert(&[again]).unwrap();
-        let w = c.get(&ServerRow::id_for("51.81.8.81", 27017)).unwrap().unwrap();
-        assert_eq!((w.players, w.verified_players, w.steam_empty), (9, Some(3), Some(true)));
+        let w = c
+            .get(&ServerRow::id_for("51.81.8.81", 27017))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (w.players, w.verified_players, w.steam_empty),
+            (9, Some(3), Some(true))
+        );
         assert!(w.inflated(), "Steam says empty, INFO says 9");
 
         c.set_meta("last_refresh", "123").unwrap();
         assert_eq!(c.get_meta("last_refresh").unwrap().as_deref(), Some("123"));
         assert_eq!(c.get_meta("missing").unwrap(), None);
-        assert_eq!(c.prune(-1).unwrap(), 2, "everything is older than 'now + 1 s'");
+        assert_eq!(
+            c.prune(-1).unwrap(),
+            2,
+            "everything is older than 'now + 1 s'"
+        );
         assert_eq!(c.count().unwrap(), 0);
     }
 
@@ -431,11 +465,18 @@ mod tests {
 
         c.history_add(&r, 12).unwrap();
         let h = c.history(10).unwrap();
-        assert_eq!((h[0].id.as_str(), h[0].mods, h[0].game_port), (r.id.as_str(), 12, 2402));
+        assert_eq!(
+            (h[0].id.as_str(), h[0].mods, h[0].game_port),
+            (r.id.as_str(), 12, 2402)
+        );
 
         let now = ServerRow::now_unix();
-        c.population_add(&[(r.id.clone(), now - 7200, 10, 0), (r.id.clone(), now - 3600, 20, 2), (r.id.clone(), now - 3600, 99, 9)])
-            .unwrap();
+        c.population_add(&[
+            (r.id.clone(), now - 7200, 10, 0),
+            (r.id.clone(), now - 3600, 20, 2),
+            (r.id.clone(), now - 3600, 99, 9),
+        ])
+        .unwrap();
         let p = c.population(&r.id, now - 86_400).unwrap();
         assert_eq!(p.len(), 2, "duplicate timestamp ignored");
         assert_eq!((p[1].players, p[1].queue), (20, 2));
@@ -462,8 +503,14 @@ mod tests {
         }])
         .unwrap();
         let w = c.get(&id).unwrap().unwrap();
-        assert_eq!((w.players, w.verified_players, w.verdict.as_deref()), (41, Some(0), Some("inflated")));
-        assert_eq!((w.ping_ms, w.tags.time_string().as_deref()), (33, Some("16:00")));
+        assert_eq!(
+            (w.players, w.verified_players, w.verdict.as_deref()),
+            (41, Some(0), Some("inflated"))
+        );
+        assert_eq!(
+            (w.ping_ms, w.tags.time_string().as_deref()),
+            (33, Some("16:00"))
+        );
         // Offline verification (no INFO): keeps ping/keywords, still records the verdict.
         c.apply_verifications(&[Verification {
             id: id.clone(),
@@ -479,6 +526,9 @@ mod tests {
         }])
         .unwrap();
         let w = c.get(&id).unwrap().unwrap();
-        assert_eq!((w.ping_ms, w.verdict.as_deref(), w.verified_at), (33, Some("offline"), Some(2_000)));
+        assert_eq!(
+            (w.ping_ms, w.verdict.as_deref(), w.verified_at),
+            (33, Some("offline"), Some(2_000))
+        );
     }
 }
