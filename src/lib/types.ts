@@ -304,6 +304,17 @@ export type ModPlanItem = {
   folder: string | null;
 };
 
+/** One Workshop item unsubscribed through Steam (D-075). */
+export type UnsubscribeResult = { id: number; ok: boolean; error: string | null };
+
+/** INFO-only snapshot for the wait-for-slot option (D-074). */
+export type ServerSlots = {
+  players: number;
+  maxPlayers: number;
+  queue: number | null;
+  pingMs: number;
+};
+
 export type JoinPlan = {
   id: string;
   name: string;

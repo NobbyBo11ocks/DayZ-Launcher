@@ -386,6 +386,68 @@ pub struct ServerDetails {
     pub verification: Verification,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnsubscribeResult {
+    pub id: u64,
+    pub ok: bool,
+    pub error: Option<String>,
+}
+
+/// Unsubscribes Workshop items through Steam (mod management, D-075). Steam deletes
+/// the files itself, once nothing under app 221100 is running; `!Workshop` junctions
+/// are never touched (they may belong to the official launcher).
+#[tauri::command]
+pub async fn mods_unsubscribe(
+    state: State<'_, AppState>,
+    ids: Vec<u64>,
+) -> AppResult<Vec<UnsubscribeResult>> {
+    let steam = state.steam.clone_handle();
+    let results = tauri::async_runtime::spawn_blocking(move || steam.unsubscribe(&ids))
+        .await
+        .map_err(|e| AppError::Internal(format!("unsubscribe task failed: {e}")))?
+        .map_err(AppError::Internal)?;
+    Ok(results
+        .into_iter()
+        .map(|(id, r)| UnsubscribeResult {
+            id,
+            ok: r.is_ok(),
+            error: r.err(),
+        })
+        .collect())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerSlots {
+    /// The server's own count: this is what decides whether a connection is accepted.
+    pub players: i32,
+    pub max_players: i32,
+    /// Players in the login queue (`lqs` keyword), if the server reports it.
+    pub queue: Option<u32>,
+    pub ping_ms: u32,
+}
+
+/// INFO only: player count, capacity and login queue for the "wait for a free
+/// slot" join option (D-074). One datagram each way, safe to poll every 10 s.
+#[tauri::command]
+pub async fn server_slots(state: State<'_, AppState>, id: String) -> AppResult<ServerSlots> {
+    let addr: SocketAddr = id
+        .parse()
+        .map_err(|_| AppError::Internal(format!("bad server id {id}")))?;
+    let reply = state
+        .a2s
+        .info(addr)
+        .await
+        .map_err(|e| AppError::Internal(format!("{addr}: {e}")))?;
+    Ok(ServerSlots {
+        players: reply.value.players as i32,
+        max_players: reply.value.max_players as i32,
+        queue: reply.value.tags.queue,
+        ping_ms: reply.rtt.as_millis() as u32,
+    })
+}
+
 /// Live INFO + RULES + PLAYER for one server (details pane, join flow).
 #[tauri::command]
 pub async fn server_details(

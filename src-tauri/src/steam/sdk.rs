@@ -228,8 +228,16 @@ enum Cmd {
         ids: Vec<u64>,
         reply: mpsc::Sender<Result<Vec<ItemDetails>, String>>,
     },
+    Unsubscribe {
+        ids: Vec<u64>,
+        reply: UnsubscribeReply,
+    },
     Shutdown,
 }
+
+/// Per-item outcome of an unsubscribe request.
+pub type UnsubscribeResults = Vec<(u64, Result<(), String>)>;
+type UnsubscribeReply = mpsc::Sender<Result<UnsubscribeResults, String>>;
 
 /// Steam answers at most this many items per details request (`kNumUGCResultsPerPage`).
 const DETAILS_PAGE: usize = 50;
@@ -237,6 +245,8 @@ const SYNC_EMIT_INTERVAL: Duration = Duration::from_millis(250);
 /// Re-issue `DownloadItem` when Steam has not started within this time.
 const SYNC_KICK_INTERVAL: Duration = Duration::from_secs(5);
 const SYNC_TIMEOUT: Duration = Duration::from_secs(45 * 60);
+/// Steam normally answers an unsubscribe within a second; ids still silent after this are reported as failed.
+const UNSUBSCRIBE_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Handle owned by the Tauri state; cheap to clone the status, commands go over a channel.
 pub struct SteamWorker {
@@ -338,6 +348,27 @@ impl SteamWorker {
         self.cmd
             .send(Cmd::Sync { job, ids })
             .map_err(|_| "steamworks thread has stopped".to_string())
+    }
+
+    /// Unsubscribes Workshop items (mod management, D-075); one result per id.
+    /// Blocking: call from a blocking task. Steam removes the files on its own.
+    pub fn unsubscribe(&self, ids: &[u64]) -> Result<UnsubscribeResults, String> {
+        let s = self.status();
+        if !s.initialized {
+            return Err(s.error.unwrap_or_else(|| "Steam is not initialised".into()));
+        }
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (reply, rx) = mpsc::channel();
+        self.cmd
+            .send(Cmd::Unsubscribe {
+                ids: ids.to_vec(),
+                reply,
+            })
+            .map_err(|_| "steamworks thread has stopped".to_string())?;
+        rx.recv_timeout(UNSUBSCRIBE_TIMEOUT + Duration::from_secs(5))
+            .map_err(|_| "Steam did not answer the unsubscribe request".to_string())?
     }
 
     /// Workshop titles and sizes, fetched in pages of 50. Blocking: call from a blocking task.
@@ -596,6 +627,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
     let mut last_activity = Instant::now();
     let mut active: Option<ActiveRefresh> = None;
     let mut sync: Option<ActiveSync> = None;
+    let mut unsub: Option<ActiveUnsubscribe> = None;
 
     loop {
         if let Some(s) = &session {
@@ -622,6 +654,9 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                         shared.set_status(&events, |st| st.error = Some(e.clone()));
                         match cmd {
                             Cmd::ItemDetails { reply, .. } => {
+                                let _ = reply.send(Err(e));
+                            }
+                            Cmd::Unsubscribe { reply, .. } => {
                                 let _ = reply.send(Err(e));
                             }
                             Cmd::Sync { job, .. } => {
@@ -655,6 +690,12 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                     sync = Some(start_sync(ugc, job, ids));
                 }
                 Cmd::ItemDetails { ids, reply } => query_details(ugc, ids, reply),
+                Cmd::Unsubscribe { ids, reply } => {
+                    if let Some(old) = unsub.take() {
+                        let _ = old.reply.send(Err("superseded by a newer request".into()));
+                    }
+                    unsub = Some(start_unsubscribe(ugc, ids, reply));
+                }
                 Cmd::Refresh(mut parts) => {
                     if active.is_some() {
                         continue;
@@ -679,7 +720,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
             }
         }
 
-        let busy = active.is_some() || sync.is_some();
+        let busy = active.is_some() || sync.is_some() || unsub.is_some();
         if busy {
             last_activity = Instant::now();
         } else if session.is_some() && idle_after.is_some_and(|d| last_activity.elapsed() >= d) {
@@ -775,12 +816,61 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
             }
         }
 
-        std::thread::sleep(if active.is_some() || sync.is_some() {
+        if unsub.as_mut().is_some_and(tick_unsubscribe) {
+            unsub = None;
+        }
+
+        std::thread::sleep(if active.is_some() || sync.is_some() || unsub.is_some() {
             TICK_ACTIVE
         } else {
             TICK_IDLE
         });
     }
+}
+
+/// In-flight unsubscribe request: Steam answers each id through a callback that
+/// `run_callbacks` delivers on this thread, so results are collected across ticks.
+struct ActiveUnsubscribe {
+    ids: Vec<u64>,
+    results: UnsubscribeResults,
+    rx: mpsc::Receiver<(u64, Result<(), String>)>,
+    reply: UnsubscribeReply,
+    started: Instant,
+}
+
+fn start_unsubscribe(ugc: &UGC, ids: Vec<u64>, reply: UnsubscribeReply) -> ActiveUnsubscribe {
+    let (tx, rx) = mpsc::channel();
+    for &id in &ids {
+        let txc = tx.clone();
+        ugc.unsubscribe_item(PublishedFileId(id), move |r| {
+            let _ = txc.send((id, r.map_err(|e| format!("{e:?}"))));
+        });
+    }
+    ActiveUnsubscribe {
+        ids,
+        results: Vec::new(),
+        rx,
+        reply,
+        started: Instant::now(),
+    }
+}
+
+/// Returns `true` once every id has answered or the timeout passed and the reply was sent.
+fn tick_unsubscribe(u: &mut ActiveUnsubscribe) -> bool {
+    while let Ok(r) = u.rx.try_recv() {
+        u.results.push(r);
+    }
+    if u.results.len() < u.ids.len() && u.started.elapsed() < UNSUBSCRIBE_TIMEOUT {
+        return false;
+    }
+    let mut results = std::mem::take(&mut u.results);
+    for &id in &u.ids {
+        if !results.iter().any(|(i, _)| *i == id) {
+            results.push((id, Err("Steam did not confirm the unsubscribe".into())));
+        }
+    }
+    let _ = u.reply.send(Ok(results));
+    true
 }
 
 fn start_partition(mms: &MatchmakingServers, filters: Filters) -> Result<ActivePartition, String> {

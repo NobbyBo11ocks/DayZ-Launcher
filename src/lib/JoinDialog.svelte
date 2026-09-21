@@ -1,12 +1,15 @@
 <script lang="ts">
   // Join flow (docs/02 §6, docs/06 §6): plan → sync missing mods with progress → launch.
+  // A full server can be waited for here (D-074): the dialog polls A2S_INFO every
+  // 10 s and starts the game the moment the server reports a free slot.
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-  import { fmtBytes, type ItemProgress, type JoinPlan, type LaunchExited, type Launched, type SyncDone, type SyncProgress } from "./types";
+  import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
+  import { fmtBytes, type ItemProgress, type JoinPlan, type LaunchExited, type Launched, type ServerSlots, type SyncDone, type SyncProgress } from "./types";
 
   let { serverId, onClose }: { serverId: string; onClose: () => void } = $props();
 
-  type Phase = "planning" | "ready" | "syncing" | "launching" | "running" | "exited" | "error";
+  type Phase = "planning" | "ready" | "syncing" | "waiting" | "launching" | "running" | "exited" | "error";
   let phase = $state<Phase>("planning");
   let plan = $state<JoinPlan | null>(null);
   let error = $state<string | null>(null);
@@ -18,11 +21,31 @@
   let autoLaunch = false;
   const job = Date.now();
 
+  // Live slot count, refreshed on open and while waiting.
+  const POLL_MS = 10_000;
+  let slots = $state<ServerSlots | null>(null);
+  let waitForSlot = $state(false);
+  let checks = $state(0);
+  let waitedSecs = $state(0);
+  let pollTimer: ReturnType<typeof setInterval> | undefined;
+  let clockTimer: ReturnType<typeof setInterval> | undefined;
+
+  const full = $derived(!!slots && slots.maxPlayers > 0 && slots.players >= slots.maxPlayers);
   const toSync = $derived(plan ? plan.mods.filter((m) => !m.installed || m.needsUpdate) : []);
   const canLaunch = $derived(!!plan && plan.gameFound && plan.steamRunning && plan.battleyePresent && toSync.length === 0 && (!plan.passwordRequired || password.length > 0));
   const canSync = $derived(!!plan && plan.steamRunning && toSync.length > 0);
   const downloadedBytes = $derived([...progress.values()].reduce((a, p) => a + (p.state === "installed" ? p.total : p.downloaded), 0));
   const totalBytes = $derived([...progress.values()].reduce((a, p) => a + p.total, 0));
+  const busy = $derived(phase === "syncing" || phase === "launching");
+
+  async function refreshSlots(): Promise<ServerSlots | null> {
+    try {
+      slots = await invoke<ServerSlots>("server_slots", { id: serverId });
+    } catch {
+      /* unreachable right now; keep the last snapshot */
+    }
+    return slots;
+  }
 
   $effect(() => {
     const unlisteners: UnlistenFn[] = [];
@@ -39,7 +62,7 @@
           if (ev.payload.ok) {
             if (plan) plan = { ...plan, mods: plan.mods.map((m) => ({ ...m, installed: true, needsUpdate: false })), missing: 0, updates: 0 };
             phase = "ready";
-            if (autoLaunch) void launch();
+            if (autoLaunch) void joinNow();
           } else {
             error = ev.payload.error ?? "Mod download failed";
             phase = "error";
@@ -52,6 +75,7 @@
           }
         }),
       );
+      void refreshSlots();
       try {
         plan = await invoke<JoinPlan>("join_plan", { id: serverId });
         phase = "ready";
@@ -60,7 +84,10 @@
         phase = "error";
       }
     })();
-    return () => unlisteners.forEach((u) => u());
+    return () => {
+      unlisteners.forEach((u) => u());
+      stopWaiting();
+    };
   });
 
   async function sync(thenLaunch: boolean) {
@@ -74,6 +101,49 @@
       error = String(e);
       phase = "error";
     }
+  }
+
+  /** Join: either straight away (DayZ queues in-game if needed) or after a slot frees up. */
+  async function joinNow() {
+    if (waitForSlot && full) startWaiting();
+    else await launch();
+  }
+
+  function startWaiting() {
+    stopWaiting();
+    phase = "waiting";
+    error = null;
+    checks = 0;
+    waitedSecs = 0;
+    const started = Date.now();
+    clockTimer = setInterval(() => (waitedSecs = Math.floor((Date.now() - started) / 1000)), 1000);
+    const poll = async () => {
+      const s = await refreshSlots();
+      checks += 1;
+      if (phase !== "waiting" || !s) return;
+      if (s.players < s.maxPlayers) {
+        stopWaiting();
+        try {
+          await getCurrentWindow().requestUserAttention(UserAttentionType.Informational);
+        } catch {
+          /* attention request not permitted; the launch is the signal */
+        }
+        await launch();
+      }
+    };
+    pollTimer = setInterval(() => void poll(), POLL_MS);
+    void poll();
+  }
+
+  function stopWaiting() {
+    clearInterval(pollTimer);
+    clearInterval(clockTimer);
+    pollTimer = clockTimer = undefined;
+  }
+
+  function cancelWaiting() {
+    stopWaiting();
+    phase = "ready";
   }
 
   async function launch() {
@@ -99,18 +169,30 @@
     failed: "Failed",
   };
 
+  const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+  function close() {
+    stopWaiting();
+    onClose();
+  }
+
   function onKey(e: KeyboardEvent) {
-    if (e.key === "Escape" && phase !== "syncing" && phase !== "launching") onClose();
+    if (e.key === "Escape" && !busy) close();
   }
 </script>
 
 <svelte:window onkeydown={onKey} />
 
-<div class="backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && phase !== "syncing" && onClose()}>
+<div class="backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && !busy && close()}>
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="join-title">
     <header>
       <h2 id="join-title">{plan?.name ?? "Join server"}</h2>
-      {#if plan}<span class="muted">{plan.ip}:{plan.gamePort} · v{plan.serverVersion}</span>{/if}
+      <span class="muted">
+        {#if plan}{plan.ip}:{plan.gamePort} · v{plan.serverVersion}{/if}
+        {#if slots}
+          · <span class:warn={full}>{slots.players}/{slots.maxPlayers}{#if slots.queue} · {slots.queue} in queue{/if}</span>
+        {/if}
+      </span>
     </header>
 
     {#if phase === "planning"}
@@ -154,7 +236,16 @@
       {#if plan.passwordRequired}
         <label class="field">
           Password
-          <input type="password" bind:value={password} autocomplete="off" disabled={phase === "syncing" || phase === "launching" || phase === "running"} />
+          <input type="password" bind:value={password} autocomplete="off" disabled={busy || phase === "waiting" || phase === "running"} />
+        </label>
+      {/if}
+
+      {#if full && (phase === "ready" || phase === "error")}
+        <label class="wait">
+          <input type="checkbox" bind:checked={waitForSlot} />
+          <span>
+            <strong>The server is full.</strong> Wait here for a free slot and join automatically (checked every 10 s). Leave this off to join now and stand in DayZ's own login queue.
+          </span>
         </label>
       {/if}
 
@@ -162,6 +253,11 @@
 
       {#if phase === "syncing" && syncInfo}
         <p class="status">Downloading via Steam… {syncInfo.installed}/{syncInfo.total} installed{#if totalBytes > 0} · {fmtBytes(downloadedBytes)} of {fmtBytes(totalBytes)}{/if}</p>
+      {:else if phase === "waiting"}
+        <p class="status">
+          Waiting for a free slot… {#if slots}{slots.players}/{slots.maxPlayers}{#if slots.queue} · {slots.queue} in queue{/if} · {/if}{checks} check{checks === 1 ? "" : "s"} · {mmss(waitedSecs)}
+        </p>
+        <p class="muted small">DayZ starts as soon as the server reports a free slot; the window will flash in the taskbar.</p>
       {:else if phase === "launching"}
         <p class="status">Starting DayZ through BattlEye…</p>
       {:else if phase === "running" && launched}
@@ -175,13 +271,18 @@
     {#if error}<p class="error">{error}</p>{/if}
 
     <footer>
-      <button class="btn secondary" onclick={onClose} disabled={phase === "syncing" || phase === "launching"}>{phase === "running" || phase === "exited" ? "Close" : "Cancel"}</button>
-      {#if phase === "ready" || phase === "error" || phase === "exited"}
-        {#if toSync.length}
-          <button class="btn" onclick={() => sync(true)} disabled={!canSync || (plan?.passwordRequired && !password)}>Download {toSync.length} mod{toSync.length === 1 ? "" : "s"} and join</button>
-          <button class="btn secondary" onclick={() => sync(false)} disabled={!canSync}>Download only</button>
-        {:else}
-          <button class="btn" onclick={launch} disabled={!canLaunch}>Join</button>
+      {#if phase === "waiting"}
+        <button class="btn secondary" onclick={cancelWaiting}>Stop waiting</button>
+        <button class="btn" onclick={() => { stopWaiting(); void launch(); }} disabled={!canLaunch}>Join now anyway</button>
+      {:else}
+        <button class="btn secondary" onclick={close} disabled={busy}>{phase === "running" || phase === "exited" ? "Close" : "Cancel"}</button>
+        {#if phase === "ready" || phase === "error" || phase === "exited"}
+          {#if toSync.length}
+            <button class="btn" onclick={() => sync(true)} disabled={!canSync || (plan?.passwordRequired && !password)}>Download {toSync.length} mod{toSync.length === 1 ? "" : "s"} and join</button>
+            <button class="btn secondary" onclick={() => sync(false)} disabled={!canSync}>Download only</button>
+          {:else}
+            <button class="btn" onclick={joinNow} disabled={!canLaunch}>{waitForSlot && full ? "Wait and join" : "Join"}</button>
+          {/if}
         {/if}
       {/if}
     </footer>
@@ -205,6 +306,9 @@
   .pfill { display: block; height: 100%; background: var(--accent); transition: width 200ms; }
   .field { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--fg-muted); }
   .field input { padding: 6px 10px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg); }
+  .wait { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: var(--radius); border: 1px solid color-mix(in srgb, var(--warn) 50%, var(--border)); font-size: 12.5px; color: var(--fg-muted); cursor: pointer; }
+  .wait input { margin-top: 2px; }
+  .wait strong { color: var(--fg); }
   .small { font-size: 12px; margin: 0; }
   .status { margin: 0; font-size: 12.5px; }
   .cmd code { display: block; font-size: 11px; white-space: pre-wrap; word-break: break-all; color: var(--fg-muted); margin-top: 4px; }
