@@ -4,6 +4,16 @@ Windows-only launcher for DayZ Standalone: key-free server list from Steam, dire
 
 Stack: Tauri 2 (Rust) + Svelte 5 + Vite. Design and research live in [docs/](docs/00-README.md).
 
+## Features
+
+- Server browser fed by Steam's own matchmaking list, with a virtualised table, filters (perspective, map, country, mod, queue, password, BattlEye, daytime, version, ping) and sorting.
+- Player counts verified directly with each server and cross-checked against Steam, so inflated and fabricated counts are flagged or hidden.
+- Country flags from an offline table; mods, population history and connected-session summary per server.
+- One-click join: missing Workshop mods are subscribed and downloaded through Steam, `!Workshop` junctions are created the way the official launcher does it, and DayZ starts through BattlEye. Full servers can be waited for.
+- Find servers by mod; mod management with updates and unsubscribe.
+- Favourites with alerts (free slot, back online), recent servers, direct connect, import of the official launcher's favourites.
+- Signed automatic updates, a 4 MB per-user installer, a Diagnostics view with a Performance section, and a Steam idle release so the launcher does not count as playtime while it sits open.
+
 ## Develop
 
 ```bash

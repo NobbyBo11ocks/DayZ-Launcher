@@ -14,3 +14,16 @@ Each milestone ends with its verification steps run and recorded in [09-decision
 | M7 ✅ 2026-09-21 | Polish and release | Signed updater (plugin + minisign key, GitHub releases endpoint; v0.1.0 published 2026-09-21, D-062), NSIS installer verified by silent install/run/uninstall, generated icon, Welcome overlay, diagnostics export, perf pass (Q16/Q17 measured and decided), unsigned installer by decision | **Done** on this machine (no VM available): install → Welcome → Join is three clicks; budgets in [05 §6](05-architecture-and-optimisation.md) updated with M7 numbers; D-055…D-059. Open: Q18 renderer growth check, release host for the updater endpoint |
 
 Out of scope for v1: Linux, server-owner listing/boosts, accounts, telemetry, LAN browser (cheap to add later via `lan_server_list`).
+
+## After v0.1.0 (all 2026-09-21, released as v0.1.1–v0.1.5)
+
+| Release | Added | Decisions |
+|---|---|---|
+| v0.1.1 | Details pane no longer re-queries in a loop | D-065 |
+| v0.1.2 | Installer defaults to `%LOCALAPPDATA%\Programs\DayZ Launcher` (custom NSIS template) | D-067 |
+| v0.1.3 | Collapsible details pane, no fill bars under counts, UI preferences in `settings.json` | D-069, D-070 |
+| v0.1.4 | Country flags (offline GeoIP), wait for a free slot when joining, mod management (update / unsubscribe) | D-073, D-074, D-075 |
+| v0.1.5 | Find servers by mod, Performance section in Diagnostics, Steam idle release setting, tidied details pane, single instance, favourite alerts, store lifetime fix | D-077–D-084 |
+| infra | GitHub Actions CI and tag-driven release workflow, release tools (`make_latest.js`, `verify_update_sig.js`, `nsis_template_check.js`) | D-063, D-071 |
+
+Candidates, not scheduled: Windows toast notifications for alerts when the launcher is minimised, launch-argument profiles, a DZSA list fallback when Steam is down, LAN browser, code signing (Q11).

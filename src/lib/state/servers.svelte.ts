@@ -307,12 +307,6 @@ class ServersStore {
     this.maybeAutoRefresh();
   }
 
-  stop() {
-    this.#unlisten.forEach((u) => u());
-    this.#unlisten = [];
-    this.#started = false;
-  }
-
   private maybeAutoRefresh() {
     if (this.steam?.initialized && !this.steam.refreshing && !this.#autoRefreshed) {
       this.#autoRefreshed = true;
