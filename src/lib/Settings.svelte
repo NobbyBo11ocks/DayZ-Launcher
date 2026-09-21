@@ -132,6 +132,18 @@
     <dt>Last refresh</dt>
     <dd>{servers.lastRefresh ? new Date(servers.lastRefresh * 1000).toLocaleString() : "never"}</dd>
   </dl>
+  {#if launch}
+    <label class="row">
+      <span class="label">Idle release</span>
+      <span class="inline">
+        after <input class="text num" type="number" min="0" max="1440" step="1" bind:value={launch.steamIdleMinutes} onchange={scheduleSave} aria-label="Minutes before the Steam session is released" /> min
+        <span class="muted">(0 = keep connected)</span>
+      </span>
+    </label>
+    <p class="muted note">
+      While the launcher is connected, Steam shows you as playing DayZ and counts the time as playtime, exactly like the official launcher. Releasing the session when idle stops that; it reconnects by itself for the next refresh or join.
+    </p>
+  {/if}
 
   <h2>Credits</h2>
   <p class="muted note">

@@ -113,9 +113,10 @@ pub struct SteamStatus {
 
 /// Release Steamworks after this long without a command or active job. Disabled by
 /// default: measured on 2026-09-21, `SteamAPI_Shutdown` unloads `steamclient64.dll`
-/// but the host's private bytes stayed at 61 MB (D-057), so the reconnect latency
-/// and "In-Game" status flapping buy nothing. `DAYZ_STEAM_IDLE_SECS=<n>` enables it
-/// for experiments.
+/// but the host's private bytes stayed at 61 MB (D-057). The reason to release is a
+/// different one (D-077): while a Steamworks session for app 221100 exists, Steam
+/// shows the user as playing DayZ and counts playtime. The Settings value drives it;
+/// `DAYZ_STEAM_IDLE_SECS=<n>` overrides it for experiments.
 fn idle_timeout() -> Option<Duration> {
     std::env::var("DAYZ_STEAM_IDLE_SECS")
         .ok()
@@ -255,21 +256,29 @@ pub struct SteamWorker {
     /// Unix seconds of the last completed refresh; seeded from the cache so the
     /// throttle survives restarts (D-042).
     last_done: Arc<Mutex<Option<i64>>>,
+    idle_after: Arc<Mutex<Option<Duration>>>,
     /// Only the original handle shuts the thread down when dropped.
     owner: bool,
 }
 
 impl SteamWorker {
-    pub fn spawn(events: UnboundedSender<SteamEvent>, last_refresh_unix: Option<i64>) -> Self {
+    /// `idle_after`: release the session after that much inactivity (Settings, D-077).
+    pub fn spawn(
+        events: UnboundedSender<SteamEvent>,
+        last_refresh_unix: Option<i64>,
+        idle_after: Option<Duration>,
+    ) -> Self {
         let (cmd, rx) = mpsc::channel();
         let status = Arc::new(Mutex::new(SteamStatus {
             app_id: DAYZ_APP_ID,
             ..Default::default()
         }));
         let last_done = Arc::new(Mutex::new(last_refresh_unix));
+        let idle_after = Arc::new(Mutex::new(idle_after));
         let shared = Shared {
             status: Arc::clone(&status),
             last_done: Arc::clone(&last_done),
+            idle_after: Arc::clone(&idle_after),
         };
         std::thread::Builder::new()
             .name("steamworks".into())
@@ -279,6 +288,7 @@ impl SteamWorker {
             cmd,
             status,
             last_done,
+            idle_after,
             owner: true,
         }
     }
@@ -289,8 +299,14 @@ impl SteamWorker {
             cmd: self.cmd.clone(),
             status: Arc::clone(&self.status),
             last_done: Arc::clone(&self.last_done),
+            idle_after: Arc::clone(&self.idle_after),
             owner: false,
         }
+    }
+
+    /// Changes the idle release timeout for the running thread (takes effect on its next tick).
+    pub fn set_idle_timeout(&self, d: Option<Duration>) {
+        *self.idle_after.lock().unwrap_or_else(|e| e.into_inner()) = d;
     }
 
     pub fn status(&self) -> SteamStatus {
@@ -406,6 +422,8 @@ impl Drop for SteamWorker {
 struct Shared {
     status: Arc<Mutex<SteamStatus>>,
     last_done: Arc<Mutex<Option<i64>>>,
+    /// Idle timeout from Settings (D-077); `None` keeps the session open.
+    idle_after: Arc<Mutex<Option<Duration>>>,
 }
 
 impl Shared {
@@ -623,7 +641,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
         });
     }
 
-    let idle_after = idle_timeout();
+    let env_idle = idle_timeout();
     let mut last_activity = Instant::now();
     let mut active: Option<ActiveRefresh> = None;
     let mut sync: Option<ActiveSync> = None;
@@ -721,6 +739,8 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
         }
 
         let busy = active.is_some() || sync.is_some() || unsub.is_some();
+        let idle_after =
+            env_idle.or_else(|| *shared.idle_after.lock().unwrap_or_else(|e| e.into_inner()));
         if busy {
             last_activity = Instant::now();
         } else if session.is_some() && idle_after.is_some_and(|d| last_activity.elapsed() >= d) {

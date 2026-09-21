@@ -1,6 +1,20 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import type { Diagnostics } from "./types";
+  import type { Diagnostics, PerfSample } from "./types";
+
+  // Release budgets from docs/05 §6 (D-078).
+  const BUDGET = { startMs: 1000, hostBytes: 90 * 1024 * 1024, totalBytes: 330 * 1024 * 1024 };
+  let perf = $state<PerfSample | null>(null);
+  let perfAt = $state("");
+  async function samplePerf() {
+    try {
+      perf = await invoke<PerfSample>("perf_sample");
+      perfAt = new Date().toLocaleTimeString();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+  const fmtDur = (ms: number) => (ms >= 60_000 ? `${Math.floor(ms / 60_000)} min ${Math.round((ms % 60_000) / 1000)} s` : `${(ms / 1000).toFixed(1)} s`);
 
   let data = $state<Diagnostics | null>(null);
   let error = $state<string | null>(null);
@@ -43,6 +57,7 @@
 
   $effect(() => {
     void load();
+    void samplePerf();
   });
 
   const fmtBytes = (n: number) =>
@@ -69,6 +84,24 @@
       <ul class="warnings">
         {#each data.warnings as w (w)}<li>{w}</li>{/each}
       </ul>
+    {/if}
+
+    <h2>Performance <button class="btn small" onclick={samplePerf}>Sample</button></h2>
+    {#if perf}
+      <dl class="kv">
+        <dt>Start-up</dt>
+        <dd class={perf.firstPaintMs == null ? "muted" : perf.firstPaintMs <= BUDGET.startMs ? "ok" : "warn"}>
+          {perf.firstPaintMs == null ? "no list painted yet" : `${perf.firstPaintMs} ms to the first list`} <span class="muted">(budget {BUDGET.startMs} ms)</span>
+        </dd>
+        <dt>Uptime</dt><dd>{fmtDur(perf.uptimeMs)} · CPU {fmtDur(perf.hostCpuMs)} ({((100 * perf.hostCpuMs) / Math.max(1, perf.uptimeMs)).toFixed(1)}% of one core)</dd>
+        <dt>Host memory</dt>
+        <dd class={perf.hostPrivateBytes <= BUDGET.hostBytes ? "ok" : "warn"}>{fmtBytes(perf.hostPrivateBytes)} <span class="muted">(budget {fmtBytes(BUDGET.hostBytes)})</span></dd>
+        <dt>WebView memory</dt><dd>{fmtBytes(perf.webviewPrivateBytes)} <span class="muted">across {perf.webviewProcesses} processes</span></dd>
+        <dt>Total</dt>
+        <dd class={perf.totalPrivateBytes <= BUDGET.totalBytes ? "ok" : "warn"}>{fmtBytes(perf.totalPrivateBytes)} <span class="muted">(budget {fmtBytes(BUDGET.totalBytes)}; sampled {perfAt})</span></dd>
+      </dl>
+    {:else}
+      <p class="muted">Sampling…</p>
     {/if}
 
     <h2>Steam</h2>
@@ -175,4 +208,5 @@
   .btn:hover { border-color: var(--accent); }
   .btn:disabled { opacity: 0.6; cursor: default; }
   .btn:focus-visible { outline: 2px solid var(--accent); }
+  .btn.small { font-size: 11px; padding: 2px 8px; margin-left: 8px; text-transform: none; letter-spacing: 0; font-weight: 500; }
 </style>

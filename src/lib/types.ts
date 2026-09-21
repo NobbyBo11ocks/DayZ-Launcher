@@ -290,6 +290,8 @@ export type Settings = {
   skipIntro: boolean;
   noSplash: boolean;
   noPause: boolean;
+  /** Minutes of inactivity after which the Steam session is released; 0 = never (D-077). */
+  steamIdleMinutes: number;
   /** Read-only for `settings_set`; written through `ui_prefs_set`. */
   ui: UiPrefs;
 };
@@ -302,6 +304,17 @@ export type ModPlanItem = {
   installed: boolean;
   needsUpdate: boolean;
   folder: string | null;
+};
+
+/** Self-measurement from the host (D-078); bytes are private (commit) sizes. */
+export type PerfSample = {
+  uptimeMs: number;
+  firstPaintMs: number | null;
+  hostPrivateBytes: number;
+  hostCpuMs: number;
+  webviewPrivateBytes: number;
+  webviewProcesses: number;
+  totalPrivateBytes: number;
 };
 
 /** One Workshop item unsubscribed through Steam (D-075). */

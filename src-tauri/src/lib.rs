@@ -7,6 +7,7 @@ mod commands;
 pub mod error;
 pub mod geoip;
 pub mod launch;
+pub mod perf;
 pub mod settings;
 pub mod steam;
 
@@ -36,6 +37,15 @@ const POPULATION_MAX_AGE_SECS: i64 = 7 * 24 * 3600;
 pub fn run() {
     let _ = STARTED.set(Instant::now());
     tauri::Builder::default()
+        // Must be the first plugin (its README): a second launch hands its arguments
+        // to the running instance, which just comes to the front (D-079).
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
@@ -51,7 +61,7 @@ pub fn run() {
                 .and_then(|c| c.get_meta("last_refresh").ok().flatten())
                 .and_then(|v| v.parse::<i64>().ok());
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<SteamEvent>();
-            let steam = SteamWorker::spawn(tx, last_refresh);
+            let steam = SteamWorker::spawn(tx, last_refresh, settings.get().steam_idle_timeout());
             let a2s = a2s::Client::default();
             app.manage(AppState {
                 steam,
@@ -155,6 +165,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_info,
+            commands::perf_first_paint,
+            commands::perf_sample,
             commands::diagnostics,
             commands::diagnostics_export,
             commands::local_game_version,

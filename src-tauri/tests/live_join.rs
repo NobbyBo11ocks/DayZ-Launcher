@@ -24,7 +24,7 @@ fn live_join() {
 
     // --- Steam -------------------------------------------------------------
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<SteamEvent>();
-    let steam = SteamWorker::spawn(tx, None);
+    let steam = SteamWorker::spawn(tx, None, None);
     let t0 = Instant::now();
     loop {
         match rx.try_recv() {

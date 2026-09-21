@@ -4,6 +4,10 @@
   import FilterBar from "./FilterBar.svelte";
   import ServerTable from "./ServerTable.svelte";
   import { servers } from "./state/servers.svelte";
+  import { invoke } from "@tauri-apps/api/core";
+
+  /** Per mount; the backend keeps only the first mark it ever receives. */
+  let firstPaintMarked = false;
 
   let filterBar = $state<FilterBar | null>(null);
   let direct = $state("");
@@ -21,6 +25,13 @@
   $effect(() => {
     void servers.start();
     return () => servers.stop();
+  });
+
+  // Start-up timing for Diagnostics (D-078): the first frame that shows rows.
+  $effect(() => {
+    if (firstPaintMarked || servers.list.length === 0) return;
+    firstPaintMarked = true;
+    requestAnimationFrame(() => void invoke("perf_first_paint").catch(() => {}));
   });
 
   function onKey(e: KeyboardEvent) {

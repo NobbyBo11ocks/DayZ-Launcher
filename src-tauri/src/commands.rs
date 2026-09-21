@@ -50,6 +50,20 @@ pub fn app_info() -> AppInfo {
     }
 }
 
+/// The UI reports its first frame with server rows (D-078); only the first call counts.
+#[tauri::command]
+pub fn perf_first_paint() {
+    crate::perf::mark_first_paint();
+}
+
+/// Memory and CPU of the host and its WebView2 processes, plus start-up timing (D-078).
+#[tauri::command]
+pub async fn perf_sample() -> AppResult<crate::perf::PerfSample> {
+    tauri::async_runtime::spawn_blocking(crate::perf::sample)
+        .await
+        .map_err(|e| AppError::Internal(format!("perf task failed: {e}")))
+}
+
 /// Full Steam / DayZ / Workshop inventory (M1).
 #[tauri::command]
 pub async fn diagnostics() -> AppResult<Diagnostics> {
@@ -112,6 +126,7 @@ pub async fn diagnostics_export(
         "steam": steam,
         "settings": settings,
         "lastRefresh": last_refresh,
+        "perf": crate::perf::sample(),
         "diagnostics": diag,
     });
     let json =
@@ -151,12 +166,16 @@ pub fn settings_get(state: State<'_, AppState>) -> Settings {
 }
 
 /// Replaces the launch options only; UI preferences are written through `ui_prefs_set`.
+/// The Steam idle timeout (D-077) is pushed to the running worker at the same time.
 #[tauri::command]
 pub fn settings_set(state: State<'_, AppState>, settings: Settings) -> AppResult<()> {
+    let idle = settings.steam_idle_timeout();
     state
         .settings
         .set_launch(settings)
-        .map_err(|e| AppError::Internal(format!("settings: {e}")))
+        .map_err(|e| AppError::Internal(format!("settings: {e}")))?;
+    state.steam.set_idle_timeout(idle);
+    Ok(())
 }
 
 /// Merges a partial UI-preferences object (theme, accent, filters, onboarded,

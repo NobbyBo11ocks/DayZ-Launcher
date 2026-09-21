@@ -62,6 +62,9 @@ pub struct Settings {
     pub skip_intro: bool,
     pub no_splash: bool,
     pub no_pause: bool,
+    /// Release the Steamworks session after this many idle minutes (0 = never). While
+    /// connected, Steam shows the user as playing DayZ and counts playtime (D-077).
+    pub steam_idle_minutes: u32,
     pub ui: UiPrefs,
 }
 
@@ -73,8 +76,17 @@ impl Default for Settings {
             skip_intro: true,
             no_splash: true,
             no_pause: false,
+            steam_idle_minutes: 15,
             ui: UiPrefs::default(),
         }
+    }
+}
+
+impl Settings {
+    /// Idle timeout for the Steam session, `None` when disabled.
+    pub fn steam_idle_timeout(&self) -> Option<std::time::Duration> {
+        (self.steam_idle_minutes > 0)
+            .then(|| std::time::Duration::from_secs(u64::from(self.steam_idle_minutes) * 60))
     }
 }
 
