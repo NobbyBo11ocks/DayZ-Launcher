@@ -19,8 +19,8 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use steamworks::{
-    Client, GameServerItem, ItemState, MatchmakingServers, PublishedFileId, ServerListCallbacks,
-    ServerListRequest, ServerResponse, UGC,
+    Client, FriendFlags, FriendState, GameServerItem, ItemState, MatchmakingServers,
+    PublishedFileId, ServerListCallbacks, ServerListRequest, ServerResponse, UGC,
 };
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -38,6 +38,9 @@ pub const STEAM_LIST_CAP: usize = 10_000;
 pub const MIN_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 
 pub type Filters = HashMap<String, String>;
+
+/// Pseudo filter key selecting Steam's LAN server discovery (D-087).
+pub const LAN_PARTITION_KEY: &str = "lan";
 
 /// Maps with the most genuinely empty servers (cache statistics 2026-09-21, D-044);
 /// each `noplayers` + `map` partition stays far below the 10 000 cap.
@@ -166,6 +169,34 @@ pub struct RefreshDone {
     pub capped: bool,
     /// Remaining partitions were skipped after repeated empty master answers (throttling).
     pub stopped_early: bool,
+    /// `steam` for the master server, `lan` for LAN discovery (D-087), `dzsa` for
+    /// the fallback list (D-089).
+    pub source: &'static str,
+}
+
+/// Where a friend is playing, from `ISteamFriends::GetFriendGamePlayed` (S-64).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FriendServer {
+    pub ip: String,
+    pub game_port: u16,
+    pub query_port: u16,
+}
+
+/// One Steam friend for the Friends tab (D-092).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FriendInfo {
+    /// Decimal SteamID64 as text: JSON numbers lose precision above 2^53.
+    pub steam_id: String,
+    pub name: String,
+    /// `offline | online | invisible | busy | away | snooze | looking_to_trade | looking_to_play`
+    pub state: &'static str,
+    /// In DayZ (app 221100) right now.
+    pub in_dayz: bool,
+    /// Set when Steam knows the server (game address and port announced by the client).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server: Option<FriendServer>,
 }
 
 /// Workshop item metadata from `ISteamUGC` details query (M5 join plan).
@@ -233,12 +264,16 @@ enum Cmd {
         ids: Vec<u64>,
         reply: UnsubscribeReply,
     },
+    Friends {
+        reply: FriendsReply,
+    },
     Shutdown,
 }
 
 /// Per-item outcome of an unsubscribe request.
 pub type UnsubscribeResults = Vec<(u64, Result<(), String>)>;
 type UnsubscribeReply = mpsc::Sender<Result<UnsubscribeResults, String>>;
+type FriendsReply = mpsc::Sender<Result<Vec<FriendInfo>, String>>;
 
 /// Steam answers at most this many items per details request (`kNumUGCResultsPerPage`).
 const DETAILS_PAGE: usize = 50;
@@ -385,6 +420,21 @@ impl SteamWorker {
             .map_err(|_| "steamworks thread has stopped".to_string())?;
         rx.recv_timeout(UNSUBSCRIBE_TIMEOUT + Duration::from_secs(5))
             .map_err(|_| "Steam did not answer the unsubscribe request".to_string())?
+    }
+
+    /// The friends list with presence and game server (D-092); Steam answers from
+    /// its local cache, so this is quick. Blocking: call from a blocking task.
+    pub fn friends(&self) -> Result<Vec<FriendInfo>, String> {
+        let s = self.status();
+        if !s.initialized {
+            return Err(s.error.unwrap_or_else(|| "Steam is not initialised".into()));
+        }
+        let (reply, rx) = mpsc::channel();
+        self.cmd
+            .send(Cmd::Friends { reply })
+            .map_err(|_| "steamworks thread has stopped".to_string())?;
+        rx.recv_timeout(Duration::from_secs(10))
+            .map_err(|_| "Steam did not answer the friends query in 10 s".to_string())?
     }
 
     /// Workshop titles and sizes, fetched in pages of 50. Blocking: call from a blocking task.
@@ -677,6 +727,9 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                             Cmd::Unsubscribe { reply, .. } => {
                                 let _ = reply.send(Err(e));
                             }
+                            Cmd::Friends { reply } => {
+                                let _ = reply.send(Err(e));
+                            }
                             Cmd::Sync { job, .. } => {
                                 let _ = events.send(SteamEvent::SyncDone(SyncDone {
                                     job,
@@ -713,6 +766,9 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                         let _ = old.reply.send(Err("superseded by a newer request".into()));
                     }
                     unsub = Some(start_unsubscribe(ugc, ids, reply));
+                }
+                Cmd::Friends { reply } => {
+                    let _ = reply.send(Ok(list_friends(&s.client)));
                 }
                 Cmd::Refresh(mut parts) => {
                     if active.is_some() {
@@ -769,7 +825,12 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                         Err(e) => shared.set_status(&events, |s| s.error = Some(e)),
                     },
                     None => {
+                        let lan_only = !r.results.is_empty()
+                            && r.results
+                                .iter()
+                                .all(|p| p.filters.contains_key(LAN_PARTITION_KEY));
                         let done = RefreshDone {
+                            source: if lan_only { "lan" } else { "steam" },
                             total: r.results.iter().map(|p| p.total).sum(),
                             responded: r.results.iter().map(|p| p.responded).sum(),
                             failed: r.results.iter().map(|p| p.failed).sum(),
@@ -893,6 +954,57 @@ fn tick_unsubscribe(u: &mut ActiveUnsubscribe) -> bool {
     true
 }
 
+fn friend_state_name(state: FriendState) -> &'static str {
+    match state {
+        FriendState::Offline => "offline",
+        FriendState::Online => "online",
+        FriendState::Invisible => "invisible",
+        FriendState::Busy => "busy",
+        FriendState::Away => "away",
+        FriendState::Snooze => "snooze",
+        FriendState::LookingToTrade => "looking_to_trade",
+        FriendState::LookingToPlay => "looking_to_play",
+    }
+}
+
+/// Regular friends (`FriendFlags::IMMEDIATE`) with presence and, for those in DayZ,
+/// the server Steam knows them on (S-64). Sorted: in DayZ first, then online, then
+/// by name. `GameId::app_id` masks the low 24 bits, which is where the app id lives.
+fn list_friends(client: &Client) -> Vec<FriendInfo> {
+    let friends = client.friends();
+    let mut out: Vec<FriendInfo> = friends
+        .get_friends(FriendFlags::IMMEDIATE)
+        .iter()
+        .map(|f| {
+            let game = f.game_played();
+            let in_dayz = game
+                .as_ref()
+                .is_some_and(|g| g.game.app_id().0 == DAYZ_APP_ID);
+            let server = game
+                .filter(|g| in_dayz && !g.game_address.is_unspecified() && g.game_port != 0)
+                .map(|g| FriendServer {
+                    ip: g.game_address.to_string(),
+                    game_port: g.game_port,
+                    query_port: g.query_port,
+                });
+            FriendInfo {
+                steam_id: f.id().raw().to_string(),
+                name: f.name(),
+                state: friend_state_name(f.state()),
+                in_dayz,
+                server,
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.in_dayz
+            .cmp(&a.in_dayz)
+            .then((a.state == "offline").cmp(&(b.state == "offline")))
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    out
+}
+
 fn start_partition(mms: &MatchmakingServers, filters: Filters) -> Result<ActivePartition, String> {
     let rows = Rc::new(RefCell::new(Vec::with_capacity(256)));
     let responded = Rc::new(Cell::new(0usize));
@@ -933,13 +1045,18 @@ fn start_partition(mms: &MatchmakingServers, filters: Filters) -> Result<ActiveP
         ),
     );
 
-    let borrowed: HashMap<&str, &str> = filters
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_str()))
-        .collect();
-    let req = mms
-        .internet_server_list(DAYZ_APP_ID, &borrowed, callbacks)
-        .map_err(|()| "server list filter key or value exceeds 255 bytes".to_string())?;
+    // A partition with the pseudo-key `lan` asks Steam's LAN discovery instead of the
+    // master server (D-087); it takes no filters and its rows carry no Steam count.
+    let req = if filters.contains_key(LAN_PARTITION_KEY) {
+        mms.lan_server_list(DAYZ_APP_ID, callbacks)
+    } else {
+        let borrowed: HashMap<&str, &str> = filters
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        mms.internet_server_list(DAYZ_APP_ID, &borrowed, callbacks)
+            .map_err(|()| "server list filter key or value exceeds 255 bytes".to_string())?
+    };
     Ok(ActivePartition {
         filters,
         req,

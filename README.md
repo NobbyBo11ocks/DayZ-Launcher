@@ -11,8 +11,12 @@ Stack: Tauri 2 (Rust) + Svelte 5 + Vite. Design and research live in [docs/](doc
 - Country flags from an offline table; mods, population history and connected-session summary per server.
 - One-click join: missing Workshop mods are subscribed and downloaded through Steam, `!Workshop` junctions are created the way the official launcher does it, and DayZ starts through BattlEye. Full servers can be waited for.
 - Find servers by mod; mod management with updates and unsubscribe.
-- Favourites with alerts (free slot, back online), recent servers, direct connect, import of the official launcher's favourites.
-- Signed automatic updates, a 4 MB per-user installer, a Diagnostics view with a Performance section, and a Steam idle release so the launcher does not count as playtime while it sits open.
+- Favourites with alerts (free slot, back online; Windows toast when the launcher is in the background), recent servers, direct connect, import of the official launcher's favourites.
+- LAN tab (Steam's LAN discovery) and Friends tab: who is in DayZ, on which server, and a Join button.
+- Launch profiles: save sets of launch options and pick one in the join dialog.
+- If Steam is unavailable, the public DZSA list can be loaded instead so you can still browse.
+- Signed automatic updates, a 4 MB per-user installer, a Diagnostics view with a Performance section and a confirmed clean-up of dangling `!Workshop` junctions, and a Steam idle release so the launcher does not count as playtime while it sits open.
+- Slim frameless window; every view except the server list fits the window without scrolling.
 
 ## Develop
 

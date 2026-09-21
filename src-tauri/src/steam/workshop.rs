@@ -187,11 +187,76 @@ pub fn junctions(workshop_dir: &Path) -> Vec<Junction> {
     out
 }
 
+/// Outcome of [`remove_dangling`] for one junction: its name and the result.
+pub type JunctionRemoval = (String, Result<(), String>);
+
+/// Removes junctions in `workshop_dir` whose target folder no longer exists (D-093):
+/// the reparse point is deleted, then the empty directory that carried it. The
+/// inventory is re-read here, so a target that came back since the last scan is
+/// kept, and live junctions are never touched whoever created them.
+pub fn remove_dangling(workshop_dir: &Path) -> Vec<JunctionRemoval> {
+    junctions(workshop_dir)
+        .into_iter()
+        .filter(|j| !j.target_exists)
+        .map(|j| {
+            let link = workshop_dir.join(&j.name);
+            let r = junction::delete(&link)
+                .and_then(|()| std::fs::remove_dir(&link))
+                .map_err(|e| e.to_string());
+            (j.name, r)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const ACF: &str = include_str!("../../tests/fixtures/appworkshop_221100.acf");
+
+    /// Real NTFS junctions in a temp folder: one live, one whose target was deleted.
+    #[test]
+    fn remove_dangling_keeps_live_junctions() {
+        let tmp = std::env::temp_dir().join(format!("dzl-dangling-test-{}", std::process::id()));
+        let ws = tmp.join("!Workshop");
+        let live_target = tmp.join("content").join("1559212036");
+        let gone_target = tmp.join("content").join("999");
+        std::fs::create_dir_all(&live_target).unwrap();
+        std::fs::create_dir_all(&gone_target).unwrap();
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(live_target.join("meta.cpp"), "name = \"CF\";").unwrap();
+        std::fs::write(ws.join("!DO_NOT_CHANGE_FILES_IN_THESE_FOLDERS"), "").unwrap();
+        junction::create(&live_target, ws.join("@CF")).unwrap();
+        junction::create(&gone_target, ws.join("@Gone")).unwrap();
+        std::fs::remove_dir(&gone_target).unwrap();
+
+        let dangling: Vec<String> = junctions(&ws)
+            .into_iter()
+            .filter(|j| !j.target_exists)
+            .map(|j| j.name)
+            .collect();
+        assert_eq!(dangling, ["@Gone"]);
+
+        let removed = remove_dangling(&ws);
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].0, "@Gone");
+        assert!(removed[0].1.is_ok(), "{:?}", removed[0].1);
+        assert!(std::fs::symlink_metadata(ws.join("@Gone")).is_err());
+
+        let after = junctions(&ws);
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].name, "@CF");
+        assert!(after[0].target_exists);
+        assert!(
+            live_target.join("meta.cpp").is_file(),
+            "live target untouched"
+        );
+        assert!(remove_dangling(&ws).is_empty(), "nothing left to remove");
+
+        let _ = junction::delete(ws.join("@CF"));
+        let _ = std::fs::remove_dir(ws.join("@CF"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 
     #[test]
     fn appworkshop_live_fixture() {

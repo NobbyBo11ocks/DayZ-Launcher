@@ -49,7 +49,8 @@
     const parts: string[] = [];
     parts.push(`${servers.list.length} shown of ${servers.rows.size}`);
     if (s?.refreshing) parts.push("refreshing from Steam…");
-    else if (d) parts.push(`${d.responded} servers from Steam in ${(d.elapsedMs / 1000).toFixed(0)} s`);
+    else if (servers.dzsaLoading) parts.push("downloading the DZSA list…");
+    else if (d) parts.push(`${d.responded} servers from ${d.source === "dzsa" ? "DZSA" : d.source === "lan" ? "the LAN" : "Steam"} in ${(d.elapsedMs / 1000).toFixed(0)} s`);
     if (servers.verifying && !v) parts.push("verifying player counts…");
     else if (v) parts.push(`${v.verified} verified · ${v.inflated + v.unverifiable + v.synthetic} fake · ${v.offline} offline`);
     if (servers.modScanning) parts.push(`scanning mod lists (${servers.modScan?.total ?? 0})…`);
@@ -77,7 +78,10 @@
       </form>
       <span class="muted status">{status}</span>
       {#if servers.steam && !servers.steam.initialized}
-        <span class="warn">Steam unavailable: {servers.steam.error ?? "not initialised"}. Cached data only.</span>
+        <span class="warn">Steam unavailable: {servers.steam.error ?? "not initialised"}.</span>
+        <button class="btn secondary" onclick={() => servers.loadDzsa()} disabled={servers.dzsaLoading} title="Download the DZSA Launcher's public server list (about 24 MB) instead">
+          {servers.dzsaLoading ? "Downloading…" : "Load list from DZSA"}
+        </button>
       {/if}
       {#if servers.error}<span class="error">{servers.error}</span>{/if}
     </div>

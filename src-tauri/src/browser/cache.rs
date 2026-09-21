@@ -464,6 +464,33 @@ impl Cache {
         tx.commit()
     }
 
+    /// Same as [`Self::replace_server_mods`] for many servers in one transaction (DZSA import).
+    pub fn replace_server_mods_many(
+        &mut self,
+        list: &[(String, Vec<(u64, String)>)],
+        now: i64,
+    ) -> rusqlite::Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut del = tx.prepare_cached("DELETE FROM server_mods WHERE server_id = ?1")?;
+            let mut ins = tx.prepare_cached(
+                "INSERT OR REPLACE INTO server_mods (server_id, mod_id, name) VALUES (?1, ?2, ?3)",
+            )?;
+            let mut at = tx.prepare_cached(
+                "INSERT INTO server_mods_at (server_id, scanned_at, mod_count) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(server_id) DO UPDATE SET scanned_at = excluded.scanned_at, mod_count = excluded.mod_count",
+            )?;
+            for (id, mods) in list {
+                del.execute(params![id])?;
+                for (mid, name) in mods {
+                    ins.execute(params![id, *mid as i64, name])?;
+                }
+                at.execute(params![id, now, mods.len() as i64])?;
+            }
+        }
+        tx.commit()
+    }
+
     /// Unix seconds of each server's last mod scan.
     pub fn mods_scanned(&self) -> rusqlite::Result<HashMap<String, i64>> {
         let mut stmt = self

@@ -2,7 +2,9 @@
   import { invoke } from "@tauri-apps/api/core";
   import Diagnostics from "./lib/Diagnostics.svelte";
   import Favourites from "./lib/Favourites.svelte";
+  import Friends from "./lib/Friends.svelte";
   import JoinDialog from "./lib/JoinDialog.svelte";
+  import Lan from "./lib/Lan.svelte";
   import Mods from "./lib/Mods.svelte";
   import Recent from "./lib/Recent.svelte";
   import Servers from "./lib/Servers.svelte";
@@ -67,7 +69,9 @@
 
   const sections = [
     { id: "servers", label: "Servers", glyph: "≡" },
+    { id: "lan", label: "LAN", glyph: "⌂" },
     { id: "favourites", label: "Favourites", glyph: "★" },
+    { id: "friends", label: "Friends", glyph: "☺" },
     { id: "recent", label: "Recent", glyph: "↺" },
     { id: "mods", label: "Mods", glyph: "▦" },
     { id: "settings", label: "Settings", glyph: "⚙" },
@@ -75,6 +79,8 @@
   ] as const;
   type Section = (typeof sections)[number]["id"];
   let active = $state<Section>("servers");
+  /** List views manage their own edges; the rest get padding and must fit the viewport (D-094). */
+  const listViews: ReadonlySet<Section> = new Set<Section>(["servers", "lan", "favourites", "friends"]);
 
   // A view can ask for a section switch (Mods → Servers with a mod filter, D-080).
   $effect(() => {
@@ -87,7 +93,7 @@
 </script>
 
 <div class="shell">
-  <TitleBar subtitle={updates.state === "available" ? `v${info?.version ?? ""} · update ${updates.version} available (Settings)` : info ? `v${info.version}` : ""} />
+  <TitleBar notice={updates.state === "available" ? `Update ${updates.version} available in Settings` : ""} />
 
   <nav class="rail" aria-label="Sections">
     {#each sections as s (s.id)}
@@ -98,11 +104,15 @@
     {/each}
   </nav>
 
-  <main class="content" class:padded={active !== "servers" && active !== "favourites"}>
+  <main class="content" class:padded={!listViews.has(active)}>
     {#if active === "servers"}
       <Servers />
+    {:else if active === "lan"}
+      <Lan />
     {:else if active === "favourites"}
       <Favourites />
+    {:else if active === "friends"}
+      <Friends />
     {:else if active === "recent"}
       <Recent />
     {:else if active === "mods"}

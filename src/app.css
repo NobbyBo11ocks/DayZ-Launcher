@@ -67,7 +67,7 @@ button {
   display: grid;
   height: 100vh;
   grid-template-columns: 180px 1fr;
-  grid-template-rows: 40px 1fr;
+  grid-template-rows: 30px 1fr;
   grid-template-areas:
     "top top"
     "rail main";
@@ -125,9 +125,18 @@ button {
   overflow: hidden;
 }
 
+/* Padded views fit the viewport (D-094): the page never scrolls, only a table
+   or column inside a view does when the window is smaller than its content. */
 .content.padded {
-  padding: 16px 20px;
-  overflow: auto;
+  padding: 14px 20px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.content.padded > * {
+  flex: 1;
+  min-height: 0;
 }
 
 .muted {

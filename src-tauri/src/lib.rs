@@ -48,6 +48,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let db_path = app.path().app_local_data_dir()?.join("cache.db");
             let cache = Arc::new(Mutex::new(Cache::open(&db_path)?));
@@ -190,6 +191,7 @@ pub fn run() {
             commands::ui_prefs_set,
             commands::servers_cached,
             commands::servers_refresh,
+            commands::servers_dzsa,
             commands::servers_verify,
             commands::server_details,
             commands::server_slots,
@@ -198,6 +200,8 @@ pub fn run() {
             commands::mods_unsubscribe,
             commands::mods_index,
             commands::mods_scan,
+            commands::junctions_remove_dangling,
+            commands::friends_list,
             commands::launch_game,
             commands::favourites_list,
             commands::favourite_set,

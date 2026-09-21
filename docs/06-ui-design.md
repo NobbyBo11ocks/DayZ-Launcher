@@ -4,22 +4,26 @@ Goal: the fastest way from "open launcher" to "in game", in a dark, quiet, infor
 
 ## 1. Window and layout
 
-- Default 1280×800, minimum 960×600, remembered via `tauri-plugin-window-state`. Custom title bar (`decorations: false`, drag region) so the theme covers the whole window; native minimise/maximise/close buttons drawn by us.
+- Default 1280×800, minimum 960×600. Custom title bar (`decorations: false`, drag region) so the theme covers the whole window: 30 px high, no app name, an update notice when one is pending, and our own minimise/maximise/close buttons (D-091).
 - Three regions:
 
 ```text
 ┌──────────────────────────────────────────────────────────────────┐
-│ ⟵ rail ⟶ │ search ▢ quick-filter chips … │ profile name │ ▭ ✕   │
-├──────────┼───────────────────────────────┬────────────────────────┤
-│ Servers  │ virtualised table             │ details pane           │
+│ (drag region)                              update notice │ ▭ ✕   │
+├──────────┬───────────────────────────────┬────────────────────────┤
+│ Servers  │ filter bar                    │                        │
+│ LAN      │ virtualised table             │ details pane           │
 │ Favs     │ name · map · players/queue    │ header + JOIN          │
-│ Recent   │ time · ping · flags           │ info grid              │
-│ Mods     │ (sortable columns)            │ mods (state per mod)   │
-│ Settings │                               │ population sparkline   │
+│ Friends  │ time · ping · flags           │ info grid              │
+│ Recent   │ (sortable columns)            │ mods (state per mod)   │
+│ Mods     │                               │ population sparkline   │
+│ Settings │                               │                        │
+│ Diagn.   │                               │                        │
 └──────────┴───────────────────────────────┴────────────────────────┘
 ```
 
-- Responsive: rail collapses to icons < 1100 px; details pane becomes a slide-over < 1000 px; table drops the "time" and "version" columns < 900 px.
+- Responsive: rail collapses to icons < 1100 px; details pane hidden < 1000 px; table drops the "time" and "version" columns < 900 px.
+- Only the server list views scroll their table. Recent, Mods, Settings, Diagnostics and Friends fit the viewport (`.content.padded` is `overflow: hidden`); when the window is smaller than their content, a table or a column scrolls on its own, never the page (D-094).
 
 ## 2. Server table
 

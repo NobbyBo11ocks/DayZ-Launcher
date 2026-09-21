@@ -1,15 +1,16 @@
 <script lang="ts">
   // Frameless window chrome (docs/06 §1). Needs core:window:allow-{minimize,
   // toggle-maximize,close,start-dragging} in capabilities/default.json.
+  // Slim and unlabelled (D-091): the bar is a drag handle plus the three controls;
+  // only an update notice appears in it.
   import { getCurrentWindow } from "@tauri-apps/api/window";
 
-  let { title = "DayZ Launcher", subtitle = "" }: { title?: string; subtitle?: string } = $props();
+  let { notice = "" }: { notice?: string } = $props();
   const win = getCurrentWindow();
 </script>
 
 <header class="titlebar" data-tauri-drag-region>
-  <span class="brand" data-tauri-drag-region>{title}</span>
-  {#if subtitle}<span class="muted" data-tauri-drag-region>{subtitle}</span>{/if}
+  {#if notice}<span class="notice" data-tauri-drag-region>{notice}</span>{/if}
   <span class="spacer" data-tauri-drag-region></span>
   <div class="controls">
     <button class="wbtn" aria-label="Minimise" onclick={() => win.minimize()}>
@@ -25,11 +26,11 @@
 </header>
 
 <style>
-  .titlebar { grid-area: top; display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 0 0 14px; background: var(--bg-elev); border-bottom: 1px solid var(--border); user-select: none; }
-  .brand { font-weight: 600; font-size: 14px; }
+  .titlebar { grid-area: top; display: flex; align-items: center; gap: 12px; height: 30px; padding: 0 0 0 12px; background: var(--bg-elev); border-bottom: 1px solid var(--border); user-select: none; }
+  .notice { font-size: 12px; color: var(--accent); }
   .spacer { flex: 1; height: 100%; }
   .controls { display: flex; height: 100%; }
-  .wbtn { all: unset; width: 46px; height: 100%; display: inline-flex; align-items: center; justify-content: center; color: var(--fg-muted); cursor: default; }
+  .wbtn { all: unset; width: 40px; height: 100%; display: inline-flex; align-items: center; justify-content: center; color: var(--fg-muted); cursor: default; }
   .wbtn:hover { background: var(--bg-row); color: var(--fg); }
   .wbtn.close:hover { background: #e81123; color: #fff; }
   .wbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

@@ -116,6 +116,7 @@
   {#if notice}<p class="ok small">{notice}</p>{/if}
   {#if data && !data.workshop}<p class="muted">No Workshop items installed for DayZ.</p>{/if}
   {#if items.length}
+    <div class="scroll">
     <table>
       <thead>
         <tr>
@@ -157,13 +158,18 @@
         {/each}
       </tbody>
     </table>
+    </div>
   {/if}
-  <p class="muted small">Mods are downloaded by Steam when you join a server that needs them. Junctions in <code>!Workshop</code> are shared with the official launcher and never deleted.</p>
+  <p class="muted small">Mods are downloaded by Steam when you join a server that needs them. Junctions in <code>!Workshop</code> are shared with the official launcher and never deleted by the launcher on its own; dangling ones can be removed from Diagnostics.</p>
 </section>
 
 <style>
-  .mods { display: flex; flex-direction: column; gap: 10px; }
+  /* Fits the viewport; only the table scrolls when the inventory is long (D-094). */
+  .mods { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
   .row { display: flex; align-items: center; gap: 12px; }
+  h1 { margin: 0; }
+  .scroll { flex: 1; min-height: 0; overflow: auto; }
+  th { position: sticky; top: 0; background: var(--bg); }
   .btn { all: unset; cursor: pointer; padding: 4px 10px; border-radius: var(--radius); background: var(--bg-row); border: 1px solid var(--border); font-size: 12.5px; }
   .btn:hover { border-color: var(--accent); }
   .btn:disabled { opacity: 0.5; cursor: default; }

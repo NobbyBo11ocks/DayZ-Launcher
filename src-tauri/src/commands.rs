@@ -17,7 +17,7 @@ use crate::error::{AppError, AppResult};
 use crate::launch::{self, LaunchSpec, Launched};
 use crate::settings::{Settings, SettingsStore, UiPrefs};
 use crate::steam::diagnostics::{self, Diagnostics};
-use crate::steam::sdk::{ItemDetails, SteamStatus, SteamWorker};
+use crate::steam::sdk::{FriendInfo, ItemDetails, SteamStatus, SteamWorker};
 use crate::steam::{locate, registry, version, workshop};
 
 /// Shared application state, created in `lib.rs::run` setup.
@@ -246,6 +246,95 @@ pub fn servers_refresh(
         .steam
         .refresh(parts, force.unwrap_or(false))
         .map_err(AppError::Internal)
+}
+
+/// Loads the DZSA list as a fallback when Steam is unavailable (D-089). Rows stream as
+/// `servers:batch`, the mod lists go into the cache, a `servers:done` with source
+/// `dzsa` closes the import, and populated rows get the usual verification pass.
+/// Returns the number of servers imported.
+#[tauri::command]
+pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResult<usize> {
+    let t0 = Instant::now();
+    let rows = crate::browser::dzsa::fetch()
+        .await
+        .map_err(AppError::Internal)?;
+    let n = rows.len();
+    let now = ServerRow::now_unix();
+    let cache = Arc::clone(&state.cache);
+    let mut targets: Vec<Target> = Vec::new();
+    let mut with_mods = 0usize;
+    for chunk in rows.chunks(500) {
+        let batch: Vec<ServerRow> = chunk.iter().map(|r| r.row.clone()).collect();
+        for r in &batch {
+            if r.players > 0 {
+                if let Some(t) = Target::from_row(r) {
+                    targets.push(t);
+                }
+            }
+        }
+        let mods: Vec<(String, Vec<(u64, String)>)> = chunk
+            .iter()
+            .filter(|r| !r.mods.is_empty())
+            .map(|r| (r.row.id.clone(), r.mods.clone()))
+            .collect();
+        with_mods += mods.len();
+        let c = Arc::clone(&cache);
+        let for_db = batch.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            if let Ok(mut c) = c.lock() {
+                let _ = c.upsert(&for_db);
+                let _ = c.replace_server_mods_many(&mods, now);
+            }
+        })
+        .await;
+        let _ = app.emit("servers:batch", &batch);
+    }
+    {
+        let c = Arc::clone(&cache);
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            if let Ok(c) = c.lock() {
+                let _ = c.set_meta("last_refresh", &now.to_string());
+            }
+        })
+        .await;
+    }
+    let done = crate::steam::sdk::RefreshDone {
+        total: n,
+        responded: n,
+        failed: 0,
+        inflated: 0,
+        elapsed_ms: t0.elapsed().as_millis() as u64,
+        partitions: Vec::new(),
+        capped: false,
+        stopped_early: false,
+        source: "dzsa",
+    };
+    let _ = app.emit("servers:done", &done);
+    let _ = app.emit(
+        "servers:mods-done",
+        &ModScanSummary {
+            total: with_mods,
+            scanned: with_mods,
+            failed: 0,
+            elapsed_ms: done.elapsed_ms,
+        },
+    );
+    #[cfg(debug_assertions)]
+    eprintln!(
+        "[dzsa] imported {n} servers ({with_mods} with mods) in {} ms; verifying {}",
+        done.elapsed_ms,
+        targets.len()
+    );
+    if !targets.is_empty() {
+        tauri::async_runtime::spawn(run_verification(
+            app,
+            cache,
+            state.a2s.clone(),
+            targets,
+            true,
+        ));
+    }
+    Ok(n)
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -593,6 +682,65 @@ pub async fn mods_unsubscribe(
         .collect())
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JunctionFailure {
+    pub name: String,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JunctionCleanup {
+    pub removed: Vec<String>,
+    pub failed: Vec<JunctionFailure>,
+}
+
+/// Removes `!Workshop` junctions whose target folder is gone (D-093). Only the
+/// confirmed button in Diagnostics calls this: junctions are shared with the official
+/// launcher and are never deleted on the launcher's own initiative.
+#[tauri::command]
+pub async fn junctions_remove_dangling() -> AppResult<JunctionCleanup> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let steam = registry::detect();
+        let path = steam
+            .path
+            .ok_or_else(|| AppError::Internal("Steam is not installed".into()))?;
+        let libs = locate::libraries(&path)?;
+        let game = locate::find_dayz(&libs)?
+            .ok_or_else(|| AppError::Internal("DayZ is not installed".into()))?;
+        let mut out = JunctionCleanup {
+            removed: Vec::new(),
+            failed: Vec::new(),
+        };
+        for (name, r) in workshop::remove_dangling(&game.workshop_dir()) {
+            match r {
+                Ok(()) => out.removed.push(name),
+                Err(error) => out.failed.push(JunctionFailure { name, error }),
+            }
+        }
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[junctions] removed {} dangling, {} failed",
+            out.removed.len(),
+            out.failed.len()
+        );
+        Ok(out)
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("junction task failed: {e}")))?
+}
+
+/// Steam friends with presence and, for those in DayZ, their server (D-092).
+#[tauri::command]
+pub async fn friends_list(state: State<'_, AppState>) -> AppResult<Vec<FriendInfo>> {
+    let steam = state.steam.clone_handle();
+    tauri::async_runtime::spawn_blocking(move || steam.friends())
+        .await
+        .map_err(|e| AppError::Internal(format!("friends task failed: {e}")))?
+        .map_err(AppError::Internal)
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerSlots {
@@ -897,6 +1045,7 @@ pub async fn launch_game(
     state: State<'_, AppState>,
     id: String,
     password: Option<String>,
+    profile: Option<String>,
 ) -> AppResult<Launched> {
     let row = cached_row(&state.cache, &id)
         .await
@@ -919,7 +1068,22 @@ pub async fn launch_game(
             .unwrap_or_default(),
         Err(_) => Vec::new(),
     };
-    let settings = state.settings.get();
+    // A saved launch profile can override the current launch settings for this
+    // launch only (D-088); an unknown name falls back to the current settings.
+    let settings = {
+        let mut s = state.settings.get();
+        if let Some(p) = profile
+            .as_deref()
+            .and_then(|n| s.launch_profiles.iter().find(|p| p.name == n).cloned())
+        {
+            s.profile_name = p.profile_name;
+            s.extra_args = p.extra_args;
+            s.skip_intro = p.skip_intro;
+            s.no_splash = p.no_splash;
+            s.no_pause = p.no_pause;
+        }
+        s
+    };
     let persona = worker_persona(&state);
 
     let row_for_spec = row.clone();

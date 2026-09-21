@@ -1,6 +1,8 @@
 <script lang="ts">
+  // Steam / DayZ / Workshop inventory plus the Performance section (D-078), laid out
+  // in two columns so the view fits the viewport without page scrolling (D-094).
   import { invoke } from "@tauri-apps/api/core";
-  import type { Diagnostics, PerfSample } from "./types";
+  import type { Diagnostics, JunctionCleanup, PerfSample } from "./types";
 
   // Release budgets from docs/05 §6 (D-078).
   const BUDGET = { startMs: 1000, hostBytes: 90 * 1024 * 1024, totalBytes: 330 * 1024 * 1024 };
@@ -55,6 +57,31 @@
     }
   }
 
+  // Dangling-junction cleanup (D-093): explicit, confirmed, dangling entries only.
+  let confirmClean = $state(false);
+  let cleaning = $state(false);
+  let cleanResult = $state<{ ok: boolean; text: string } | null>(null);
+  const dangling = $derived(data?.junctions.filter((j) => !j.targetExists).length ?? 0);
+
+  async function cleanJunctions() {
+    confirmClean = false;
+    cleaning = true;
+    cleanResult = null;
+    try {
+      const r = await invoke<JunctionCleanup>("junctions_remove_dangling");
+      const failed = r.failed.map((f) => `${f.name} (${f.error})`).join(", ");
+      cleanResult = {
+        ok: r.failed.length === 0,
+        text: `Removed ${r.removed.length} junction${r.removed.length === 1 ? "" : "s"}${failed ? `; could not remove ${failed}` : ""}.`,
+      };
+      await load();
+    } catch (e) {
+      cleanResult = { ok: false, text: String(e) };
+    } finally {
+      cleaning = false;
+    }
+  }
+
   $effect(() => {
     void load();
     void samplePerf();
@@ -86,127 +113,165 @@
       </ul>
     {/if}
 
-    <h2>Performance <button class="btn small" onclick={samplePerf}>Sample</button></h2>
-    {#if perf}
-      <dl class="kv">
-        <dt>Start-up</dt>
-        <dd class={perf.firstPaintMs == null ? "muted" : perf.firstPaintMs <= BUDGET.startMs ? "ok" : "warn"}>
-          {perf.firstPaintMs == null ? "no list painted yet" : `${perf.firstPaintMs} ms to the first list`} <span class="muted">(budget {BUDGET.startMs} ms)</span>
-        </dd>
-        <dt>Uptime</dt><dd>{fmtDur(perf.uptimeMs)} · CPU {fmtDur(perf.hostCpuMs)} ({((100 * perf.hostCpuMs) / Math.max(1, perf.uptimeMs)).toFixed(1)}% of one core)</dd>
-        <dt>Host memory</dt>
-        <dd class={perf.hostPrivateBytes <= BUDGET.hostBytes ? "ok" : "warn"}>{fmtBytes(perf.hostPrivateBytes)} <span class="muted">(budget {fmtBytes(BUDGET.hostBytes)})</span></dd>
-        <dt>WebView memory</dt><dd>{fmtBytes(perf.webviewPrivateBytes)} <span class="muted">across {perf.webviewProcesses} processes</span></dd>
-        <dt>Total</dt>
-        <dd class={perf.totalPrivateBytes <= BUDGET.totalBytes ? "ok" : "warn"}>{fmtBytes(perf.totalPrivateBytes)} <span class="muted">(budget {fmtBytes(BUDGET.totalBytes)}; sampled {perfAt})</span></dd>
-      </dl>
-    {:else}
-      <p class="muted">Sampling…</p>
-    {/if}
-
-    <h2>Steam</h2>
-    <dl class="kv">
-      <dt>Path</dt><dd>{data.steam.path ?? "not found"} <span class="muted">({data.steam.source})</span></dd>
-      <dt>Executable</dt><dd>{data.steam.exe ?? "–"}</dd>
-      <dt>Running</dt>
-      <dd class={data.steam.running ? "ok" : "warn"}>
-        {data.steam.running ? `yes (pid ${data.steam.pid})` : "no"}
-        {#if data.steam.registryPid && data.steam.registryPid !== data.steam.pid}
-          <span class="muted"> · registry says pid {data.steam.registryPid} (stale)</span>
+    <div class="cols">
+      <div class="col">
+        <h2>Performance <button class="btn small" onclick={samplePerf}>Sample</button></h2>
+        {#if perf}
+          <dl class="kv">
+            <dt>Start-up</dt>
+            <dd class={perf.firstPaintMs == null ? "muted" : perf.firstPaintMs <= BUDGET.startMs ? "ok" : "warn"}>
+              {perf.firstPaintMs == null ? "no list painted yet" : `${perf.firstPaintMs} ms to the first list`} <span class="muted">(budget {BUDGET.startMs} ms)</span>
+            </dd>
+            <dt>Uptime</dt><dd>{fmtDur(perf.uptimeMs)} · CPU {fmtDur(perf.hostCpuMs)} ({((100 * perf.hostCpuMs) / Math.max(1, perf.uptimeMs)).toFixed(1)}% of one core)</dd>
+            <dt>Host memory</dt>
+            <dd class={perf.hostPrivateBytes <= BUDGET.hostBytes ? "ok" : "warn"}>{fmtBytes(perf.hostPrivateBytes)} <span class="muted">(budget {fmtBytes(BUDGET.hostBytes)})</span></dd>
+            <dt>WebView memory</dt><dd>{fmtBytes(perf.webviewPrivateBytes)} <span class="muted">across {perf.webviewProcesses} processes</span></dd>
+            <dt>Total</dt>
+            <dd class={perf.totalPrivateBytes <= BUDGET.totalBytes ? "ok" : "warn"}>{fmtBytes(perf.totalPrivateBytes)} <span class="muted">(budget {fmtBytes(BUDGET.totalBytes)}; sampled {perfAt})</span></dd>
+          </dl>
+        {:else}
+          <p class="muted">Sampling…</p>
         {/if}
-      </dd>
-      <dt>Logged in</dt><dd class={data.steam.activeUser ? "ok" : "warn"}>{data.steam.activeUser ? "yes" : "no"}</dd>
-    </dl>
 
-    <h2>Libraries</h2>
-    <table>
-      <thead><tr><th>Path</th><th>Label</th><th class="num">Apps</th><th>DayZ</th></tr></thead>
-      <tbody>
-        {#each data.libraries as lib (lib.path)}
-          <tr><td>{lib.path}</td><td>{lib.label || "–"}</td><td class="num">{lib.appCount}</td><td>{lib.hasDayz ? "✓" : ""}</td></tr>
-        {/each}
-      </tbody>
-    </table>
+        <h2>Steam</h2>
+        <dl class="kv">
+          <dt>Path</dt><dd class="wrap">{data.steam.path ?? "not found"} <span class="muted">({data.steam.source})</span></dd>
+          <dt>Executable</dt><dd class="wrap">{data.steam.exe ?? "–"}</dd>
+          <dt>Running</dt>
+          <dd class={data.steam.running ? "ok" : "warn"}>
+            {data.steam.running ? `yes (pid ${data.steam.pid})` : "no"}
+            {#if data.steam.registryPid && data.steam.registryPid !== data.steam.pid}
+              <span class="muted"> · registry says pid {data.steam.registryPid} (stale)</span>
+            {/if}
+          </dd>
+          <dt>Logged in</dt><dd class={data.steam.activeUser ? "ok" : "warn"}>{data.steam.activeUser ? "yes" : "no"}</dd>
+        </dl>
 
-    <h2>DayZ</h2>
-    {#if data.dayz}
-      <dl class="kv">
-        <dt>Folder</dt><dd>{data.dayz.folder}</dd>
-        <dt>Executable</dt><dd>{data.dayz.exe}</dd>
-        <dt>Version</dt><dd>{data.dayz.gameVersion ?? "?"} <span class="muted">(exe {data.dayz.exeVersion ?? "?"})</span></dd>
-        <dt>Build</dt><dd>{data.dayz.buildId} <span class="muted">updated {fmtTime(data.dayz.lastUpdated)}</span></dd>
-        <dt>Size</dt><dd>{fmtBytes(data.dayz.sizeOnDisk)}</dd>
-        <dt>State flags</dt><dd>{data.dayz.stateFlags} <span class="muted">{data.dayz.stateFlags === 4 ? "(fully installed)" : ""}</span></dd>
-        <dt>BattlEye launcher</dt><dd class={data.dayz.hasBattleyeExe ? "ok" : "warn"}>{data.dayz.hasBattleyeExe ? "DayZ_BE.exe present" : "DayZ_BE.exe missing"}</dd>
-        <dt>Official launcher</dt><dd>{data.dayz.hasOfficialLauncher ? "present" : "absent"}</dd>
-      </dl>
-    {:else}
-      <p class="warn">DayZ (app 221100) not found in any library.</p>
-    {/if}
+        <h2>DayZ</h2>
+        {#if data.dayz}
+          <dl class="kv">
+            <dt>Folder</dt><dd class="wrap">{data.dayz.folder}</dd>
+            <dt>Executable</dt><dd class="wrap">{data.dayz.exe}</dd>
+            <dt>Version</dt><dd>{data.dayz.gameVersion ?? "?"} <span class="muted">(exe {data.dayz.exeVersion ?? "?"})</span></dd>
+            <dt>Build</dt><dd>{data.dayz.buildId} <span class="muted">updated {fmtTime(data.dayz.lastUpdated)}</span></dd>
+            <dt>Size</dt><dd>{fmtBytes(data.dayz.sizeOnDisk)}</dd>
+            <dt>State flags</dt><dd>{data.dayz.stateFlags} <span class="muted">{data.dayz.stateFlags === 4 ? "(fully installed)" : ""}</span></dd>
+            <dt>BattlEye launcher</dt><dd class={data.dayz.hasBattleyeExe ? "ok" : "warn"}>{data.dayz.hasBattleyeExe ? "DayZ_BE.exe present" : "DayZ_BE.exe missing"}</dd>
+            <dt>Official launcher</dt><dd>{data.dayz.hasOfficialLauncher ? "present" : "absent"}</dd>
+          </dl>
+        {:else}
+          <p class="warn">DayZ (app 221100) not found in any library.</p>
+        {/if}
+      </div>
 
-    <h2>Workshop</h2>
-    {#if data.workshop}
-      <dl class="kv">
-        <dt>Manifest</dt><dd>{data.workshop.acfPath}</dd>
-        <dt>Status</dt>
-        <dd>
-          {data.workshop.items.length} items, {fmtBytes(data.workshop.sizeOnDisk)}
-          {#if data.workshop.needsUpdate}<span class="warn"> · needs update</span>{/if}
-          {#if data.workshop.needsDownload}<span class="warn"> · needs download</span>{/if}
-        </dd>
-      </dl>
-      <table>
-        <thead><tr><th>Workshop ID</th><th>meta.cpp name</th><th>mod.cpp name</th><th class="num">Size</th><th>Updated</th><th>Folder</th></tr></thead>
-        <tbody>
-          {#each data.workshop.items as it (it.id)}
-            <tr class:stale={it.needsUpdate}>
-              <td class="mono">{it.id}</td>
-              <td>{it.metaName ?? "–"}</td>
-              <td>{it.modName ?? "–"}</td>
-              <td class="num">{fmtBytes(it.size)}</td>
-              <td>{fmtTime(it.timeUpdated)}{it.needsUpdate ? " ⚠" : ""}</td>
-              <td class={it.folder ? "" : "warn"}>{it.folder ? "present" : "missing"}</td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    {:else}
-      <p class="muted">No appworkshop_221100.acf found.</p>
-    {/if}
+      <div class="col">
+        <h2>Libraries</h2>
+        <table>
+          <thead><tr><th>Path</th><th>Label</th><th class="num">Apps</th><th>DayZ</th></tr></thead>
+          <tbody>
+            {#each data.libraries as lib (lib.path)}
+              <tr><td>{lib.path}</td><td>{lib.label || "–"}</td><td class="num">{lib.appCount}</td><td>{lib.hasDayz ? "✓" : ""}</td></tr>
+            {/each}
+          </tbody>
+        </table>
 
-    <h2>!Workshop junctions ({data.junctions.length})</h2>
-    <table>
-      <thead><tr><th>Name</th><th>Target</th><th>Workshop ID</th><th>Target</th></tr></thead>
-      <tbody>
-        {#each data.junctions as j (j.name)}
-          <tr>
-            <td>{j.name}</td>
-            <td class="mono">{j.target ?? "–"}</td>
-            <td class="mono">{j.workshopId ?? "–"}</td>
-            <td class={j.targetExists ? "ok" : "warn"}>{j.targetExists ? "exists" : "dangling"}</td>
-          </tr>
-        {/each}
-      </tbody>
-    </table>
+        <h2>Workshop</h2>
+        {#if data.workshop}
+          <dl class="kv">
+            <dt>Manifest</dt><dd class="wrap">{data.workshop.acfPath}</dd>
+            <dt>Status</dt>
+            <dd>
+              {data.workshop.items.length} items, {fmtBytes(data.workshop.sizeOnDisk)}
+              {#if data.workshop.needsUpdate}<span class="warn"> · needs update</span>{/if}
+              {#if data.workshop.needsDownload}<span class="warn"> · needs download</span>{/if}
+            </dd>
+          </dl>
+          {#if data.workshop.items.length}
+            <table>
+              <thead><tr><th>Workshop ID</th><th>meta.cpp name</th><th>mod.cpp name</th><th class="num">Size</th><th>Updated</th><th>Folder</th></tr></thead>
+              <tbody>
+                {#each data.workshop.items as it (it.id)}
+                  <tr class:stale={it.needsUpdate}>
+                    <td class="mono">{it.id}</td>
+                    <td>{it.metaName ?? "–"}</td>
+                    <td>{it.modName ?? "–"}</td>
+                    <td class="num">{fmtBytes(it.size)}</td>
+                    <td>{fmtTime(it.timeUpdated)}{it.needsUpdate ? " ⚠" : ""}</td>
+                    <td class={it.folder ? "" : "warn"}>{it.folder ? "present" : "missing"}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          {/if}
+        {:else}
+          <p class="muted">No appworkshop_221100.acf found.</p>
+        {/if}
+
+        <h2>
+          <span>!Workshop junctions ({data.junctions.length})</span>
+          {#if dangling}
+            {#if confirmClean}
+              <span class="inline">
+                Remove {dangling} dangling junction{dangling === 1 ? "" : "s"}? Only entries whose target folder is gone are removed.
+                <button class="btn small danger" onclick={cleanJunctions}>Yes</button>
+                <button class="btn small" onclick={() => (confirmClean = false)}>No</button>
+              </span>
+            {:else}
+              <button class="btn small" onclick={() => (confirmClean = true)} disabled={cleaning} title="Delete the junctions in !Workshop whose target folder no longer exists">
+                {cleaning ? "Removing…" : `Remove ${dangling} dangling`}
+              </button>
+            {/if}
+          {/if}
+        </h2>
+        {#if cleanResult}<p class={cleanResult.ok ? "ok small" : "warn small"}>{cleanResult.text}</p>{/if}
+        <table>
+          <thead><tr><th>Name</th><th>Target</th><th>Workshop ID</th><th>Status</th></tr></thead>
+          <tbody>
+            {#each data.junctions as j (j.name)}
+              <tr>
+                <td>{j.name}</td>
+                <td class="mono path" title={j.target ?? ""}>{j.target ?? "–"}</td>
+                <td class="mono">{j.workshopId ?? "–"}</td>
+                <td class={j.targetExists ? "ok" : "warn"}>{j.targetExists ? "exists" : "dangling"}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    </div>
   {/if}
 </section>
 
 <style>
-  .diag { display: flex; flex-direction: column; gap: 8px; }
+  .diag { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
   .row { display: flex; align-items: center; gap: 12px; }
-  h2 { font-size: 14px; font-weight: 600; margin: 12px 0 4px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em; }
-  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
-  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  h1 { margin: 0; }
+  /* Two columns that share the height; a column scrolls on its own only when the
+     window is smaller than its content. */
+  .cols { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 0 28px; }
+  .col { min-height: 0; min-width: 0; overflow: auto; }
+  h2 { display: flex; align-items: center; gap: 10px; font-size: 12px; font-weight: 600; margin: 10px 0 4px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .col > h2:first-child { margin-top: 0; }
+  .inline { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--fg); }
+  .kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 12px; margin: 0; font-size: 12.5px; }
+  .kv dt { color: var(--fg-muted); }
+  .kv dd { margin: 0; min-width: 0; }
+  .kv dd.wrap { overflow-wrap: anywhere; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { text-align: left; padding: 3px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
   th { color: var(--fg-muted); font-weight: 500; }
+  td.path { max-width: 0; width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .num { text-align: right; }
-  .mono { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
+  .mono { font-family: Consolas, "Cascadia Mono", monospace; font-size: 11.5px; }
   .ok { color: var(--ok); }
   .warn { color: var(--warn); }
   .stale td { color: var(--warn); }
-  .warnings { margin: 0; padding-left: 18px; color: var(--warn); }
+  .warnings { margin: 0; padding-left: 18px; color: var(--warn); font-size: 12px; }
+  .small { font-size: 12px; margin: 0; }
   .btn { all: unset; cursor: pointer; padding: 4px 10px; border-radius: var(--radius); background: var(--bg-row); border: 1px solid var(--border); }
   .btn:hover { border-color: var(--accent); }
   .btn:disabled { opacity: 0.6; cursor: default; }
   .btn:focus-visible { outline: 2px solid var(--accent); }
-  .btn.small { font-size: 11px; padding: 2px 8px; margin-left: 8px; text-transform: none; letter-spacing: 0; font-weight: 500; }
+  .btn.small { font-size: 11px; padding: 2px 8px; text-transform: none; letter-spacing: 0; font-weight: 500; }
+  .btn.danger { border-color: var(--danger); color: var(--danger); }
 </style>

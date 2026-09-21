@@ -7,6 +7,8 @@
 
   let importing = $state(false);
   let imported = $state<ImportResult | null>(null);
+  /** The pane follows the selection only while it is one of these rows. */
+  const selected = $derived(servers.favouriteRows.find((r) => r.id === servers.selectedId) ?? null);
 
   async function importOfficial() {
     importing = true;
@@ -36,7 +38,7 @@
       <p class="muted">Press <kbd>F</kbd> on a server or click its star. The official launcher's favourites can be imported with the button above. The bell on a favourite alerts you when a slot frees up or the server comes back online.</p>
     </div>
   {:else}
-    <div class="main" class:with-pane={servers.selected != null}>
+    <div class="main" class:with-pane={selected != null}>
       <ServerTable
         rows={servers.favouriteRows}
         selectedId={servers.selectedId}
@@ -51,8 +53,8 @@
         alerts={servers.favouriteAlerts}
         onAlert={(id) => servers.toggleAlert(id)}
       />
-      {#if servers.selected}
-        <DetailsPane row={servers.selected} localVersion={servers.localVersion} />
+      {#if selected}
+        <DetailsPane row={selected} localVersion={servers.localVersion} />
       {/if}
     </div>
   {/if}

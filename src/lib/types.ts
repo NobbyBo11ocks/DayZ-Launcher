@@ -164,6 +164,8 @@ export type CachedServers = {
 };
 
 export type RefreshDone = {
+  /** "steam" for the master server, "lan" for LAN discovery (D-087), "dzsa" for the fallback list (D-089). */
+  source: "steam" | "lan" | "dzsa";
   total: number;
   responded: number;
   failed: number;
@@ -284,12 +286,24 @@ export type UiPrefs = {
   lastUpdateCheckMs: number;
 };
 
+/** A saved set of launch options (D-088). */
+export type LaunchProfile = {
+  name: string;
+  profileName: string;
+  extraArgs: string;
+  skipIntro: boolean;
+  noSplash: boolean;
+  noPause: boolean;
+};
+
 export type Settings = {
   profileName: string;
   extraArgs: string;
   skipIntro: boolean;
   noSplash: boolean;
   noPause: boolean;
+  /** Saved presets; the flat fields above are the current launch options. */
+  launchProfiles: LaunchProfile[];
   /** Minutes of inactivity after which the Steam session is released; 0 = never (D-077). */
   steamIdleMinutes: number;
   /** Read-only for `settings_set`; written through `ui_prefs_set`. */
@@ -325,6 +339,21 @@ export type PerfSample = {
 
 /** One Workshop item unsubscribed through Steam (D-075). */
 export type UnsubscribeResult = { id: number; ok: boolean; error: string | null };
+
+/** Dangling `!Workshop` junctions removed on request from Diagnostics (D-093). */
+export type JunctionCleanup = { removed: string[]; failed: { name: string; error: string }[] };
+
+/** Where a friend is playing, as Steam reports it (D-092). */
+export type FriendServer = { ip: string; gamePort: number; queryPort: number };
+export type FriendState = "offline" | "online" | "invisible" | "busy" | "away" | "snooze" | "looking_to_trade" | "looking_to_play";
+export type FriendInfo = {
+  /** SteamID64 as text (precision). */
+  steamId: string;
+  name: string;
+  state: FriendState;
+  inDayz: boolean;
+  server?: FriendServer;
+};
 
 /** INFO-only snapshot for the wait-for-slot option (D-074). */
 export type ServerSlots = {

@@ -4,6 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
+import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { uiPrefs } from "./uiprefs.svelte";
 import {
@@ -51,6 +52,24 @@ export type Filters = {
 
 const FILTERS_KEY = "dayz-launcher.filters.v1";
 
+/**
+ * Windows toast for a favourite alert when the launcher is not the focused window
+ * (D-086); the in-app toast and taskbar flash cover the focused case. Permission is
+ * asked for on the first alert only.
+ */
+async function notifyIfUnfocused(a: FavouriteAlert) {
+  try {
+    if (await getCurrentWindow().isFocused()) return;
+    if (!(await isPermissionGranted()) && (await requestPermission()) !== "granted") return;
+    sendNotification({
+      title: a.kind === "slot" ? "Free slot" : "Back online",
+      body: `${a.name}: ${a.players}/${a.maxPlayers}`,
+    });
+  } catch {
+    /* notifications unavailable; the in-app toast remains */
+  }
+}
+
 export const defaultFilters = (): Filters => ({
   search: "",
   perspective: "any",
@@ -82,6 +101,15 @@ function loadFilters(): Filters {
 
 /** Re-verify a visible row when its verification is older than this. */
 const STALE_SECS = 120;
+
+/** Private (RFC 1918), loopback and link-local IPv4: what Steam's LAN discovery returns (D-087). */
+export function isLanIp(ip: string): boolean {
+  const p = ip.split(".").map(Number);
+  if (p.length !== 4 || p.some((n) => !Number.isInteger(n))) return false;
+  const a = p[0] ?? 0;
+  const b = p[1] ?? 0;
+  return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+}
 
 class ServersStore {
   rows = new SvelteMap<string, ServerRow>();
@@ -251,6 +279,19 @@ class ServersStore {
     return out;
   });
 
+  /** Rows with a local-network address (LAN tab, D-087), search-filtered, busiest first. */
+  lanRows = $derived.by(() => {
+    const q = this.filters.search.trim().toLowerCase();
+    const out: ServerRow[] = [];
+    for (const r of this.rows.values()) {
+      if (!isLanIp(r.ip)) continue;
+      if (q && !(r.name.toLowerCase().includes(q) || r.map.toLowerCase().includes(q) || r.ip.startsWith(q))) continue;
+      out.push(r);
+    }
+    out.sort((a, b) => trustedPlayers(b) - trustedPlayers(a) || a.pingMs - b.pingMs);
+    return out;
+  });
+
   async start() {
     if (this.#started) return;
     this.#started = true;
@@ -302,15 +343,58 @@ class ServersStore {
         void getCurrentWindow()
           .requestUserAttention(UserAttentionType.Informational)
           .catch(() => {});
+        void notifyIfUnfocused(ev.payload);
       }),
     );
     this.maybeAutoRefresh();
   }
 
+  #dzsaTried = false;
+  dzsaLoading = $state(false);
+
   private maybeAutoRefresh() {
     if (this.steam?.initialized && !this.steam.refreshing && !this.#autoRefreshed) {
       this.#autoRefreshed = true;
       void this.refresh(false, false);
+    } else if (this.steam && !this.steam.initialized && this.steam.error && !this.#dzsaTried && !this.#autoRefreshed) {
+      // Steam failed to initialise: fall back to the DZSA list once (D-089), unless a
+      // recent cached list already covers the session.
+      this.#dzsaTried = true;
+      const fresh = this.lastRefresh != null && Date.now() / 1000 - this.lastRefresh < 600;
+      if (!fresh) void this.loadDzsa();
+    }
+  }
+
+  /** DZSA Launcher's public list: the fallback when Steam is unavailable (D-089). */
+  async loadDzsa() {
+    if (this.dzsaLoading) return;
+    this.error = null;
+    this.dzsaLoading = true;
+    this.done = null;
+    this.verifySummary = null;
+    try {
+      await invoke<number>("servers_dzsa");
+      this.verifying = true;
+      void this.loadModsIndex();
+    } catch (e) {
+      this.error = String(e);
+    } finally {
+      this.dzsaLoading = false;
+    }
+  }
+
+  /**
+   * Steam's LAN discovery (D-087): servers on the local network, merged into the list.
+   * LAN rows carry no Steam head-count, so no verification pass follows; visible rows
+   * are checked on demand like any other.
+   */
+  async refreshLan(): Promise<boolean> {
+    this.error = null;
+    try {
+      return await invoke<boolean>("servers_refresh", { partitions: [{ lan: "1" }], force: true });
+    } catch (e) {
+      this.error = String(e);
+      return false;
     }
   }
 

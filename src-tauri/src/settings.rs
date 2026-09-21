@@ -52,6 +52,31 @@ impl UiPrefs {
     }
 }
 
+/// A saved preset of the launch options (D-088).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LaunchProfile {
+    pub name: String,
+    pub profile_name: String,
+    pub extra_args: String,
+    pub skip_intro: bool,
+    pub no_splash: bool,
+    pub no_pause: bool,
+}
+
+impl Default for LaunchProfile {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            profile_name: String::new(),
+            extra_args: String::new(),
+            skip_intro: true,
+            no_splash: true,
+            no_pause: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -62,6 +87,9 @@ pub struct Settings {
     pub skip_intro: bool,
     pub no_splash: bool,
     pub no_pause: bool,
+    /// Saved presets of the five launch options above; the join dialog can launch
+    /// with one of them for a single launch (D-088).
+    pub launch_profiles: Vec<LaunchProfile>,
     /// Release the Steamworks session after this many idle minutes (0 = never). While
     /// connected, Steam shows the user as playing DayZ and counts playtime (D-077).
     pub steam_idle_minutes: u32,
@@ -76,6 +104,7 @@ impl Default for Settings {
             skip_intro: true,
             no_splash: true,
             no_pause: false,
+            launch_profiles: Vec::new(),
             steam_idle_minutes: 15,
             ui: UiPrefs::default(),
         }

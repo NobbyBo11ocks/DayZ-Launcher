@@ -5,7 +5,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
-  import { fmtBytes, type ItemProgress, type JoinPlan, type LaunchExited, type Launched, type ServerSlots, type SyncDone, type SyncProgress } from "./types";
+  import { fmtBytes, type ItemProgress, type JoinPlan, type LaunchExited, type Launched, type LaunchProfile, type ServerSlots, type Settings, type SyncDone, type SyncProgress } from "./types";
 
   let { serverId, onClose }: { serverId: string; onClose: () => void } = $props();
 
@@ -20,6 +20,15 @@
   let exit = $state<LaunchExited | null>(null);
   let autoLaunch = false;
   const job = Date.now();
+
+  // Saved launch profiles (D-088): one can be picked for this launch only.
+  let profiles = $state<LaunchProfile[]>([]);
+  let profile = $state("");
+  $effect(() => {
+    invoke<Settings>("settings_get")
+      .then((s) => (profiles = s.launchProfiles ?? []))
+      .catch(() => {});
+  });
 
   // Live slot count, refreshed on open and while waiting.
   const POLL_MS = 10_000;
@@ -151,7 +160,7 @@
     error = null;
     phase = "launching";
     try {
-      launched = await invoke<Launched>("launch_game", { id: serverId, password: password || null });
+      launched = await invoke<Launched>("launch_game", { id: serverId, password: password || null, profile: profile || null });
       phase = "running";
     } catch (e) {
       error = String(e);
@@ -249,7 +258,16 @@
         </label>
       {/if}
 
-      <p class="muted small">Profile name: <strong>{plan.profileName || "(Steam persona)"}</strong> · change it in Settings</p>
+      <p class="muted small">
+        Profile name: <strong>{plan.profileName || "(Steam persona)"}</strong> · change it in Settings
+        {#if profiles.length}
+          · launch with
+          <select class="pick" bind:value={profile} disabled={busy || phase === "waiting" || phase === "running"} aria-label="Launch profile">
+            <option value="">current settings</option>
+            {#each profiles as p (p.name)}<option value={p.name}>{p.name}</option>{/each}
+          </select>
+        {/if}
+      </p>
 
       {#if phase === "syncing" && syncInfo}
         <p class="status">Downloading via Steam… {syncInfo.installed}/{syncInfo.total} installed{#if totalBytes > 0} · {fmtBytes(downloadedBytes)} of {fmtBytes(totalBytes)}{/if}</p>
@@ -310,6 +328,7 @@
   .wait input { margin-top: 2px; }
   .wait strong { color: var(--fg); }
   .small { font-size: 12px; margin: 0; }
+  .pick { padding: 2px 6px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg); font-size: 12px; }
   .status { margin: 0; font-size: 12.5px; }
   .cmd code { display: block; font-size: 11px; white-space: pre-wrap; word-break: break-all; color: var(--fg-muted); margin-top: 4px; }
   .ok { color: var(--ok); }
