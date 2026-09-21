@@ -11,6 +11,12 @@ npm install
 npm run tauri dev
 ```
 
+## What it looks like
+
+![Server browser with the details pane](docs/screenshots/servers.png)
+
+Country flags, verified player counts, a mod filter, and a details pane with the server's mods, population history and connected sessions.
+
 ## Build installer
 
 ```bash

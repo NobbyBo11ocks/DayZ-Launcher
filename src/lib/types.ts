@@ -369,7 +369,9 @@ export type SyncDone = { job: number; ok: boolean; error: string | null; items: 
 export type Launched = { pid: number; exe: string; commandLine: string };
 export type LaunchExited = { pid: number; code: number | null };
 
-export type Favourite = { id: string; addedAt: number };
+export type Favourite = { id: string; addedAt: number; alert: boolean };
+/** A watched favourite changed state (D-083): a slot freed up, or it answers again. */
+export type FavouriteAlert = { id: string; name: string; kind: "slot" | "online"; players: number; maxPlayers: number; at: number };
 export type HistoryEntry = { id: string; joinedAt: number; name: string; ip: string; gamePort: number; mods: number };
 export type PopulationSample = { ts: number; players: number; queue: number };
 export type ImportResult = { total: number; imported: number; already: number; unreachable: number; path: string };

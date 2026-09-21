@@ -438,7 +438,16 @@ pub async fn run_mod_scan(
             let rows = c.load_all().ok()?;
             Some(
                 rows.iter()
-                    .filter(|r| r.tags.modded && (r.verified_players.unwrap_or(r.players) > 0))
+                    // Modded servers with real players: a verified head-count, or Steam's
+                    // own `hasplayers` partition when not verified yet. The fake servers
+                    // that only claim players in INFO (rule R0, ~20 000 rows) are skipped;
+                    // scanning them would be a 23 000-flow sweep for nothing (D-037).
+                    .filter(|r| {
+                        r.tags.modded
+                            && !r.inflated()
+                            && r.verified_players
+                                .map_or(r.steam_empty == Some(false) && r.players > 0, |v| v > 0)
+                    })
                     .filter(|r| {
                         force
                             || scanned
@@ -1013,6 +1022,8 @@ pub struct LaunchExited {
 pub struct Favourite {
     pub id: String,
     pub added_at: i64,
+    /// Watched for a free slot / return online (D-083).
+    pub alert: bool,
 }
 
 #[tauri::command]
@@ -1027,11 +1038,128 @@ pub async fn favourites_list(state: State<'_, AppState>) -> AppResult<Vec<Favour
             .map_err(|e| AppError::Internal(format!("cache: {e}")))?;
         Ok(list
             .into_iter()
-            .map(|(id, added_at)| Favourite { id, added_at })
+            .map(|(id, added_at, alert)| Favourite {
+                id,
+                added_at,
+                alert,
+            })
             .collect())
     })
     .await
     .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?
+}
+
+/// Watch or stop watching a favourite (D-083); the watcher task picks it up within a minute.
+#[tauri::command]
+pub async fn favourite_alert_set(
+    state: State<'_, AppState>,
+    id: String,
+    on: bool,
+) -> AppResult<()> {
+    let c = Arc::clone(&state.cache);
+    tauri::async_runtime::spawn_blocking(move || {
+        let c = c
+            .lock()
+            .map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
+        c.favourite_alert_set(&id, on)
+            .map_err(|e| AppError::Internal(format!("cache: {e}")))
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FavouriteAlert {
+    pub id: String,
+    pub name: String,
+    /// `slot`: was full, now has room. `online`: did not answer, now does.
+    pub kind: &'static str,
+    pub players: i32,
+    pub max_players: i32,
+    /// Unix milliseconds; doubles as the toast key.
+    pub at: i64,
+}
+
+/// How often watched favourites are polled and how many silent polls count as offline.
+const WATCH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+const WATCH_OFFLINE_POLLS: u8 = 3;
+
+/// Background watcher for favourites with the alert flag (D-083): one INFO datagram
+/// per watched server per minute; emits `favourite:alert` on a full → free slot or
+/// silent → answering transition. The first observation only sets the baseline.
+pub async fn watch_favourites(app: AppHandle, cache: Arc<Mutex<Cache>>, client: Client) {
+    #[derive(Clone, Copy)]
+    struct Seen {
+        full: bool,
+        silent_polls: u8,
+    }
+    let client = client
+        .with_timeout(std::time::Duration::from_millis(1500))
+        .with_retries(1);
+    let mut seen: HashMap<String, Seen> = HashMap::new();
+    loop {
+        tokio::time::sleep(WATCH_INTERVAL).await;
+        let c = Arc::clone(&cache);
+        let watched = tauri::async_runtime::spawn_blocking(move || {
+            c.lock().ok().and_then(|c| c.favourites_watched().ok())
+        })
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+        seen.retain(|id, _| watched.iter().any(|w| w.0 == *id));
+        for (id, ip, query_port, name) in watched {
+            let Ok(addr) = format!("{ip}:{query_port}").parse::<SocketAddr>() else {
+                continue;
+            };
+            let reply = client.info(addr).await.ok();
+            let prev = seen.get(&id).copied();
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis() as i64);
+            match reply {
+                Some(r) => {
+                    let (players, max) = (r.value.players as i32, r.value.max_players as i32);
+                    let full = max > 0 && players >= max;
+                    if let Some(p) = prev {
+                        let came_online = p.silent_polls >= WATCH_OFFLINE_POLLS;
+                        let slot_freed = p.full && !full;
+                        if came_online || slot_freed {
+                            let _ = app.emit(
+                                "favourite:alert",
+                                FavouriteAlert {
+                                    id: id.clone(),
+                                    name: name.clone(),
+                                    kind: if came_online { "online" } else { "slot" },
+                                    players,
+                                    max_players: max,
+                                    at: now_ms,
+                                },
+                            );
+                        }
+                    }
+                    seen.insert(
+                        id,
+                        Seen {
+                            full,
+                            silent_polls: 0,
+                        },
+                    );
+                }
+                None => {
+                    let polls = prev.map_or(1, |p| p.silent_polls.saturating_add(1));
+                    seen.insert(
+                        id,
+                        Seen {
+                            full: prev.is_some_and(|p| p.full),
+                            silent_polls: polls,
+                        },
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[tauri::command]
@@ -1239,7 +1367,7 @@ pub async fn import_official_favourites(
                 .and_then(|c| c.favourites().ok())
                 .unwrap_or_default()
                 .into_iter()
-                .map(|(id, _)| id)
+                .map(|(id, _, _)| id)
                 .collect()
         })
         .await

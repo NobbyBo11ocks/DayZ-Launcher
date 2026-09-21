@@ -8,6 +8,7 @@
   import Servers from "./lib/Servers.svelte";
   import Settings from "./lib/Settings.svelte";
   import TitleBar from "./lib/TitleBar.svelte";
+  import Toasts from "./lib/Toasts.svelte";
   import Welcome from "./lib/Welcome.svelte";
   import { prefs } from "./lib/state/prefs.svelte";
   import { servers } from "./lib/state/servers.svelte";
@@ -114,6 +115,7 @@
 {#if servers.joiningId}
   <JoinDialog serverId={servers.joiningId} onClose={() => (servers.joiningId = null)} />
 {/if}
+<Toasts />
 {#if showWelcome}
   <Welcome onDone={finishWelcome} />
 {/if}

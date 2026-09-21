@@ -3,6 +3,7 @@
 // mutate it in place, and the visible list is derived from filters + sort.
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { uiPrefs } from "./uiprefs.svelte";
 import {
@@ -10,6 +11,7 @@ import {
   trustedPlayers,
   type CachedServers,
   type Favourite,
+  type FavouriteAlert,
   type HistoryEntry,
   type ImportResult,
   type ModScanSummary,
@@ -95,6 +97,10 @@ class ServersStore {
   lastRefresh = $state<number | null>(null);
   verifying = $state(false);
   favourites = new SvelteSet<string>();
+  /** Favourites the backend watches for a free slot or a return online (D-083). */
+  favouriteAlerts = new SvelteSet<string>();
+  /** Alerts not yet dismissed, newest last (at most five). */
+  alerts = $state<FavouriteAlert[]>([]);
   history = $state<HistoryEntry[]>([]);
   /** Server the join dialog is open for. */
   joiningId = $state<string | null>(null);
@@ -290,6 +296,13 @@ class ServersStore {
         this.modScan = ev.payload;
         this.modScanning = false;
       }),
+      await listen<FavouriteAlert>("favourite:alert", (ev) => {
+        // One entry per server; the newest replaces an older one for the same server.
+        this.alerts = [...this.alerts.filter((a) => a.id !== ev.payload.id), ev.payload].slice(-5);
+        void getCurrentWindow()
+          .requestUserAttention(UserAttentionType.Informational)
+          .catch(() => {});
+      }),
     );
     this.maybeAutoRefresh();
   }
@@ -363,7 +376,29 @@ class ServersStore {
   async loadFavourites() {
     const list = await invoke<Favourite[]>("favourites_list");
     this.favourites.clear();
-    for (const f of list) this.favourites.add(f.id);
+    this.favouriteAlerts.clear();
+    for (const f of list) {
+      this.favourites.add(f.id);
+      if (f.alert) this.favouriteAlerts.add(f.id);
+    }
+  }
+
+  /** Watch or stop watching a favourite (D-083). */
+  async toggleAlert(id: string) {
+    const on = !this.favouriteAlerts.has(id);
+    if (on) this.favouriteAlerts.add(id);
+    else this.favouriteAlerts.delete(id);
+    try {
+      await invoke("favourite_alert_set", { id, on });
+    } catch (e) {
+      this.error = String(e);
+      if (on) this.favouriteAlerts.delete(id);
+      else this.favouriteAlerts.add(id);
+    }
+  }
+
+  dismissAlert(at: number) {
+    this.alerts = this.alerts.filter((a) => a.at !== at);
   }
 
   async toggleFavourite(id: string) {

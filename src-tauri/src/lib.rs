@@ -70,6 +70,13 @@ pub fn run() {
                 settings,
             });
 
+            // Watches favourites with the alert flag: one INFO per minute each (D-083).
+            tauri::async_runtime::spawn(commands::watch_favourites(
+                app.handle().clone(),
+                Arc::clone(&cache),
+                a2s.clone(),
+            ));
+
             // Forwards Steam-thread events to the WebView, persists batches, and
             // verifies populated servers (docs/11 R2–R5) once a refresh completes.
             let handle = app.handle().clone();
@@ -194,6 +201,7 @@ pub fn run() {
             commands::launch_game,
             commands::favourites_list,
             commands::favourite_set,
+            commands::favourite_alert_set,
             commands::history_list,
             commands::population_history,
             commands::direct_connect,

@@ -16,6 +16,8 @@
     onVisible,
     onActivate,
     onFavourite,
+    alerts,
+    onAlert,
   }: {
     rows: ServerRow[];
     selectedId: string | null;
@@ -28,6 +30,9 @@
     onVisible: (ids: string[]) => void;
     onActivate: (id: string) => void;
     onFavourite: (id: string) => void;
+    /** Watched servers and the toggle; only the Favourites view passes them (D-083). */
+    alerts?: Set<string>;
+    onAlert?: (id: string) => void;
   } = $props();
 
   const ROW = 36;
@@ -185,6 +190,21 @@
                 }}
                 ondblclick={(e) => e.stopPropagation()}>{favourites.has(r.id) ? "★" : "☆"}</button
               >
+              {#if onAlert && alerts}
+                <button
+                  class="star bell"
+                  class:on={alerts.has(r.id)}
+                  aria-label={alerts.has(r.id) ? "Stop watching this server" : "Alert me when a slot frees up or it comes back online"}
+                  aria-pressed={alerts.has(r.id)}
+                  title={alerts.has(r.id) ? "Watching: stop alerts" : "Alert me when a slot frees up or it comes back online"}
+                  tabindex="-1"
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    onAlert(r.id);
+                  }}
+                  ondblclick={(e) => e.stopPropagation()}>{alerts.has(r.id) ? "🔔" : "🔕"}</button
+                >
+              {/if}
               <Flag code={r.country} />
               <span class="flags">
                 {#if r.password}<span class="flag" title="Password protected">🔒</span>{/if}
@@ -252,6 +272,7 @@
   .c-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .star { all: unset; cursor: pointer; flex: none; width: 18px; text-align: center; color: var(--fg-muted); opacity: 0.55; font-size: 13px; }
   .star:hover, .star.on { opacity: 1; color: var(--accent); }
+  .bell { font-size: 11px; }
   .flags { display: inline-flex; gap: 4px; flex: none; }
   .flag { font-size: 11px; }
   .pill { font-size: 10px; line-height: 14px; padding: 0 5px; border-radius: 4px; background: var(--bg-row); color: var(--fg-muted); border: 1px solid var(--border); }
