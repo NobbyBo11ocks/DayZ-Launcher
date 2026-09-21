@@ -7,18 +7,42 @@
   import { clock, isInflated, trustedPlayers, type Diagnostics, type PopulationSample, type ServerDetails, type ServerRow } from "./types";
 
   let { row, localVersion }: { row: ServerRow | null; localVersion: string | null } = $props();
-  let samples = $state<PopulationSample[]>([]);
 
-  // Population samples for the selected server; refreshed when its verification changes.
+  // The effects below key on these primitives, never on `row` itself: every
+  // verification (including the one `server_details` publishes) replaces the row
+  // object in the store, and an effect that read `row` re-ran the query on each
+  // replacement, looping forever and blanking the pane each time (D-065).
+  const id = $derived(row?.id ?? null);
+  const verifiedAt = $derived(row?.verifiedAt ?? null);
+
+  let samples = $state<PopulationSample[]>([]);
+  let samplesFor: string | null = null;
+
+  // Population samples for the selected server; refetched (without blanking) when a
+  // new verification lands, cleared only when the selection changes.
   $effect(() => {
-    const id = row?.id;
-    const stamp = row?.verifiedAt;
-    void stamp;
-    samples = [];
-    if (!id) return;
-    invoke<PopulationSample[]>("population_history", { id, hours: 72 })
-      .then((s) => (samples = s))
-      .catch(() => (samples = []));
+    const cur = id;
+    void verifiedAt;
+    if (!cur) {
+      samples = [];
+      samplesFor = null;
+      return;
+    }
+    if (samplesFor !== cur) {
+      samples = [];
+      samplesFor = cur;
+    }
+    let cancelled = false;
+    invoke<PopulationSample[]>("population_history", { id: cur, hours: 72 })
+      .then((s) => {
+        if (!cancelled) samples = s;
+      })
+      .catch(() => {
+        /* keep what we have */
+      });
+    return () => {
+      cancelled = true;
+    };
   });
 
   let details = $state<ServerDetails | null>(null);
@@ -35,14 +59,18 @@
       .catch(() => (installed = new Set()));
   });
 
+  // Live INFO/RULES/PLAYER, once per selection.
   $effect(() => {
-    const id = row?.id;
+    const cur = id;
     details = null;
     error = null;
-    if (!id) return;
+    if (!cur) {
+      loading = false;
+      return;
+    }
     loading = true;
     let cancelled = false;
-    invoke<ServerDetails>("server_details", { id })
+    invoke<ServerDetails>("server_details", { id: cur })
       .then((d) => {
         if (!cancelled) details = d;
       })
