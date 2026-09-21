@@ -25,6 +25,7 @@ Out of scope for v1: Linux, server-owner listing/boosts, accounts, telemetry. (T
 | v0.1.4 | Country flags (offline GeoIP), wait for a free slot when joining, mod management (update / unsubscribe) | D-073, D-074, D-075 |
 | v0.1.5 | Find servers by mod, Performance section in Diagnostics, Steam idle release setting, tidied details pane, single instance, favourite alerts, store lifetime fix | D-077–D-084 |
 | v0.1.6 | Windows toasts for favourite alerts, launch profiles, DZSA list fallback, LAN tab, Friends tab, dangling-junction cleanup in Diagnostics, slim title bar, views that fit the window without scrolling, code-signing guide (docs/12) | D-086–D-094 |
+| v0.1.7 | Join a friend's session from the Friends tab: Steam's game-server address first, rich-presence `connect` as fallback, presence re-requested every poll; LAN scans no longer count as a list refresh | D-096 |
 | infra | GitHub Actions CI and tag-driven release workflow, release tools (`make_latest.js`, `verify_update_sig.js`, `nsis_template_check.js`) | D-063, D-071 |
 
 Candidates, not scheduled: code signing (Q11), a server-side "friends on this server" column in the browser, remembering the window size and position.

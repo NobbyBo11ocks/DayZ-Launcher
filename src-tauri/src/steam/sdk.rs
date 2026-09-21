@@ -967,9 +967,45 @@ fn friend_state_name(state: FriendState) -> &'static str {
     }
 }
 
+/// Server address from a rich-presence `connect` string (S-65): Steam hands this
+/// text to the game as its command line when a friend clicks "Join Game", so it is
+/// whatever the game chose: `+connect 1.2.3.4:2302`, `-connect=1.2.3.4 -port=2302`,
+/// `connect 1.2.3.4`. The first IPv4 wins; a port after a colon or a later bare
+/// number follows it; no port means DayZ's default game port 2302.
+fn parse_connect(text: &str) -> Option<(std::net::Ipv4Addr, u16)> {
+    let mut ip: Option<std::net::Ipv4Addr> = None;
+    let mut port: Option<u16> = None;
+    for tok in text.split(|c: char| c.is_whitespace() || c == '=' || c == ',' || c == ';') {
+        let t = tok.trim_matches(|c| c == '+' || c == '-' || c == '"' || c == '\'');
+        if ip.is_none() {
+            if let Some((a, p)) = t.rsplit_once(':') {
+                if let Ok(a) = a.parse() {
+                    ip = Some(a);
+                    port = p.parse().ok();
+                    continue;
+                }
+            }
+            if let Ok(a) = t.parse() {
+                ip = Some(a);
+            }
+        } else if port.is_none() {
+            if let Ok(p) = t.parse::<u16>() {
+                if p != 0 {
+                    port = Some(p);
+                }
+            }
+        }
+    }
+    ip.filter(|a| !a.is_unspecified())
+        .map(|a| (a, port.unwrap_or(2302)))
+}
+
 /// Regular friends (`FriendFlags::IMMEDIATE`) with presence and, for those in DayZ,
-/// the server Steam knows them on (S-64). Sorted: in DayZ first, then online, then
-/// by name. `GameId::app_id` masks the low 24 bits, which is where the app id lives.
+/// the server Steam knows them on (S-64): the game-server address Steam records when
+/// the client authenticates with a server, or failing that a rich-presence `connect`
+/// string (S-65). Presence for friends in DayZ is (re)requested each call so a value
+/// that arrives later shows on the next poll. Sorted: in DayZ first, then online,
+/// then by name. `GameId::app_id` masks the low 24 bits, which is where the app id lives.
 fn list_friends(client: &Client) -> Vec<FriendInfo> {
     let friends = client.friends();
     let mut out: Vec<FriendInfo> = friends
@@ -980,13 +1016,31 @@ fn list_friends(client: &Client) -> Vec<FriendInfo> {
             let in_dayz = game
                 .as_ref()
                 .is_some_and(|g| g.game.app_id().0 == DAYZ_APP_ID);
-            let server = game
+            let mut server = game
                 .filter(|g| in_dayz && !g.game_address.is_unspecified() && g.game_port != 0)
                 .map(|g| FriendServer {
                     ip: g.game_address.to_string(),
                     game_port: g.game_port,
                     query_port: g.query_port,
                 });
+            if in_dayz && server.is_none() {
+                server = f
+                    .rich_presence("connect")
+                    .and_then(|c| parse_connect(&c))
+                    .map(|(ip, game_port)| FriendServer {
+                        ip: ip.to_string(),
+                        game_port,
+                        query_port: 0,
+                    });
+                // SAFETY: the flat accessor returns this session's live ISteamFriends;
+                // the request is asynchronous and rate-limited by Steam.
+                unsafe {
+                    steamworks::sys::SteamAPI_ISteamFriends_RequestFriendRichPresence(
+                        steamworks::sys::SteamAPI_SteamFriends_v018(),
+                        f.id().raw(),
+                    );
+                }
+            }
             FriendInfo {
                 steam_id: f.id().raw().to_string(),
                 name: f.name(),
@@ -1120,5 +1174,29 @@ mod tests {
             p.last().unwrap().contains_key("noplayers") && !p.last().unwrap().contains_key("map")
         );
         assert_eq!(steam_empty_for(&HashMap::new()), None);
+    }
+
+    #[test]
+    fn connect_strings() {
+        let ip = |s: &str| s.parse::<std::net::Ipv4Addr>().unwrap();
+        assert_eq!(
+            parse_connect("+connect 51.81.8.81:2402"),
+            Some((ip("51.81.8.81"), 2402))
+        );
+        assert_eq!(
+            parse_connect("-connect=51.81.8.81 -port=2402"),
+            Some((ip("51.81.8.81"), 2402))
+        );
+        assert_eq!(
+            parse_connect("connect 51.81.8.81"),
+            Some((ip("51.81.8.81"), 2302))
+        );
+        assert_eq!(
+            parse_connect("-connect=\"51.81.8.81\" -port=\"2402\" -mod=@CF"),
+            Some((ip("51.81.8.81"), 2402))
+        );
+        assert_eq!(parse_connect("+connect 0.0.0.0:0"), None);
+        assert_eq!(parse_connect(""), None);
+        assert_eq!(parse_connect("-nolauncher"), None);
     }
 }

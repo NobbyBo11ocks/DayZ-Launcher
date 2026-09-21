@@ -1,6 +1,6 @@
 [package]
 name = "dayz-launcher"
-version = "0.1.6"
+version = "0.1.7"
 description = "Windows DayZ Standalone launcher: server browser, mod sync, direct launch"
 authors = ["DayZ Launcher contributors"]
 edition = "2021"
@@ -34,7 +34,7 @@ tokio = { version = "1.53.1", features = ["net", "time", "sync", "macros", "rt-m
 bytes = "1"
 # DZSA server-list fallback when Steam is unavailable (D-089); the updater already pulls this version.
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "gzip"] }
-steamworks = "0.13.1"
+steamworks = { version = "0.13.1", features = ["raw-bindings"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 tauri-plugin-updater = "2.12.0"
 tauri-plugin-process = "2.3.1"

@@ -129,12 +129,17 @@ pub fn run() {
                                     .collect::<Vec<_>>()
                             );
                             let _ = handle.emit("servers:done", &d);
+                            // A LAN scan is not a list refresh: it must not push the
+                            // automatic refresh's throttle or age out cached rows.
+                            let full_list = d.source == "steam";
                             let c = Arc::clone(&cache);
                             let _ = tauri::async_runtime::spawn_blocking(move || {
                                 if let Ok(c) = c.lock() {
-                                    let _ = c.set_meta("last_refresh", &browser::ServerRow::now_unix().to_string());
-                                    let _ = c.prune(CACHE_MAX_AGE_SECS);
-                                    let _ = c.population_prune(POPULATION_MAX_AGE_SECS);
+                                    if full_list {
+                                        let _ = c.set_meta("last_refresh", &browser::ServerRow::now_unix().to_string());
+                                        let _ = c.prune(CACHE_MAX_AGE_SECS);
+                                        let _ = c.population_prune(POPULATION_MAX_AGE_SECS);
+                                    }
                                 }
                             })
                             .await;

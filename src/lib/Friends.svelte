@@ -93,7 +93,7 @@
   {:else if visible.length === 0}
     <div class="empty">
       <p>{friends.length ? "Nobody online right now." : "No friends found."}</p>
-      <p class="muted">Friends in DayZ appear at the top with the server they are on. Join takes you through the usual mod check and launch.</p>
+      <p class="muted">Friends in DayZ appear at the top with the server they are on, as soon as Steam knows it. Join takes you through the usual mod check and launch.</p>
     </div>
   {:else}
     <div class="scroll">
@@ -111,7 +111,7 @@
                 {:else if f.server}
                   <span class="mono">{f.server.ip}:{f.server.gamePort}</span>
                 {:else if f.inDayz}
-                  <span class="muted">in the menu, or on a server Steam does not report</span>
+                  <span class="muted" title="Steam learns the server when the game authenticates with it; this list asks again every 30 seconds">server not reported by Steam yet (main menu, or still loading)</span>
                 {:else}
                   <span class="muted">–</span>
                 {/if}
