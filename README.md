@@ -29,9 +29,9 @@ Key-free server list straight from Steam · player counts verified with every se
 
 | Installer | Cold start to first frame | Populated-server refresh | Idle CPU | Memory, whole app |
 |:-:|:-:|:-:|:-:|:-:|
-| 4.7 MB | 0.43 s | 36 s | 0.4 % of one core | ≈ 300 MB |
+| 4.7 MB | 0.43 s | 42 s | 0.2 % of one core | ≈ 306 MB |
 
-<sub>Measured on the reference machine at v0.1.19; budgets, method and history in [docs/05 §6](docs/05-architecture-and-optimisation.md).</sub>
+<sub>Measured on the reference machine at v0.1.23; budgets, method and history in [docs/05 §6](docs/05-architecture-and-optimisation.md).</sub>
 
 ## Highlights
 
