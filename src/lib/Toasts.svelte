@@ -49,7 +49,7 @@
   .toast { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 10px 12px; border-radius: var(--radius); background: var(--bg-elev); border: 1px solid color-mix(in srgb, var(--accent) 60%, var(--border)); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4); font-size: 12.5px; }
   .text { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
   .text strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .btn { all: unset; cursor: pointer; padding: 6px 12px; border-radius: var(--radius); background: var(--accent); color: #111; font-weight: 600; }
+  .btn { all: unset; cursor: pointer; padding: 6px 12px; border-radius: var(--radius); background: var(--accent); color: var(--accent-fg); font-weight: 600; }
   .btn:focus-visible { outline: 2px solid var(--fg); }
   .close { all: unset; cursor: pointer; color: var(--fg-muted); padding: 4px; }
   .close:hover { color: var(--fg); }

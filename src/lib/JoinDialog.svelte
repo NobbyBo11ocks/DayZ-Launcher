@@ -335,7 +335,7 @@
   .warn { color: var(--warn); }
   .error { color: var(--danger); margin: 0; font-size: 12.5px; }
   footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
-  .btn { all: unset; cursor: pointer; padding: 7px 16px; border-radius: var(--radius); background: var(--accent); color: #111; font-weight: 600; }
+  .btn { all: unset; cursor: pointer; padding: 7px 16px; border-radius: var(--radius); background: var(--accent); color: var(--accent-fg); font-weight: 600; }
   .btn.secondary { background: var(--bg-row); color: var(--fg); border: 1px solid var(--border); font-weight: 500; }
   .btn:disabled { opacity: 0.45; cursor: default; }
   .btn:focus-visible { outline: 2px solid var(--fg); }

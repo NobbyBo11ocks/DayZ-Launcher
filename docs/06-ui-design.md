@@ -51,8 +51,8 @@ Chips above the table: Perspective (1PP/3PP), Map, Not full, Not empty, Has queu
 
 ## 5. Visual system
 
-- Tokens (`:root`): `--bg`, `--bg-elev`, `--bg-row`, `--fg`, `--fg-muted`, `--accent`, `--ok`, `--warn`, `--danger`, `--radius: 8px`, `--row-h: 36px`.
-- Themes: **Slate** (default dark, neutral greys with a single accent), **Light**, and accent choices (amber, teal, red). Theme switch is instant (attribute on `<html>`).
+- Tokens (`:root`): `--bg`, `--bg-elev`, `--bg-row`, `--fg`, `--fg-muted`, `--accent`, `--accent-fg` (text on an accent surface: `#111` on dark, `#fff` on the deeper light-theme accents), `--ok`, `--warn`, `--danger`, `--radius: 8px`, `--row-h: 36px`.
+- Themes: **Slate** (default dark, neutral greys with a single accent) and **Light**. Twelve accents in colour-wheel order (amber, orange, red, rose, pink, violet, indigo, blue, sky, teal, green, lime), each with a vivid dark-theme tone and a deeper light-theme tone; picked as a row of dots in Settings (D-131). **Lime** is the default (D-132). Theme and accent switch instantly (attributes on `<html>`).
 - Typography: Segoe UI Variable / system-ui; 13 px table, 15 px headers, tabular numerals for ping/players.
 - Motion: 120 ms fades, no slides on lists; skeleton rows while the first batch streams; reduced-motion respected.
 - Iconography: single inline SVG sprite, stroke icons 16 px.

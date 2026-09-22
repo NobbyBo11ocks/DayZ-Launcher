@@ -9,7 +9,7 @@ const FLUSH_MS = 150;
 
 export const defaultUiPrefs = (): UiPrefs => ({
   theme: "slate",
-  accent: "amber",
+  accent: "lime",
   onboarded: false,
   filters: null,
   lastUpdateCheckMs: 0,

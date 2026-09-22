@@ -11,7 +11,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const THEMES: [&str; 2] = ["slate", "light"];
-const ACCENTS: [&str; 4] = ["amber", "teal", "red", "green"];
+// Keep in step with `ACCENTS` in src/lib/state/prefs.svelte.ts and the tokens in src/app.css.
+const ACCENTS: [&str; 12] = [
+    "amber", "orange", "red", "rose", "pink", "violet", "indigo", "blue", "sky", "teal", "green",
+    "lime",
+];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -26,17 +30,24 @@ pub struct UiPrefs {
     /// Unix seconds of the newest news post the user has seen (News tab, D-099).
     #[serde(default)]
     pub news_seen: i64,
+    /// Set once the one-time move off the old amber default has run (D-132). Without
+    /// it, every existing install would keep amber for ever, since the saved value
+    /// cannot be told apart from a deliberate choice.
+    #[serde(default)]
+    pub accent_default_v2: bool,
 }
 
 impl Default for UiPrefs {
     fn default() -> Self {
         Self {
             theme: "slate".into(),
-            accent: "amber".into(),
+            // Lime by default (D-132); mirrored by DEFAULT_ACCENT in prefs.svelte.ts.
+            accent: "lime".into(),
             onboarded: false,
             filters: None,
             last_update_check_ms: 0,
             news_seen: 0,
+            accent_default_v2: false,
         }
     }
 }
@@ -48,10 +59,18 @@ impl UiPrefs {
             self.theme = "slate".into();
         }
         if !ACCENTS.contains(&self.accent.as_str()) {
-            self.accent = "amber".into();
+            self.accent = "lime".into();
         }
         if !matches!(self.filters, Some(Value::Object(_)) | None) {
             self.filters = None;
+        }
+        // One-time: anyone still on the old default moves to the new one, every other
+        // accent is left alone (D-132).
+        if !self.accent_default_v2 {
+            if self.accent == "amber" {
+                self.accent = "lime".into();
+            }
+            self.accent_default_v2 = true;
         }
     }
 }
@@ -212,7 +231,11 @@ mod tests {
         let path = temp_path("rt");
         let store = SettingsStore::load(&path);
         assert!(store.get().skip_intro && store.get().no_splash && !store.get().no_pause);
-        assert_eq!(store.get().ui, UiPrefs::default());
+        // A loaded store is always normalised, so it carries the accent marker (D-132).
+        let mut fresh = UiPrefs::default();
+        fresh.normalise();
+        assert_eq!(store.get().ui, fresh);
+        assert_eq!(store.get().ui.accent, "lime");
         let mut s = store.get();
         s.profile_name = "Survivor".into();
         s.extra_args = "-cpuCount=8".into();
@@ -228,7 +251,30 @@ mod tests {
         let s: Settings = serde_json::from_str(r#"{"profileName":"x"}"#).unwrap();
         assert_eq!(s.profile_name, "x");
         assert!(s.skip_intro);
-        assert_eq!(s.ui.accent, "amber");
+        assert_eq!(s.ui.accent, "lime");
+    }
+
+    #[test]
+    fn old_amber_default_moves_to_lime_once() {
+        // An install from before D-132: amber and no marker.
+        let mut ui = UiPrefs {
+            accent: "amber".into(),
+            ..UiPrefs::default()
+        };
+        ui.normalise();
+        assert_eq!(ui.accent, "lime");
+        assert!(ui.accent_default_v2);
+        // Amber picked deliberately afterwards survives every later load.
+        ui.accent = "amber".into();
+        ui.normalise();
+        assert_eq!(ui.accent, "amber");
+        // Any other accent is untouched by the migration.
+        let mut teal = UiPrefs {
+            accent: "teal".into(),
+            ..UiPrefs::default()
+        };
+        teal.normalise();
+        assert_eq!(teal.accent, "teal");
     }
 
     #[test]
@@ -265,7 +311,7 @@ mod tests {
             .patch_ui(json!({ "accent": "neon", "lastUpdateCheckMs": 42 }))
             .unwrap();
         assert_eq!(ui.theme, "light");
-        assert_eq!(ui.accent, "amber");
+        assert_eq!(ui.accent, "lime");
         assert_eq!(ui.last_update_check_ms, 42);
         assert!(store.patch_ui(json!("nope")).is_err());
         let again = SettingsStore::load(&path).get().ui;

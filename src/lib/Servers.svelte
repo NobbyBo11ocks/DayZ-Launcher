@@ -146,7 +146,7 @@
   .row > :global(.filters) { flex: 1 1 0; min-width: 0; }
   .actions { display: flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
 
-  .btn { all: unset; cursor: pointer; box-sizing: border-box; height: 28px; padding: 0 14px; display: inline-flex; align-items: center; border-radius: var(--radius); background: var(--accent); color: #111; font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+  .btn { all: unset; cursor: pointer; box-sizing: border-box; height: 28px; padding: 0 14px; display: inline-flex; align-items: center; border-radius: var(--radius); background: var(--accent); color: var(--accent-fg); font-weight: 600; font-size: 12.5px; white-space: nowrap; }
   .btn.secondary { background: var(--bg-row); color: var(--fg); border: 1px solid var(--border); font-weight: 500; }
   .btn.secondary:hover { border-color: var(--accent); }
   .btn:disabled { opacity: 0.5; cursor: default; }

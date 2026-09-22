@@ -164,7 +164,7 @@
   .bar { display: flex; align-items: center; gap: 12px; font-size: 12px; }
   .check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
   .check input { accent-color: var(--accent); }
-  .btn { all: unset; cursor: pointer; padding: 6px 12px; border-radius: var(--radius); background: var(--accent); color: #111; font-weight: 600; }
+  .btn { all: unset; cursor: pointer; padding: 6px 12px; border-radius: var(--radius); background: var(--accent); color: var(--accent-fg); font-weight: 600; }
   .btn:disabled { opacity: 0.5; cursor: default; }
   .btn:focus-visible { outline: 2px solid var(--fg); }
   .empty { margin: auto; text-align: center; max-width: 480px; }

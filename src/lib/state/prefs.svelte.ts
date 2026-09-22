@@ -4,13 +4,16 @@
 import { uiPrefs } from "./uiprefs.svelte";
 
 export type Theme = "slate" | "light";
-export type Accent = "amber" | "teal" | "red" | "green";
+export type Accent = "amber" | "orange" | "red" | "rose" | "pink" | "violet" | "indigo" | "blue" | "sky" | "teal" | "green" | "lime";
 
 const KEY = "dayz-launcher.prefs.v1";
-const ACCENTS: Accent[] = ["amber", "teal", "red", "green"];
+/** Colour-wheel order, as shown in Settings. Tokens live in app.css; the host list in settings.rs. */
+export const ACCENTS: Accent[] = ["amber", "orange", "red", "rose", "pink", "violet", "indigo", "blue", "sky", "teal", "green", "lime"];
 
 const normTheme = (t: unknown): Theme => (t === "light" ? "light" : "slate");
-const normAccent = (a: unknown): Accent => (ACCENTS.includes(a as Accent) ? (a as Accent) : "amber");
+/** Lime is the default (D-132); it must match `UiPrefs::default` in settings.rs. */
+const DEFAULT_ACCENT: Accent = "lime";
+const normAccent = (a: unknown): Accent => (ACCENTS.includes(a as Accent) ? (a as Accent) : DEFAULT_ACCENT);
 
 function loadCache(): { theme: Theme; accent: Accent } {
   try {
@@ -22,12 +25,12 @@ function loadCache(): { theme: Theme; accent: Accent } {
   } catch {
     /* storage unavailable */
   }
-  return { theme: "slate", accent: "amber" };
+  return { theme: "slate", accent: DEFAULT_ACCENT };
 }
 
 class Prefs {
   theme = $state<Theme>("slate");
-  accent = $state<Accent>("amber");
+  accent = $state<Accent>(DEFAULT_ACCENT);
   #fromFile = false;
 
   constructor() {
@@ -38,7 +41,7 @@ class Prefs {
       // A file that still has the defaults and no onboarding mark has never been
       // written by this build: seed it from the cache instead of overriding the cache
       // (users of earlier builds keep their theme). Afterwards the file wins.
-      const unset = u.theme === "slate" && u.accent === "amber" && !u.onboarded;
+      const unset = u.theme === "slate" && u.accent === DEFAULT_ACCENT && !u.onboarded;
       if (!unset) {
         this.theme = normTheme(u.theme);
         this.accent = normAccent(u.accent);

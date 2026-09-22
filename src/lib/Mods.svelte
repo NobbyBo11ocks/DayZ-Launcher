@@ -180,7 +180,7 @@
   .btn { all: unset; cursor: pointer; padding: 4px 10px; border-radius: var(--radius); background: var(--bg-row); border: 1px solid var(--border); font-size: 12.5px; }
   .btn:hover { border-color: var(--accent); }
   .btn:disabled { opacity: 0.5; cursor: default; }
-  .btn.accent { background: var(--accent); color: #111; font-weight: 600; border-color: transparent; }
+  .btn.accent { background: var(--accent); color: var(--accent-fg); font-weight: 600; border-color: transparent; }
   .btn.danger { border-color: var(--danger); color: var(--danger); }
   .th { all: unset; cursor: pointer; }
   .th:hover { color: var(--fg); }

@@ -289,7 +289,7 @@
   .link:hover { text-decoration: underline; }
   .link:focus-visible { outline: 2px solid var(--accent); border-radius: 3px; }
   .actions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
-  .join { all: unset; cursor: pointer; flex: 1; text-align: center; padding: 8px 18px; border-radius: var(--radius); background: var(--accent); color: #111; font-weight: 600; }
+  .join { all: unset; cursor: pointer; flex: 1; text-align: center; padding: 8px 18px; border-radius: var(--radius); background: var(--accent); color: var(--accent-fg); font-weight: 600; }
   .join:hover { filter: brightness(1.08); }
   .join:focus-visible { outline: 2px solid var(--fg); }
   .star { all: unset; cursor: pointer; flex: none; width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); border: 1px solid var(--border); font-size: 17px; color: var(--fg-muted); }

@@ -1503,6 +1503,22 @@ pub async fn history_list(
     .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?
 }
 
+/// Removes every join from the history (the Recent view's confirmed "Clear list",
+/// D-130). Returns how many rows went.
+#[tauri::command]
+pub async fn history_clear(state: State<'_, AppState>) -> AppResult<usize> {
+    let c = Arc::clone(&state.cache);
+    tauri::async_runtime::spawn_blocking(move || {
+        let c = c
+            .lock()
+            .map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
+        c.history_clear()
+            .map_err(|e| AppError::Internal(format!("cache: {e}")))
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?
+}
+
 /// Verified head-count samples for one server over the last `hours` (default 72).
 #[tauri::command]
 pub async fn population_history(

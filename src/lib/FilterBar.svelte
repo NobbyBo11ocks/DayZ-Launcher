@@ -146,7 +146,7 @@
   .seg { display: inline-flex; box-sizing: border-box; height: 28px; padding: 2px; border-radius: var(--radius); background: var(--bg-row); border: 1px solid var(--border); flex: none; }
   .segbtn { all: unset; cursor: pointer; display: inline-flex; align-items: center; padding: 0 9px; border-radius: 6px; color: var(--fg-muted); font-size: 12px; font-weight: 500; white-space: nowrap; }
   .segbtn:hover { color: var(--fg); }
-  .segbtn.on { background: var(--accent); color: #111; font-weight: 600; }
+  .segbtn.on { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
   .segbtn:focus-visible { outline: 2px solid var(--accent); }
 
   .select { box-sizing: border-box; height: 28px; padding: 0 6px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg); font-size: 12.5px; max-width: 150px; }

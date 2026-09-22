@@ -170,10 +170,10 @@
   .text h1 { margin: 0; font-size: 23px; font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; }
   .chip { padding: 2px 9px; border-radius: 999px; background: color-mix(in srgb, var(--fg) 7%, transparent); border: 1px solid var(--border); font-size: 11.5px; color: var(--fg-muted); white-space: nowrap; }
-  .chip.accent { color: #111; background: var(--accent); border-color: transparent; font-weight: 600; }
+  .chip.accent { color: var(--accent-fg); background: var(--accent); border-color: transparent; font-weight: 600; }
   .actions { display: flex; gap: 8px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
 
-  .btn { all: unset; cursor: pointer; padding: 8px 14px; border-radius: 10px; background: var(--accent); color: #111; font-weight: 600; white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+  .btn { all: unset; cursor: pointer; padding: 8px 14px; border-radius: 10px; background: var(--accent); color: var(--accent-fg); font-weight: 600; white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
   .btn.secondary { background: var(--bg-row); color: var(--fg); border: 1px solid var(--border); font-weight: 500; }
   .btn.small { padding: 4px 10px; font-size: 12px; border-radius: var(--radius); }
   .btn:hover { filter: brightness(1.08); }
@@ -186,7 +186,7 @@
   .seg { display: inline-flex; padding: 2px; border-radius: 10px; background: var(--bg-row); border: 1px solid var(--border); }
   .segbtn { all: unset; cursor: pointer; padding: 4px 11px; border-radius: 8px; color: var(--fg-muted); font-size: 12px; font-weight: 500; }
   .segbtn:hover { color: var(--fg); }
-  .segbtn.on { background: var(--accent); color: #111; font-weight: 600; }
+  .segbtn.on { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
   .segbtn:focus-visible { outline: 2px solid var(--accent); }
 
   .scroll { flex: 1; min-height: 0; overflow: auto; padding-right: 4px; display: flex; flex-direction: column; gap: 12px; }
@@ -215,7 +215,7 @@
   .dot { opacity: 0.6; }
   .pill { padding: 1px 7px; border-radius: 9px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em; }
   .pill.up { background: color-mix(in srgb, var(--accent) 22%, var(--bg-row)); color: var(--accent); }
-  .pill.new { background: var(--accent); color: #111; }
+  .pill.new { background: var(--accent); color: var(--accent-fg); }
   .link { all: unset; cursor: pointer; color: var(--fg); }
   .link:hover { color: var(--accent); }
   .link:focus-visible { outline: 2px solid var(--accent); border-radius: 4px; }

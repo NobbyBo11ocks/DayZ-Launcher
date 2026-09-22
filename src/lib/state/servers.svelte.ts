@@ -579,6 +579,16 @@ class ServersStore {
     }
   }
 
+  /** Empties the join history after the user's confirmation on the Recent view (D-130). */
+  async clearHistory() {
+    try {
+      await invoke("history_clear");
+      this.history = [];
+    } catch (e) {
+      this.error = String(e);
+    }
+  }
+
   /** Adds a server by address, selects it, and returns it. */
   async directConnect(address: string): Promise<ServerRow | null> {
     this.error = null;

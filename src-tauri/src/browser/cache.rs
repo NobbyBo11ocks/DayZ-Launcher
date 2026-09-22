@@ -257,6 +257,15 @@ impl Cache {
         Ok(())
     }
 
+    /// Empties the join history: the user's confirmed "Clear list" on the Recent view
+    /// (D-130), the only code path that deletes history rows. Returns the number
+    /// removed and checkpoints so the deletion is as durable as the inserts.
+    pub fn history_clear(&self) -> rusqlite::Result<usize> {
+        let n = self.conn.execute("DELETE FROM history", [])?;
+        self.checkpoint();
+        Ok(n)
+    }
+
     /// Folds the write-ahead log into the database file without blocking readers.
     pub fn checkpoint(&self) {
         let _ = self.conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);");
@@ -699,6 +708,9 @@ mod tests {
             (h[0].id.as_str(), h[0].mods, h[0].game_port),
             (r.id.as_str(), 12, 2402)
         );
+        assert_eq!(c.history_clear().unwrap(), 1);
+        assert!(c.history(10).unwrap().is_empty());
+        assert_eq!(c.history_clear().unwrap(), 0, "clearing twice is harmless");
 
         let now = ServerRow::now_unix();
         c.population_add(&[

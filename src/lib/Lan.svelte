@@ -68,7 +68,7 @@
   .bar { display: flex; align-items: center; gap: 10px; font-size: 12px; }
   .search { flex: 0 0 220px; padding: 6px 10px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg); }
   .search:focus-visible { outline: 2px solid var(--accent); }
-  .btn { all: unset; cursor: pointer; padding: 6px 12px; border-radius: var(--radius); background: var(--accent); color: #111; font-weight: 600; }
+  .btn { all: unset; cursor: pointer; padding: 6px 12px; border-radius: var(--radius); background: var(--accent); color: var(--accent-fg); font-weight: 600; }
   .btn:disabled { opacity: 0.5; cursor: default; }
   .btn:focus-visible { outline: 2px solid var(--fg); }
   .empty { margin: auto; text-align: center; max-width: 520px; }

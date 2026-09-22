@@ -37,6 +37,7 @@ Out of scope for v1: Linux, server-owner listing/boosts, accounts, telemetry. (T
 | v0.1.16 | Stale-registry note removed from the join dialog | D-123 |
 | v0.1.17 | Steam thread retries init every 10 s when Steam starts after the launcher | D-125 |
 | v0.1.18 | Friends marker on server rows and a "Friends" quick filter | D-128 |
+| v0.1.19 | "Clear list" on the Recent view (confirmed), twelve accent colours picked as dots with an `--accent-fg` token so light-theme accents stay readable, lime as the new default accent with a one-time move off amber, news summaries no longer opening with a picture address, README rewritten with fresh screenshots, MIT licence file | D-130–D-133 |
 | infra | GitHub Actions CI and tag-driven release workflow, release tools (`make_latest.js`, `verify_update_sig.js`, `nsis_template_check.js`) | D-063, D-071 |
 
 Candidates, not scheduled: code signing (Q11), a "friends on this server" marker in the browser once Q21 shows how DayZ reports servers to Steam.

@@ -265,6 +265,7 @@ pub fn run() {
             commands::favourite_set,
             commands::favourite_alert_set,
             commands::history_list,
+            commands::history_clear,
             commands::population_history,
             commands::direct_connect,
             commands::import_official_favourites

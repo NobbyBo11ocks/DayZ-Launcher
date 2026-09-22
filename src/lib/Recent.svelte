@@ -19,6 +19,17 @@
   }
 
   const when = (unix: number) => new Date(unix * 1000).toLocaleString();
+
+  // "Clear list" (D-130): the only way history rows are deleted, and only after an
+  // inline confirmation, like the junction cleanup in Diagnostics (D-093).
+  let confirmClear = $state(false);
+  let clearing = $state(false);
+  async function clearAll() {
+    clearing = true;
+    await servers.clearHistory();
+    clearing = false;
+    confirmClear = false;
+  }
 </script>
 
 <section class="recent">
@@ -26,6 +37,16 @@
     <h1>Recent</h1>
     {#if servers.history.length}<span class="muted">{servers.history.length} join{servers.history.length === 1 ? "" : "s"}</span>{/if}
     {#if servers.error}<span class="error">{servers.error}</span>{/if}
+    {#if servers.history.length}
+      <span class="spacer"></span>
+      {#if confirmClear}
+        <span class="muted">Remove all {servers.history.length} join{servers.history.length === 1 ? "" : "s"} from the list?</span>
+        <button class="btn danger" onclick={clearAll} disabled={clearing}>{clearing ? "Clearing…" : "Clear"}</button>
+        <button class="btn ghost" onclick={() => (confirmClear = false)} disabled={clearing}>Keep</button>
+      {:else}
+        <button class="btn ghost" onclick={() => (confirmClear = true)} title="Remove every entry from this list; favourites and the server list are untouched">Clear list</button>
+      {/if}
+    {/if}
   </header>
   {#if servers.history.length === 0}
     <p class="muted">Servers you join appear here.</p>
@@ -62,7 +83,12 @@
   .act { text-align: right; }
   .mono { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
   .star { color: var(--accent); }
-  .btn { all: unset; cursor: pointer; padding: 4px 10px; border-radius: var(--radius); background: var(--accent); color: #111; font-weight: 600; font-size: 12px; }
+  .spacer { flex: 1; }
+  .btn { all: unset; cursor: pointer; padding: 4px 10px; border-radius: var(--radius); background: var(--accent); color: var(--accent-fg); font-weight: 600; font-size: 12px; }
+  .btn.ghost { background: transparent; color: var(--fg-muted); border: 1px solid var(--border); font-weight: 500; }
+  .btn.ghost:hover { color: var(--fg); }
+  .btn.danger { background: var(--danger); color: #fff; }
+  .btn:disabled { opacity: 0.5; cursor: default; }
   .btn:focus-visible { outline: 2px solid var(--fg); }
   .error { color: var(--danger); }
 </style>

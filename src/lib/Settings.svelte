@@ -3,7 +3,7 @@
   // (docs/06 §5). Two columns so the whole view fits the viewport (D-094).
   import { invoke } from "@tauri-apps/api/core";
   import { external } from "./external";
-  import { prefs, type Accent, type Theme } from "./state/prefs.svelte";
+  import { ACCENTS, prefs, type Theme } from "./state/prefs.svelte";
   import { servers } from "./state/servers.svelte";
   import { updates } from "./state/updates.svelte";
   import type { Settings } from "./types";
@@ -75,12 +75,8 @@
     { id: "slate", label: "Slate (dark)" },
     { id: "light", label: "Light" },
   ];
-  const accents: { id: Accent; label: string }[] = [
-    { id: "amber", label: "Amber" },
-    { id: "teal", label: "Teal" },
-    { id: "red", label: "Red" },
-    { id: "green", label: "Green" },
-  ];
+  // Twelve accents as colour dots (D-131): the id is the label, capitalised.
+  const accents = ACCENTS.map((id) => ({ id, label: id.charAt(0).toUpperCase() + id.slice(1) }));
 </script>
 
 <section class="settings">
@@ -99,13 +95,12 @@
       </div>
       <div class="row">
         <span class="label">Accent</span>
-        <div class="group" role="radiogroup" aria-label="Accent">
+        <div class="group dots" role="radiogroup" aria-label="Accent">
           {#each accents as a (a.id)}
-            <button class="chip" class:on={prefs.accent === a.id} role="radio" aria-checked={prefs.accent === a.id} onclick={() => (prefs.accent = a.id)}>
-              <span class="swatch" data-accent={a.id}></span>{a.label}
-            </button>
+            <button class="dot" data-accent={a.id} class:on={prefs.accent === a.id} role="radio" aria-checked={prefs.accent === a.id} aria-label={a.label} title={a.label} onclick={() => (prefs.accent = a.id)}></button>
           {/each}
         </div>
+        <span class="muted">{accents.find((a) => a.id === prefs.accent)?.label}</span>
       </div>
 
       <h2>Server browser</h2>
@@ -229,11 +224,13 @@
   .chip.on { background: color-mix(in srgb, var(--accent) 22%, var(--bg-row)); color: var(--fg); border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
   .chip:disabled { opacity: 0.5; cursor: default; }
   .chip:focus-visible { outline: 2px solid var(--accent); }
-  .swatch { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
-  .swatch[data-accent="amber"] { background: #f0b429; }
-  .swatch[data-accent="teal"] { background: #2dd4bf; }
-  .swatch[data-accent="red"] { background: #f0544f; }
-  .swatch[data-accent="green"] { background: #4ade80; }
+  /* Accent dots: each carries its own --accent through its data-accent attribute (app.css), so the
+     fill and the selection ring are the dot's colour, not the current theme's. */
+  .dots { gap: 8px; align-items: center; }
+  .dot { all: unset; box-sizing: border-box; cursor: pointer; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.25); transition: transform 120ms ease; }
+  .dot:hover { transform: scale(1.15); }
+  .dot.on { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); }
+  .dot:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
   .check { cursor: pointer; }
   .check input { accent-color: var(--accent); }
   .text { flex: 1; min-width: 0; max-width: 420px; padding: 5px 10px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg); }

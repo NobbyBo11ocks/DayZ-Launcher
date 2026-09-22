@@ -154,10 +154,29 @@ pub fn plain_text(s: &str, max: usize) -> String {
                 if !closed {
                     out.push(c);
                     out.push_str(&skipped);
-                } else if !last_space {
-                    // Tags often separate lines or list items: keep the words apart.
-                    out.push(' ');
-                    last_space = true;
+                } else {
+                    // `[img]url[/img]` carries a bare picture path as its content (the
+                    // 1.27/1.28 posts, D-133): drop it with the tag. Without a closing
+                    // tag the text is kept as it was.
+                    if c == '[' && skipped == "img" {
+                        let mut inner = String::new();
+                        for n in chars.by_ref() {
+                            inner.push(n);
+                            if inner.ends_with("[/img]") {
+                                inner.clear();
+                                break;
+                            }
+                        }
+                        if !inner.is_empty() {
+                            out.push_str(&inner);
+                            last_space = inner.ends_with(char::is_whitespace);
+                        }
+                    }
+                    if !last_space {
+                        // Tags often separate lines or list items: keep the words apart.
+                        out.push(' ');
+                        last_space = true;
+                    }
                 }
             }
             '&' => {
@@ -389,6 +408,16 @@ mod tests {
         assert_eq!(cut, "one two…");
         assert_eq!(plain_text("a [unclosed tag", 100), "a [unclosed tag");
         assert_eq!(plain_text("R&D &amp; more", 100), "R&D & more");
+        // The 1.27/1.28 posts open with a bare-URL image tag (D-133).
+        assert_eq!(
+            plain_text(
+                "[img]{STEAM_CLAN_IMAGE}/4458811/c72fc93abb14e43ab6fdd3c5b3924136206efb3d.jpg[/img]\nGreetings, Survivors!\nWe’re about to enter",
+                500
+            ),
+            "Greetings, Survivors! We’re about to enter"
+        );
+        assert_eq!(plain_text("[img src=\"x\"][/img]Hello", 100), "Hello");
+        assert_eq!(plain_text("[img]no closing tag", 100), "no closing tag");
     }
 
     #[test]
