@@ -88,7 +88,7 @@
     </div>
     <div class="actions">
       {#if lastJoin}
-        <button class="btn secondary" onclick={joinAgain} title="{lastJoin.ip}:{lastJoin.gamePort}">Join again · {lastJoin.name}</button>
+        <button class="btn" onclick={joinAgain} title="{lastJoin.name} ({lastJoin.ip}:{lastJoin.gamePort})">Join again</button>
       {/if}
       <button class="btn" onclick={browse}>Browse servers</button>
     </div>
@@ -102,9 +102,6 @@
       {/each}
     </div>
     {#if news.error}<span class="error">{news.error}</span>{/if}
-    <button class="btn small secondary push" onclick={() => void news.refresh()} disabled={news.loading} title={news.fetchedAt ? `Checked ${new Date(news.fetchedAt * 1000).toLocaleTimeString()}; refreshes every 30 minutes` : "Refreshes every 30 minutes"}>
-      {news.loading ? "Refreshing…" : "Refresh"}
-    </button>
   </div>
 
   <div class="scroll">
@@ -179,7 +176,6 @@
   .btn { all: unset; cursor: pointer; padding: 8px 14px; border-radius: 10px; background: var(--accent); color: #111; font-weight: 600; white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
   .btn.secondary { background: var(--bg-row); color: var(--fg); border: 1px solid var(--border); font-weight: 500; }
   .btn.small { padding: 4px 10px; font-size: 12px; border-radius: var(--radius); }
-  .btn.push { margin-left: auto; }
   .btn:hover { filter: brightness(1.08); }
   .btn.secondary:hover { border-color: var(--accent); filter: none; }
   .btn:disabled { opacity: 0.6; cursor: default; }
