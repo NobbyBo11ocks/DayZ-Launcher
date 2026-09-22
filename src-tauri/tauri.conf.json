@@ -27,7 +27,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com; font-src 'self'; frame-src https://www.youtube-nocookie.com; connect-src ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com; font-src 'self'; frame-src https://www.youtube-nocookie.com; connect-src ipc: http://ipc.localhost; base-uri 'self'; form-action 'none'; frame-ancestors 'none'"
     }
   },
   "plugins": {
@@ -36,6 +36,7 @@
       "endpoints": [
         "https://github.com/NobbyBo11ocks/dayz-launcher/releases/latest/download/latest.json"
       ],
+      "requireSignedVersion": true,
       "windows": {
         "installMode": "passive"
       }

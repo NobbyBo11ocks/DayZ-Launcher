@@ -7,7 +7,9 @@
   import FilterBar from "./FilterBar.svelte";
   import ServerTable from "./ServerTable.svelte";
   import { servers } from "./state/servers.svelte";
-  import { invoke } from "@tauri-apps/api/core";
+  // Every command through the logging wrapper: a failure is recorded with its
+  // command name before it is rethrown (D-158/D-160).
+  import { invokeLogged as invoke } from "./log";
 
   /** Per mount; the backend keeps only the first mark it ever receives. */
   let firstPaintMarked = false;

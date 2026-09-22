@@ -387,22 +387,23 @@ impl Cache {
         })
     }
 
+    /// Every cached row, unordered: the browser puts them in a map and sorts by the
+    /// column the user picked, so sorting here only cost a temp b-tree (D-160).
     pub fn load_all(&self) -> rusqlite::Result<Vec<ServerRow>> {
-        let mut stmt = self.conn.prepare(&format!(
-            "SELECT {SELECT_COLUMNS} FROM servers ORDER BY last_seen DESC"
-        ))?;
+        let mut stmt = self
+            .conn
+            .prepare_cached(&format!("SELECT {SELECT_COLUMNS} FROM servers"))?;
         let rows = stmt.query_map([], Self::row_from)?;
         rows.collect()
     }
 
     pub fn get(&self, id: &str) -> rusqlite::Result<Option<ServerRow>> {
-        self.conn
-            .query_row(
-                &format!("SELECT {SELECT_COLUMNS} FROM servers WHERE id = ?1"),
-                params![id],
-                Self::row_from,
-            )
-            .optional()
+        // Called up to 120 times per on-demand verification, so the SQL is compiled
+        // once rather than per row (D-160).
+        let mut stmt = self
+            .conn
+            .prepare_cached(&format!("SELECT {SELECT_COLUMNS} FROM servers WHERE id = ?1"))?;
+        stmt.query_row(params![id], Self::row_from).optional()
     }
 
     /// Insert-or-replace a batch inside one transaction. `None` values for the
@@ -459,9 +460,16 @@ impl Cache {
     pub fn apply_verifications(&mut self, results: &[Verification]) -> rusqlite::Result<()> {
         let tx = self.conn.transaction()?;
         {
+            // A check that could not count keeps the last count it did (D-160): a single
+            // dropped PLAYER datagram used to write NULL over a good head-count, after
+            // which the UI fell back to the server's own — possibly inflated — number
+            // with no marking at all. The verdict still records why it could not be
+            // refreshed, and `verified_at` only advances when there is a fresh count.
             let mut stmt = tx.prepare_cached(
                 "UPDATE servers SET
-                   verified_players = ?2, verified_at = ?3, verdict = ?4,
+                   verified_players = COALESCE(?2, verified_players),
+                   verified_at = CASE WHEN ?2 IS NULL THEN verified_at ELSE ?3 END,
+                   verdict = ?4,
                    players = ?5, max_players = ?6,
                    ping_ms = COALESCE(?7, ping_ms), keywords = COALESCE(?8, keywords),
                    last_seen = CASE WHEN ?7 IS NULL THEN last_seen ELSE ?3 END
@@ -788,7 +796,10 @@ mod tests {
             (w.ping_ms, w.tags.time_string().as_deref()),
             (33, Some("16:00"))
         );
-        // Offline verification (no INFO): keeps ping/keywords, still records the verdict.
+        // Offline verification (no INFO): keeps ping and keywords, records the verdict,
+        // and — since it produced no count — keeps the last count and the time it was
+        // taken (D-160). Overwriting them with NULL made the UI fall back to the
+        // server's own number with nothing to say it was unverified.
         c.apply_verifications(&[Verification {
             id: id.clone(),
             verdict: Verdict::Offline,
@@ -804,8 +815,14 @@ mod tests {
         .unwrap();
         let w = c.get(&id).unwrap().unwrap();
         assert_eq!(
-            (w.ping_ms, w.verdict.as_deref(), w.verified_at),
-            (33, Some("offline"), Some(2_000))
+            (
+                w.ping_ms,
+                w.verdict.as_deref(),
+                w.verified_at,
+                w.verified_players
+            ),
+            (33, Some("offline"), Some(1_000), Some(0)),
+            "verdict updates; the count and its timestamp survive a check that could not count"
         );
     }
 }

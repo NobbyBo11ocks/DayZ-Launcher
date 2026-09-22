@@ -15,7 +15,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tokio::time::timeout;
 
-use super::packet::{challenge_of, classify, Datagram, Kind, Reassembler, MAX_DATAGRAM};
+use super::packet::{challenge_of, classify, Datagram, Kind, Reassembler};
 use super::{info, players, rules, A2sError, A2sResult, Info, Players, Rules};
 
 /// Default send rate; ~400 datagrams/s stayed loss-free on a home connection.
@@ -149,9 +149,19 @@ impl Client {
             .acquire()
             .await
             .map_err(|_| A2sError::Timeout)?;
+        // One socket for the attempt and its retry: binding inside `query_once`
+        // opened a second NAT flow for the same target on every retry, and burst
+        // size is exactly what D-037 measured as the cause of answer loss (D-160).
+        let sock = UdpSocket::bind(if addr.is_ipv4() {
+            "0.0.0.0:0"
+        } else {
+            "[::]:0"
+        })
+        .await?;
+        sock.connect(addr).await?;
         let mut last = A2sError::Timeout;
         for _ in 0..=self.retries {
-            match self.query_once(addr, kind).await {
+            match self.query_once(&sock, kind).await {
                 Ok(v) => return Ok(v),
                 Err(A2sError::Timeout) => last = A2sError::Timeout,
                 Err(e) => return Err(e),
@@ -160,16 +170,9 @@ impl Client {
         Err(last)
     }
 
-    async fn query_once(&self, addr: SocketAddr, kind: Kind) -> A2sResult<(Vec<u8>, Duration, u8)> {
-        let sock = UdpSocket::bind(if addr.is_ipv4() {
-            "0.0.0.0:0"
-        } else {
-            "[::]:0"
-        })
-        .await?;
-        sock.connect(addr).await?;
+    async fn query_once(&self, sock: &UdpSocket, kind: Kind) -> A2sResult<(Vec<u8>, Duration, u8)> {
         let mut challenge: Option<[u8; 4]> = None;
-        let mut buf = vec![0u8; MAX_DATAGRAM];
+        let mut buf = vec![0u8; kind.max_datagram()];
         let mut challenges_seen = 0u8;
         // The deadline starts at the first send so pacing delay is not charged to the server.
         let mut deadline: Option<Instant> = None;

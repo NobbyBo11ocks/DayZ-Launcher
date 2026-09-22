@@ -77,10 +77,8 @@ pub async fn fetch() -> Result<Vec<DzsaRow>, String> {
     if !resp.status().is_success() {
         return Err(format!("DZSA answered HTTP {}", resp.status()));
     }
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| format!("DZSA download failed: {e}"))?;
+    // The live list is ~24 MB; the cap is generous but finite (D-160).
+    let bytes = crate::http::body_capped(resp, 64 * 1024 * 1024, "DZSA server list").await?;
     let doc: Document = serde_json::from_slice(&bytes).map_err(|e| format!("DZSA JSON: {e}"))?;
     let now = ServerRow::now_unix();
     Ok(doc

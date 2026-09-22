@@ -65,21 +65,24 @@ export type JunctionInfo = {
   targetExists: boolean;
 };
 
+/**
+ * Absent keys, not nulls: the host leaves out everything it has nothing to say
+ * about, and the two fields nothing renders (`external`, `unknown`) never cross
+ * IPC at all (D-160).
+ */
 export type DayzTags = {
   battleye: boolean;
   firstPersonOnly: boolean;
-  external: boolean;
   privateHive: boolean;
   modded: boolean;
   dlc: boolean;
   allowedFilePatching: boolean;
-  shard: string | null;
-  queue: number | null;
-  timeMultiplier: number | null;
-  nightMultiplier: number | null;
+  shard?: string | null;
+  queue?: number | null;
+  timeMultiplier?: number | null;
+  nightMultiplier?: number | null;
   /** Minutes since midnight, in-game clock. */
-  timeMinutes: number | null;
-  unknown: string[];
+  timeMinutes?: number | null;
 };
 
 export type Verdict = "verified" | "inflated" | "unverifiable" | "synthetic" | "offline";
@@ -96,23 +99,18 @@ export type ServerRow = {
   /** Reported by the server; often inflated (D-038). */
   players: number;
   maxPlayers: number;
-  bots: number;
   password: boolean;
-  secure: boolean;
   serverVersion: number;
   version: string;
   pingMs: number;
-  keywords: string;
   tags: DayzTags;
-  steamId: number;
-  lastSeen: number;
-  verifiedPlayers: number | null;
+  verifiedPlayers?: number | null;
   /** Steam's master reported zero authenticated players (row from a `noplayers` partition). */
-  steamEmpty: boolean | null;
-  verifiedAt: number | null;
-  verdict: Verdict | null;
-  /** ISO 3166-1 alpha-2 from the embedded GeoIP table, null when unknown (D-073). */
-  country: string | null;
+  steamEmpty?: boolean | null;
+  verifiedAt?: number | null;
+  verdict?: Verdict | null;
+  /** ISO 3166-1 alpha-2 from the embedded GeoIP table, absent when unknown (D-073). */
+  country?: string | null;
 };
 
 /** Rule R0 (docs/11): Steam says empty, A2S_INFO claims players. */
@@ -128,9 +126,19 @@ export const isUntrusted = (r: ServerRow): boolean =>
   isInflated(r) ||
   r.verdict === "inflated" ||
   r.verdict === "synthetic" ||
+  r.verdict === "offline" ||
   (r.verdict === "unverifiable" && r.steamEmpty !== false);
 
-/** Population a player may rely on (mirrors ServerRow::trusted_players in Rust). */
+/**
+ * True when the number on screen is the server's own claim rather than a head-count
+ * we made ourselves (D-160). Steam vouching for a server keeps it visible, but the
+ * count is still unchecked and must not look verified: hiding behind a green tick is
+ * exactly the gap a server that answers INFO and firewalls PLAYER relies on.
+ */
+export const isUnchecked = (r: ServerRow): boolean =>
+  r.verifiedPlayers == null && (r.verdict === "unverifiable" || r.verdict === "offline" || r.verdict == null);
+
+/** Population a player may rely on (mirrors `judge` in browser/verify.rs). */
 export const trustedPlayers = (r: ServerRow): number => (r.verifiedPlayers ?? (isInflated(r) ? 0 : r.players));
 
 export type SteamStatus = {
@@ -175,6 +183,8 @@ export type RefreshDone = {
   capped: boolean;
   /** Later partitions were skipped after Steam's master stopped answering (throttling). */
   stoppedEarly: boolean;
+  /** The request never reached Steam: an answer so the UI stops waiting, not a result (D-160). */
+  rejected?: boolean;
 };
 
 export type Verification = {

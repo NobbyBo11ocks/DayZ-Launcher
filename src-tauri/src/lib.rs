@@ -6,6 +6,7 @@ pub mod browser;
 mod commands;
 pub mod error;
 pub mod geoip;
+pub mod http;
 pub mod launch;
 pub mod log;
 pub mod news;
@@ -98,16 +99,43 @@ pub fn run() {
             let cache = Arc::new(Mutex::new(match Cache::open(&db_path) {
                 Ok(c) => c,
                 Err(e) => {
+                    // A cache is only a cache: losing it costs one refresh, so a corrupt
+                    // or locked file must not stop the app starting with no window and no
+                    // message (D-160). Move it aside, keep it for diagnosis, try once more.
                     log_error!("cache", "open failed at {}: {e}", db_path.display());
-                    return Err(e.into());
+                    let aside = db_path
+                        .with_extension(format!("db.broken-{}", browser::ServerRow::now_unix()));
+                    let moved = std::fs::rename(&db_path, &aside).is_ok();
+                    // A stale WAL/shm pair would be adopted by the fresh database.
+                    for ext in ["db-wal", "db-shm"] {
+                        let _ = std::fs::remove_file(db_path.with_extension(ext));
+                    }
+                    match Cache::open(&db_path) {
+                        Ok(c) => {
+                            log_warn!(
+                                "cache",
+                                "started on a new cache; old file kept: {moved} ({})",
+                                aside.display()
+                            );
+                            c
+                        }
+                        Err(e2) => {
+                            log_error!("cache", "second open failed as well: {e2}");
+                            return Err(e2.into());
+                        }
+                    }
                 }
             }));
-            log_info!(
-                "cache",
-                "open {} rows at {}",
-                cache.lock().map(|c| c.count().unwrap_or(0)).unwrap_or(0),
-                db_path.display()
-            );
+            // The row count is a SELECT COUNT(*) over ~19 000 rows and the line is
+            // only for the log, so it is not worth holding the first frame (D-160).
+            {
+                let c = Arc::clone(&cache);
+                let at = db_path.display().to_string();
+                tauri::async_runtime::spawn_blocking(move || {
+                    let n = c.lock().map(|c| c.count().unwrap_or(0)).unwrap_or(0);
+                    log_info!("cache", "open {n} rows at {at}");
+                });
+            }
             #[cfg(debug_assertions)]
             eprintln!("[setup] cache at {} ({} rows)", db_path.display(), cache.lock().map(|c| c.count().unwrap_or(0)).unwrap_or(0));
             let settings = SettingsStore::load(&app.path().app_config_dir()?.join("settings.json"));
@@ -172,7 +200,10 @@ pub fn run() {
                             let _ = tauri::async_runtime::spawn_blocking(move || {
                                 if let Ok(mut c) = c.lock() {
                                     if let Err(e) = c.upsert(&rows) {
-                                        eprintln!("[cache] upsert failed: {e}");
+                                        // Release builds have no console, so this used to
+                                        // vanish entirely (D-160): a full disk lost the
+                                        // whole cached list without a trace.
+                                        log_error!("cache", "upsert of {} row(s) failed: {e}", rows.len());
                                     }
                                 }
                             })
@@ -225,14 +256,26 @@ pub fn run() {
                             }
                             let _ = handle.emit("servers:done", &d);
                             // A LAN scan is not a list refresh: it must not push the
-                            // automatic refresh's throttle or age out cached rows.
-                            let full_list = d.source == "steam";
+                            // automatic refresh's throttle or age out cached rows, and a
+                            // rejected one fetched nothing at all (D-160): treating it as
+                            // real wrote last_refresh, pruned rows the list never renewed
+                            // and reported "0 of 0 shown" as a success.
+                            let full_list = d.source == "steam" && !d.rejected;
                             let c = Arc::clone(&cache);
                             let _ = tauri::async_runtime::spawn_blocking(move || {
                                 if let Ok(c) = c.lock() {
                                     if full_list {
                                         let _ = c.set_meta("last_refresh", &browser::ServerRow::now_unix().to_string());
                                         let _ = c.prune(CACHE_MAX_AGE_SECS);
+                                        let _ = c.population_prune(POPULATION_MAX_AGE_SECS);
+                                        // A refresh writes thousands of rows and never
+                                        // checkpointed, so the WAL reached 4.5 MB and every
+                                        // later start paid recovery over it (D-160).
+                                        c.checkpoint();
+                                    } else {
+                                        // A LAN scan or the DZSA fallback still adds
+                                        // population samples; without this they grew for
+                                        // the whole session (D-160).
                                         let _ = c.population_prune(POPULATION_MAX_AGE_SECS);
                                     }
                                 }

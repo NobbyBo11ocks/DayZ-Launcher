@@ -26,7 +26,13 @@ pub fn junction_name(id: u64, meta_name: Option<&str>) -> String {
         .unwrap_or("")
         .chars()
         .filter(|c| {
-            !matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') && !c.is_control()
+            // `;` is not forbidden by Windows but it separates -mod= entries
+            // (launch/args.rs), so a mod name carrying one would split its own
+            // path into two arguments and the launch would fail (D-160).
+            !matches!(
+                c,
+                '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' | ';'
+            ) && !c.is_control()
         })
         .collect::<String>()
         .trim()

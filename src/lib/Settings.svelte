@@ -1,7 +1,9 @@
 <script lang="ts">
   // Appearance, browser defaults, launch options and profiles, updates, Steam
   // (docs/06 §5). Two columns so the whole view fits the viewport (D-094).
-  import { invoke } from "@tauri-apps/api/core";
+  // Every command through the logging wrapper: a failure is recorded with its
+  // command name before it is rethrown (D-158/D-160).
+  import { invokeLogged as invoke } from "./log";
   import { external } from "./external";
   import { ACCENTS, prefs, type Theme } from "./state/prefs.svelte";
   import { servers } from "./state/servers.svelte";

@@ -3,7 +3,9 @@
 // Official update posts that arrive after the user last looked raise an in-app
 // toast and, when the window is not focused, a Windows notification. The store
 // also holds the signed-in user's avatar for the welcome header.
-import { invoke } from "@tauri-apps/api/core";
+// Every command through the logging wrapper: a failure is recorded with its
+// command name before it is rethrown (D-158/D-160).
+import { invokeLogged as invoke } from "../log";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { SvelteMap } from "svelte/reactivity";
@@ -155,8 +157,14 @@ class NewsStore {
     if (this.#thumbFailed.has(n.gid)) return yt;
     if (!this.#thumbPending.has(n.gid)) {
       this.#thumbPending.add(n.gid);
-      void invoke<ArrayBuffer>("news_thumb", { gid: n.gid, url: n.image })
-        .then((buf) => this.thumbs.set(n.gid, URL.createObjectURL(new Blob([buf], { type: "image/jpeg" }))))
+      // Cards draw at ~340 px, the featured picture at roughly twice that; asking
+      // for 640 px everywhere decoded ~920 KB per card in the WebView (D-160).
+      void invoke<ArrayBuffer>("news_thumb", { gid: n.gid, url: n.image, max: featured ? 640 : 360 })
+        .then((buf) => {
+          const old = this.thumbs.get(n.gid);
+          this.thumbs.set(n.gid, URL.createObjectURL(new Blob([buf], { type: "image/jpeg" })));
+          if (old) URL.revokeObjectURL(old);
+        })
         .catch(() => this.#thumbFailed.add(n.gid))
         .finally(() => this.#thumbPending.delete(n.gid));
     }

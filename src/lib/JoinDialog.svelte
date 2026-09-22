@@ -2,7 +2,9 @@
   // Join flow (docs/02 §6, docs/06 §6): plan → sync missing mods with progress → launch.
   // A full server can be waited for here (D-074): the dialog polls A2S_INFO every
   // 10 s and starts the game the moment the server reports a free slot.
-  import { invoke } from "@tauri-apps/api/core";
+  // Every command through the logging wrapper: a failure is recorded with its
+  // command name before it is rethrown (D-158/D-160).
+  import { invokeLogged as invoke } from "./log";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
   import { fmtBytes, type ItemProgress, type JoinPlan, type LaunchExited, type Launched, type LaunchProfile, type ServerSlots, type Settings, type SyncDone, type SyncProgress } from "./types";

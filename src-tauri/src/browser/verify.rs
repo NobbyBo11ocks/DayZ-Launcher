@@ -119,11 +119,21 @@ pub fn judge(
                     .collect();
                 let all_young = p.players.iter().all(|x| x.duration_secs < 60.0);
                 let named = p.players.iter().any(|x| !x.name.is_empty());
-                if distinct.len() <= 2 || all_young || named {
+                // "Everyone joined in the last minute" is what an honest server looks
+                // like just after its scheduled restart, so on its own it no longer
+                // flags (D-160): it was hiding real servers every few hours. What gives
+                // a fabricated list away is repetition — many players sharing very few
+                // distinct durations — so young sessions only count when they also
+                // repeat.
+                let repetitive = distinct.len() * 3 <= v as usize;
+                if distinct.len() <= 2 || named || (all_young && repetitive) {
                     return (
                         Verdict::Synthetic,
                         Some(v),
-                        format!("{v} entries, {} distinct durations, all_young={all_young}, named={named}", distinct.len()),
+                        format!(
+                            "{v} entries, {} distinct durations, all_young={all_young}, named={named}",
+                            distinct.len()
+                        ),
                     );
                 }
             }
@@ -292,8 +302,22 @@ mod tests {
                 0
             )
             .0,
+            Verdict::Verified,
+            "young but varied: what an honest server looks like just after a restart (D-160)"
+        );
+        assert_eq!(
+            judge(
+                Some(&i),
+                Ok(&players(
+                    &[10.0, 20.0, 30.0, 10.0, 20.0, 30.0, 10.0, 20.0, 30.0],
+                    ""
+                )),
+                0,
+                0
+            )
+            .0,
             Verdict::Synthetic,
-            "all under a minute"
+            "young and repetitive: nine sessions sharing three durations"
         );
         assert_eq!(
             judge(

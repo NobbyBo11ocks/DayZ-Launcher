@@ -288,9 +288,22 @@ pub fn image_allowed(url: &str) -> bool {
 
 /// Decodes a picture and re-encodes it as a JPEG of at most [`THUMB_MAX`] px on
 /// the long side (aspect kept). CPU-bound: call from a blocking task.
-pub fn shrink(data: &[u8]) -> Result<Vec<u8>, String> {
-    let img = image::load_from_memory(data).map_err(|e| format!("picture unreadable: {e}"))?;
-    let small = img.thumbnail(THUMB_MAX, THUMB_MAX).to_rgb8();
+pub fn shrink(data: &[u8], max: u32) -> Result<Vec<u8>, String> {
+    // Without limits a small file declaring huge dimensions allocates the whole
+    // raster before `thumbnail` ever downscales it (D-160).
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(8192);
+    limits.max_image_height = Some(8192);
+    limits.max_alloc = Some(256 * 1024 * 1024);
+    let reader = image::ImageReader::new(std::io::Cursor::new(data))
+        .with_guessed_format()
+        .map_err(|e| format!("picture unreadable: {e}"))?;
+    let mut reader = reader;
+    reader.limits(limits);
+    let img = reader
+        .decode()
+        .map_err(|e| format!("picture unreadable: {e}"))?;
+    let small = img.thumbnail(max, max).to_rgb8();
     let mut out = Vec::with_capacity(64 * 1024);
     let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 82);
     small
@@ -306,6 +319,7 @@ pub async fn thumbnail(
     url: String,
     dir: std::path::PathBuf,
     key: String,
+    max: u32,
 ) -> Result<Vec<u8>, String> {
     if !image_allowed(&url) {
         return Err("picture host not allowed".into());
@@ -314,30 +328,34 @@ pub async fn thumbnail(
     if safe.is_empty() {
         return Err("bad thumbnail key".into());
     }
-    let path = dir.join(format!("{safe}.jpg"));
+    // A card is ~340 px wide and the featured picture ~2x that, so the two sizes
+    // are cached separately: one 640 px file per card decoded to 920 KB in the
+    // WebView, ~22 MB for a full page (D-160).
+    let max = max.clamp(160, THUMB_MAX);
+    let path = dir.join(format!("{safe}-{max}.jpg"));
     if let Ok(bytes) = std::fs::read(&path) {
         return Ok(bytes);
     }
     let client = reqwest::Client::builder()
         .user_agent(USER_AGENT)
         .timeout(std::time::Duration::from_secs(30))
+        // `image_allowed` vetted the host, so following a redirect off it would
+        // undo that check and turn this into a blind request to anywhere (D-160).
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| e.to_string())?;
-    let body = client
+    let resp = client
         .get(&url)
         .send()
         .await
         .map_err(|e| format!("picture request failed: {e}"))?
         .error_for_status()
-        .map_err(|e| format!("picture request failed: {e}"))?
-        .bytes()
-        .await
-        .map_err(|e| format!("picture unreadable: {e}"))?;
-    if body.len() > IMAGE_MAX_BYTES {
-        return Err("picture too large".into());
-    }
+        .map_err(|e| format!("picture request failed: {e}"))?;
+    // The size was checked after the whole body was already in memory, so it
+    // bounded nothing; the cap now applies while it downloads (D-160).
+    let body = crate::http::body_capped(resp, IMAGE_MAX_BYTES, "picture").await?;
     tokio::task::spawn_blocking(move || {
-        let bytes = shrink(&body)?;
+        let bytes = shrink(&body, max)?;
         let _ = std::fs::create_dir_all(&dir);
         let _ = std::fs::write(&path, &bytes);
         Ok(bytes)
@@ -355,6 +373,9 @@ pub fn prune_thumbnails(dir: &std::path::Path, keep: &std::collections::HashSet<
         let name = entry.file_name();
         let stem = name.to_string_lossy();
         let stem = stem.strip_suffix(".jpg").unwrap_or(&stem);
+        // "<gid>-<max>.jpg" since D-160; older files have no suffix and are dropped
+        // by the same rule because their stem is not a known gid either.
+        let stem = stem.rsplit_once('-').map_or(stem, |(gid, _)| gid);
         if !keep.contains(stem) {
             let _ = std::fs::remove_file(entry.path());
         }
@@ -377,16 +398,15 @@ pub async fn fetch(count: u32) -> Result<Vec<NewsItem>, String> {
         "{NEWS_URL}?appid={}&count={count}&maxlength=0&format=json",
         crate::steam::DAYZ_APP_ID
     );
-    let body = client
+    let resp = client
         .get(url)
         .send()
         .await
         .map_err(|e| format!("news request failed: {e}"))?
         .error_for_status()
-        .map_err(|e| format!("news request failed: {e}"))?
-        .bytes()
-        .await
-        .map_err(|e| format!("news reply unreadable: {e}"))?;
+        .map_err(|e| format!("news request failed: {e}"))?;
+    // 60 posts are well under 100 KB gzipped; 8 MB is far above any honest reply (D-160).
+    let body = crate::http::body_capped(resp, 8 * 1024 * 1024, "news reply").await?;
     let doc: Document =
         serde_json::from_slice(&body).map_err(|e| format!("news reply unreadable: {e}"))?;
     let mut items: Vec<NewsItem> = doc.appnews.newsitems.into_iter().map(convert).collect();

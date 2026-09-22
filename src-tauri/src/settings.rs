@@ -149,10 +149,29 @@ pub struct SettingsStore {
 
 impl SettingsStore {
     pub fn load(path: &Path) -> Self {
-        let mut current = std::fs::read(path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<Settings>(&bytes).ok())
-            .unwrap_or_default();
+        // Defaults are the right answer for a first run, but silently defaulting on an
+        // unreadable file meant the next preference change wrote them over the user's
+        // launch profiles for good (D-160). Keep a copy and say so.
+        let mut current = match std::fs::read(path) {
+            Ok(bytes) => match serde_json::from_slice::<Settings>(&bytes) {
+                Ok(s) => s,
+                Err(e) => {
+                    let aside = path.with_extension("json.unreadable");
+                    let saved = std::fs::write(&aside, &bytes).is_ok();
+                    crate::log_error!(
+                        "settings",
+                        "{} is unreadable ({e}); starting from defaults, copy kept: {saved}",
+                        path.display()
+                    );
+                    Settings::default()
+                }
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Settings::default(),
+            Err(e) => {
+                crate::log_error!("settings", "{} could not be read: {e}", path.display());
+                Settings::default()
+            }
+        };
         current.ui.normalise();
         Self {
             path: path.to_path_buf(),

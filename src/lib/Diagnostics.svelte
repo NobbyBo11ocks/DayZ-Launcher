@@ -1,7 +1,9 @@
 <script lang="ts">
   // Steam / DayZ / Workshop inventory plus the Performance section (D-078), laid out
   // in two columns so the view fits the viewport without page scrolling (D-094).
-  import { invoke } from "@tauri-apps/api/core";
+  // Every command through the logging wrapper: a failure is recorded with its
+  // command name before it is rethrown (D-158/D-160).
+  import { invokeLogged as invoke } from "./log";
   import { revealItemInDir } from "@tauri-apps/plugin-opener";
   import type { CacheStats, Diagnostics, JunctionCleanup, PerfSample } from "./types";
 

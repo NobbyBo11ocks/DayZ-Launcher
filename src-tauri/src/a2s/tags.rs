@@ -8,21 +8,31 @@ use serde::{Deserialize, Serialize};
 pub struct DayzTags {
     pub battleye: bool,
     pub first_person_only: bool,
+    /// Whether the hive is hosted off-box. Parsed, never rendered (D-160).
+    #[serde(skip_serializing)]
     pub external: bool,
     pub private_hive: bool,
     pub modded: bool,
     pub dlc: bool,
     /// Server permits `-filePatching` clients (`allowedFilePatching`, seen live D-033).
     pub allowed_file_patching: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub shard: Option<String>,
     /// Players waiting in the login queue (`lqs<N>`).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub queue: Option<u32>,
     /// Day time acceleration (`etm<f>`).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub time_multiplier: Option<f32>,
     /// Night time acceleration (`entm<f>`).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub night_multiplier: Option<f32>,
     /// In-game clock as minutes since midnight (`HH:MM`).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub time_minutes: Option<u16>,
+    /// Tags this parser does not know, kept for diagnosis of new server versions;
+    /// an empty array per row is pure IPC weight, so it stays on the host (D-160).
+    #[serde(skip_serializing)]
     pub unknown: Vec<String>,
 }
 

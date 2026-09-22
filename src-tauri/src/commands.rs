@@ -1,7 +1,7 @@
 //! Tauri IPC surface. Every command that touches files, the registry, the network
 //! or the database runs off the UI thread (docs/05 §4).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -308,6 +308,7 @@ pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResu
         partitions: Vec::new(),
         capped: false,
         stopped_early: false,
+        rejected: false,
         source: "dzsa",
     };
     let _ = app.emit("servers:done", &done);
@@ -334,6 +335,11 @@ pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResu
             targets,
             true,
         ));
+    } else {
+        // Nothing to verify still has to close the pass (D-160): the UI sets
+        // "verifying" as soon as the fallback is asked for, and only this event
+        // clears it. An empty or all-empty DZSA list left it spinning for ever.
+        let _ = app.emit("servers:verify-done", &VerifySummary::default());
     }
     Ok(n)
 }
@@ -450,7 +456,7 @@ async fn publish(
     let _ = tauri::async_runtime::spawn_blocking(move || {
         if let Ok(mut c) = c.lock() {
             if let Err(e) = c.apply_verifications(&results) {
-                eprintln!("[cache] apply_verifications failed: {e}");
+                crate::log_error!("cache", "apply_verifications of {} failed: {e}", results.len());
             }
             let samples: Vec<(String, i64, i32, i32)> = results
                 .iter()
@@ -462,7 +468,7 @@ async fn publish(
                 .collect();
             if !samples.is_empty() {
                 if let Err(e) = c.population_add(&samples) {
-                    eprintln!("[cache] population_add failed: {e}");
+                    crate::log_error!("cache", "population_add of {} sample(s) failed: {e}", samples.len());
                 }
             }
         }
@@ -612,16 +618,27 @@ pub async fn run_mod_scan(
                 mods: mods.iter().map(|(m, _)| *m).collect(),
             })
             .collect();
-        let names: Vec<(u64, String)> = batch
-            .iter()
-            .flat_map(|(_, mods)| mods.iter().cloned())
-            .collect();
+        // The same handful of popular mods appears on most servers in a chunk, so
+        // sending every occurrence made this event ~10x larger than it needs to be
+        // (200 servers x ~30 mods vs a few hundred distinct ids) — docs/04 §4 caps
+        // an event at ~200 KB (D-160).
+        let mut seen: HashSet<u64> = HashSet::with_capacity(256);
+        let mut names: Vec<(u64, String)> = Vec::with_capacity(256);
+        for (_, mods) in &batch {
+            for (id, name) in mods {
+                if seen.insert(*id) {
+                    names.push((*id, name.clone()));
+                }
+            }
+        }
         let _ = app.emit("servers:mods", &(payload, names));
         let c = Arc::clone(&cache);
         let _ = tauri::async_runtime::spawn_blocking(move || {
             if let Ok(mut c) = c.lock() {
-                for (id, mods) in &batch {
-                    let _ = c.replace_server_mods(id, mods, now);
+                // One transaction for the chunk, not one per server: measured
+                // 43-51 ms against 8-10 ms for 200 servers (D-160).
+                if let Err(e) = c.replace_server_mods_many(&batch, now) {
+                    crate::log_error!("cache", "server mods for {} row(s) failed: {e}", batch.len());
                 }
             }
         })
@@ -720,8 +737,16 @@ pub async fn junctions_remove_dangling() -> AppResult<JunctionCleanup> {
             .path
             .ok_or_else(|| AppError::Internal("Steam is not installed".into()))?;
         let libs = locate::libraries(&path)?;
-        let game = locate::find_dayz(&libs)?
-            .ok_or_else(|| AppError::Internal("DayZ is not installed".into()))?;
+        let game = locate::find_dayz(&libs)?.ok_or_else(|| {
+            let gone = locate::unreachable_dayz_libraries(&libs);
+            AppError::Internal(match gone.first() {
+                Some(p) => format!(
+                    "Steam has DayZ in {}, but that folder is not reachable; connect the drive and try again.",
+                    p.display()
+                ),
+                None => "DayZ is not installed".into(),
+            })
+        })?;
         let mut out = JunctionCleanup {
             removed: Vec::new(),
             failed: Vec::new(),
@@ -793,9 +818,10 @@ pub async fn news_thumb(
     app: AppHandle,
     gid: String,
     url: String,
+    max: Option<u32>,
 ) -> AppResult<tauri::ipc::Response> {
     let dir = news_thumb_dir(&app)?;
-    let bytes = crate::news::thumbnail(url, dir, gid)
+    let bytes = crate::news::thumbnail(url, dir, gid, max.unwrap_or(640))
         .await
         .map_err(AppError::Internal)?;
     Ok(tauri::ipc::Response::new(bytes))
@@ -878,8 +904,16 @@ pub fn log_ui(level: String, target: String, message: String) {
         "debug" => crate::log::Level::Debug,
         _ => crate::log::Level::Info,
     };
-    let target = format!("ui:{}", target.chars().take(24).collect::<String>());
-    crate::log::write(lvl, &target, message.chars().take(2000).collect::<String>());
+    // One entry is one line in launcher.log, so a message carrying newlines could
+    // forge entries and make the log untrustworthy to read back (D-160).
+    let flatten = |s: &str, n: usize| -> String {
+        s.chars()
+            .take(n)
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .collect()
+    };
+    let target = format!("ui:{}", flatten(&target, 24));
+    crate::log::write(lvl, &target, flatten(&message, 2000));
 }
 
 /// Row counts and file sizes of the cache database (D-115).
@@ -1190,6 +1224,25 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
         ),
         crate::proc::ElevationState::Matched => {}
     }
+    // Two of the three conditions that grey the Join button out had nothing to say
+    // for themselves, so the dialog showed a disabled button and no reason (D-160).
+    let game_found = diag.dayz.is_some();
+    let battleye_present = diag.dayz.as_ref().is_some_and(|g| g.has_battleye_exe);
+    if !game_found {
+        warnings.push(
+            "DayZ was not found in any Steam library; install it, or check that its drive is connected."
+                .into(),
+        );
+    } else if !battleye_present {
+        warnings.push(
+            "DayZ_BE.exe is missing from the game folder; verify the game files in Steam.".into(),
+        );
+    }
+    // Whatever else the machine check turned up (no library folders, an unreadable
+    // Workshop folder, nobody signed in): the user could only see these in
+    // Diagnostics before, while the join in front of them quietly failed.
+    warnings.extend(diag.warnings.iter().cloned());
+
     let settings = state.settings.get();
     let profile_name = if settings.profile_name.trim().is_empty() {
         worker_persona(&state).unwrap_or_default()
@@ -1207,8 +1260,8 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
         local_version,
         version_mismatch,
         steam_running: diag.steam.running,
-        game_found: diag.dayz.is_some(),
-        battleye_present: diag.dayz.as_ref().is_some_and(|g| g.has_battleye_exe),
+        game_found,
+        battleye_present,
         rules_ok: rules.is_ok(),
         missing,
         updates,
@@ -1335,6 +1388,17 @@ pub async fn launch_game(
     // Spawn FIRST, then step aside (D-119, corrected in D-151): a child started by a
     // BELOW_NORMAL parent inherits that class, so lowering the launcher before the spawn
     // handed DayZ itself a below-normal priority — the opposite of the intent.
+    // A second DayZ would fight the first for the game's own single-instance lock,
+    // and its immediate exit used to restore the launcher's priority while the real
+    // game was still playing (D-119, D-160).
+    if let Some(pid) = crate::steam::registry::process::find_named("DayZ_x64.exe")
+        .or_else(|| crate::steam::registry::process::find_named("DayZ_BE.exe"))
+    {
+        crate::log_warn!("launch", "DayZ is already running as pid {pid}");
+        return Err(AppError::Internal(
+            "DayZ is already running; close it before joining another server.".into(),
+        ));
+    }
     let (mut child, launched) = match launch::spawn(&game_dir, &args) {
         Ok(v) => v,
         Err(e) => {
@@ -1357,7 +1421,11 @@ pub async fn launch_game(
         let mods = links.len();
         let _ = tauri::async_runtime::spawn_blocking(move || {
             if let Ok(c) = c.lock() {
-                let _ = c.history_add(&row_for_history, mods);
+                // Q22: a join that is not recorded is exactly the reported symptom,
+                // so the failure has to leave a trace (D-160).
+                if let Err(e) = c.history_add(&row_for_history, mods) {
+                    crate::log_error!("cache", "history_add failed: {e}");
+                }
             }
         })
         .await;
@@ -1819,15 +1887,28 @@ pub async fn import_official_favourites(
     if !new_rows.is_empty() {
         let c = Arc::clone(&state.cache);
         let rows = new_rows.clone();
-        let _ = tauri::async_runtime::spawn_blocking(move || {
-            if let Ok(mut c) = c.lock() {
-                let _ = c.upsert(&rows);
-                for r in &rows {
-                    let _ = c.favourite_set(&r.id, true);
-                }
+        // The count was already tallied above, so swallowing these writes reported a
+        // successful import that saved nothing (D-160). Fail loudly instead.
+        let stored = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+            let mut c = c.lock().map_err(|_| "the cache lock is poisoned".to_string())?;
+            c.upsert(&rows).map_err(|e| e.to_string())?;
+            for r in &rows {
+                c.favourite_set(&r.id, true).map_err(|e| e.to_string())?;
             }
+            Ok(())
         })
         .await;
+        let stored = match stored {
+            Ok(r) => r,
+            Err(e) => Err(e.to_string()),
+        };
+        if let Err(e) = stored {
+            crate::log_error!("cache", "favourite import of {} row(s) failed: {e}", new_rows.len());
+            return Err(AppError::Internal(format!(
+                "read {} favourite(s) but could not save them: {e}",
+                new_rows.len()
+            )));
+        }
         let _ = app.emit("servers:batch", &new_rows);
         tauri::async_runtime::spawn(run_verification(
             app.clone(),

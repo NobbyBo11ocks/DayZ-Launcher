@@ -86,7 +86,10 @@ pub fn split_extra(s: &str) -> Vec<String> {
     out
 }
 
-/// Windows-style rendering for logs and the UI: arguments containing spaces are quoted.
+/// Windows-style rendering for logs and the UI: arguments containing spaces are
+/// quoted, and the server password is masked. The real argument still carries it
+/// (the game needs it, D-010), but this string is shown in the join dialog and
+/// copied into support reports, where a screenshot would leak it (D-160).
 pub fn display_command_line(exe: &str, args: &[String]) -> String {
     let mut s = String::new();
     s.push('"');
@@ -94,6 +97,10 @@ pub fn display_command_line(exe: &str, args: &[String]) -> String {
     s.push('"');
     for a in args {
         s.push(' ');
+        let a = match a.strip_prefix("-password=") {
+            Some("") | None => a.as_str(),
+            Some(_) => "-password=********",
+        };
         if a.contains(' ') {
             s.push('"');
             s.push_str(a);
@@ -145,6 +152,14 @@ mod tests {
             display_command_line(r"G:\SteamLibrary\steamapps\common\DayZ\DayZ_BE.exe", &args);
         assert!(line.starts_with(r#""G:\SteamLibrary\steamapps\common\DayZ\DayZ_BE.exe" 0 1 1 -exe DayZ_x64.exe "-mod=G:\"#));
         assert!(line.contains(r#"@Dabs Framework" -connect=51.81.8.81 -port=2402"#));
+    }
+
+    #[test]
+    fn display_masks_the_password() {
+        let args = vec!["-connect=1.2.3.4".to_string(), "-password=hunter2".to_string()];
+        let line = display_command_line("DayZ_BE.exe", &args);
+        assert!(line.ends_with("-password=********"), "{line}");
+        assert!(!line.contains("hunter2"));
     }
 
     #[test]

@@ -2,7 +2,7 @@
   // Virtualised server table (docs/05 §5, docs/06 §2): fixed 36 px rows, renders only
   // the viewport plus overscan, reports visible ids for verification, keyboard nav.
   import Flag from "./Flag.svelte";
-  import { clock, isInflated, isUntrusted, trustedPlayers, type ServerRow } from "./types";
+  import { clock, isInflated, isUntrusted, isUnchecked, trustedPlayers, type ServerRow } from "./types";
   import type { SortKey } from "./state/servers.svelte";
 
   let {
@@ -77,7 +77,10 @@
   // updates alone must not retrigger this (D-060).
   let visTimer: ReturnType<typeof setTimeout> | undefined;
   $effect(() => {
-    const key = `${start}:${end}:${rows.length}`;
+    // Only the viewport window, never the data: `rows.length` changes on most
+    // batches during a refresh, so it re-armed the timer before it could fire and
+    // on-demand verification fell back to the 60 s cadence below (D-160).
+    const key = `${start}:${end}`;
     void key;
     clearTimeout(visTimer);
     visTimer = setTimeout(() => onVisible(rows.slice(start, end).map((r) => r.id)), 400);
@@ -164,6 +167,7 @@
         {#each slice as r (r.id)}
           {@const pop = trustedPlayers(r)}
           {@const untrusted = isUntrusted(r)}
+          {@const unchecked = isUnchecked(r)}
           {@const mods = modsByServer?.get(r.id)?.length}
           <!-- Keyboard handling belongs to the grid container, not each row: one handler
                there sees every key, while a second on the row made Svelte's delegated
@@ -249,12 +253,18 @@
                       : "Server refuses player queries while claiming players"
                     : r.verdict === "synthetic"
                       ? "Player list looks fabricated"
-                      : r.verdict === "verified"
-                        ? `Verified head-count (${clock(r.tags.timeMinutes)} in game)`
-                        : "Reported by the server, not yet verified"}
+                      : r.verdict === "offline"
+                        ? "Server is not answering; this is the last number it reported"
+                        : r.verdict === "verified"
+                          ? `Verified head-count (${clock(r.tags.timeMinutes)} in game)`
+                          : "Reported by the server, not yet verified"}
             >
-              <span class="txt" class:muted={r.verdict == null && !untrusted}>
-                {#if untrusted}<span class="warn">⚠</span>{/if}
+              <!-- An unchecked count is dimmed and marked "?" (D-160). Steam vouching
+                   for a server keeps it in the list, but the number is still the
+                   server's own, and showing it like a verified one is the gap a
+                   server that answers INFO and firewalls PLAYER relies on. -->
+              <span class="txt" class:muted={unchecked && !untrusted}>
+                {#if untrusted}<span class="warn">⚠</span>{:else if unchecked}<span class="unchecked">?</span>{/if}
                 {pop}/{r.maxPlayers}{#if r.tags.queue}<span class="muted"> +{r.tags.queue}</span>{/if}
               </span>
             </div>
@@ -310,4 +320,5 @@
   .c-time .glyph { color: var(--fg-muted); margin-right: 3px; }
   .ok { color: var(--ok); }
   .warn { color: var(--warn); }
+  .unchecked { color: var(--fg-muted); font-weight: 600; }
 </style>

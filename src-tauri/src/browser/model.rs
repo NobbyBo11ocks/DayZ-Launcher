@@ -19,37 +19,47 @@ pub struct ServerRow {
     /// As reported in A2S_INFO. Often inflated (D-038); `verified_players` wins when present.
     pub players: i32,
     pub max_players: i32,
+    // Stored and queried, never rendered: 19 000 rows cross IPC on every start, so
+    // each unread field is ~19 000 copies of nothing (D-160).
+    #[serde(skip_serializing)]
     pub bots: i32,
     pub password: bool,
+    #[serde(skip_serializing)]
     pub secure: bool,
     /// Steam's integer form, e.g. 129163709.
     pub server_version: i32,
     /// `1.29.163709`
     pub version: String,
     pub ping_ms: u32,
+    /// The raw A2S tag string; the UI reads the parsed `tags` instead.
+    #[serde(skip_serializing)]
     pub keywords: String,
     #[serde(default)]
     pub tags: DayzTags,
+    /// Steam's id for the server. Identity is `ip:queryPort` (docs/04 §1), so
+    /// nothing in the UI uses this.
+    #[serde(skip_serializing)]
     pub steam_id: u64,
     /// Unix seconds when this row was last confirmed by a query.
+    #[serde(skip_serializing)]
     pub last_seen: i64,
     /// Head-count from A2S_PLAYER (M4+), `None` until verified.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verified_players: Option<i32>,
     /// Steam's master server reported zero authenticated players (row came from a
     /// `noplayers` partition). `Some(true)` with `players > 0` means the A2S count
     /// is inflated (docs/11 rule R0, D-045). `None` when the partition was neutral.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub steam_empty: Option<bool>,
     /// Unix seconds of the last PLAYER verification.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verified_at: Option<i64>,
     /// Verdict string from `verify::Verdict::as_str` (rules R2–R5), if verified.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verdict: Option<String>,
     /// ISO 3166-1 alpha-2 country of `ip` from the embedded GeoIP table (D-073);
     /// derived, not stored in the cache.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub country: Option<String>,
 }
 

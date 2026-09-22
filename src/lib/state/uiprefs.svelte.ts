@@ -2,7 +2,9 @@
 // launcher's settings.json on the Rust side (D-070). localStorage is only an
 // instant-start cache kept by the individual stores; this module is the single
 // writer to the file. Patches are coalesced so a burst of filter toggles is one write.
-import { invoke } from "@tauri-apps/api/core";
+// Every command through the logging wrapper: a failure is recorded with its
+// command name before it is rethrown (D-158/D-160).
+import { invokeLogged as invoke } from "../log";
 import type { Settings, UiPrefs } from "../types";
 
 const FLUSH_MS = 150;

@@ -3,7 +3,9 @@
   // (docs/02 §3–4) with search, filters, multi-select and bulk update or unsubscribe
   // on top of the single-item management from D-075. Fits the viewport; only the
   // table scrolls (D-094).
-  import { invoke } from "@tauri-apps/api/core";
+  // Every command through the logging wrapper: a failure is recorded with its
+  // command name before it is rethrown (D-158/D-160).
+  import { invokeLogged as invoke } from "./log";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { revealItemInDir } from "@tauri-apps/plugin-opener";
   import { SvelteSet } from "svelte/reactivity";

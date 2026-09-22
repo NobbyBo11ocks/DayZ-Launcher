@@ -1,12 +1,15 @@
 // Server browser state (Svelte 5 runes, docs/05 §5). One instance for the app.
 // Rows live in a SvelteMap keyed by "ip:queryPort"; batches from the Steam thread
 // mutate it in place, and the visible list is derived from filters + sort.
-import { invoke } from "@tauri-apps/api/core";
+// Every command through the logging wrapper: a failure is recorded with its
+// command name before it is rethrown (D-158/D-160).
+import { invokeLogged as invoke } from "../log";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { uiPrefs } from "./uiprefs.svelte";
+import { describe, logWarn } from "../log";
 import {
   isUntrusted,
   trustedPlayers,
@@ -54,6 +57,9 @@ export type Filters = {
 };
 
 const FILTERS_KEY = "dayz-launcher.filters.v1";
+
+/** How long incoming rows are pooled before one merge into `rows` (D-160). */
+const ROW_FLUSH_MS = 350;
 
 /**
  * Windows toast for a favourite alert when the launcher is not the focused window
@@ -121,6 +127,16 @@ export function isLanIp(ip: string): boolean {
 
 class ServersStore {
   rows = new SvelteMap<string, ServerRow>();
+  /**
+   * Rows waiting to be merged into `rows`. Steam delivers a batch every 100 ms and
+   * every write invalidates the whole derived chain — filter, sort, maps, countries,
+   * counts — which measures ~13 ms at 19 000 rows, so applying each batch on arrival
+   * spent ~130 ms of every second on the main thread for the length of a refresh and
+   * dropped frames while scrolling (D-160). Folding them into one flush costs at most
+   * `ROW_FLUSH_MS` of freshness on a list that already takes ~40 s to arrive.
+   */
+  #inbox: ServerRow[] = [];
+  #flushTimer: ReturnType<typeof setTimeout> | undefined;
   steam = $state<SteamStatus | null>(null);
   done = $state<RefreshDone | null>(null);
   verifySummary = $state<VerifySummary | null>(null);
@@ -170,7 +186,11 @@ class ServersStore {
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
   });
 
-  untrustedCount = $derived([...this.rows.values()].filter(isUntrusted).length);
+  untrustedCount = $derived.by(() => {
+    let n = 0;
+    for (const r of this.rows.values()) if (isUntrusted(r)) n++;
+    return n;
+  });
 
   /** Filters away from their defaults, all rows of the bar (D-108). */
   activeFilterCount = $derived.by(() => {
@@ -281,7 +301,13 @@ class ServersStore {
   );
 
   /** Populated modded servers whose mod list has not been scanned yet. */
-  unscannedModded = $derived([...this.rows.values()].filter((r) => r.tags.modded && trustedPlayers(r) > 0 && !this.modsByServer.has(r.id)).length);
+  unscannedModded = $derived.by(() => {
+    let n = 0;
+    for (const r of this.rows.values()) {
+      if (r.tags.modded && trustedPlayers(r) > 0 && !this.modsByServer.has(r.id)) n++;
+    }
+    return n;
+  });
 
   private async loadModsIndex() {
     try {
@@ -362,13 +388,21 @@ class ServersStore {
     }
     this.#unlisten.push(
       await listen<ServerRow[]>("servers:batch", (ev) => {
-        for (const r of ev.payload) {
-          const prev = this.rows.get(r.id);
-          // Keep verification results the Steam batch does not carry.
-          this.rows.set(r.id, prev ? { ...r, verifiedPlayers: prev.verifiedPlayers, verifiedAt: prev.verifiedAt, verdict: prev.verdict } : r);
+        for (const r of ev.payload) this.#inbox.push(r);
+        if (this.#flushTimer === undefined) {
+          this.#flushTimer = setTimeout(() => this.flushRows(), ROW_FLUSH_MS);
         }
       }),
       await listen<RefreshDone>("servers:done", (ev) => {
+        // A rejected refresh never reached Steam (D-160). It is sent so the UI stops
+        // waiting, not as a result: keeping it would replace a real summary with
+        // "0 of 0 shown · 0 from Steam in 0 s" and read as a success.
+        this.flushRows();
+        if (ev.payload.rejected) {
+          this.verifying = false;
+          this.error = "Steam did not answer the refresh, so the list was not updated.";
+          return;
+        }
         this.done = ev.payload;
         this.lastRefresh = Math.floor(Date.now() / 1000);
       }),
@@ -419,24 +453,26 @@ class ServersStore {
       // Servers with friends (D-128): by ip:queryPort when Steam reports the query
       // port, else by ip + game port against the known rows.
       const on = new Map<string, string[]>();
+      // One pass over the rows for the whole list, not one per friend whose query
+      // port Steam did not report (D-160).
+      let byGamePort: Map<string, string> | null = null;
+      const needsLookup = list.some((f) => f.server && !(f.server.queryPort > 0 && this.rows.has(`${f.server.ip}:${f.server.queryPort}`)));
+      if (needsLookup) {
+        byGamePort = new Map();
+        for (const r of this.rows.values()) byGamePort.set(`${r.ip}:${r.gamePort}`, r.id);
+      }
       for (const f of list) {
         if (!f.server) continue;
-        let id: string | null = f.server.queryPort > 0 ? `${f.server.ip}:${f.server.queryPort}` : null;
-        if (!id || !this.rows.has(id)) {
-          id = null;
-          for (const r of this.rows.values()) {
-            if (r.ip === f.server.ip && r.gamePort === f.server.gamePort) {
-              id = r.id;
-              break;
-            }
-          }
-        }
+        const direct = f.server.queryPort > 0 ? `${f.server.ip}:${f.server.queryPort}` : null;
+        const id = direct && this.rows.has(direct) ? direct : (byGamePort?.get(`${f.server.ip}:${f.server.gamePort}`) ?? null);
         if (id) on.set(id, [...(on.get(id) ?? []), f.name]);
       }
       for (const key of [...this.friendsOn.keys()]) if (!on.has(key)) this.friendsOn.delete(key);
       for (const [key, names] of on) this.friendsOn.set(key, names);
-    } catch {
-      /* Steam busy or gone: keep the last value */
+    } catch (e) {
+      // Keep the last value on screen, but a friends list that keeps failing is the
+      // first visible sign that the Steam session has gone (D-160).
+      logWarn("friends", `poll failed: ${describe(e)}`);
     }
   }
 
@@ -503,7 +539,26 @@ class ServersStore {
     }
   }
 
+  /** Merges everything the last batches delivered. Idempotent and cheap when empty. */
+  flushRows() {
+    if (this.#flushTimer !== undefined) {
+      clearTimeout(this.#flushTimer);
+      this.#flushTimer = undefined;
+    }
+    if (this.#inbox.length === 0) return;
+    const batch = this.#inbox;
+    this.#inbox = [];
+    for (const r of batch) {
+      const prev = this.rows.get(r.id);
+      // Keep verification results the Steam batch does not carry.
+      this.rows.set(r.id, prev ? { ...r, verifiedPlayers: prev.verifiedPlayers, verifiedAt: prev.verifiedAt, verdict: prev.verdict } : r);
+    }
+  }
+
   applyVerifications(list: Verification[]) {
+    // A verification can land between a batch and its flush; without this the row
+    // it refers to would not be in `rows` yet and the result would be dropped.
+    this.flushRows();
     for (const v of list) {
       const r = this.rows.get(v.id);
       if (!r) continue;
@@ -513,10 +568,11 @@ class ServersStore {
         players: v.reported,
         maxPlayers: v.maxPlayers,
         pingMs: v.pingMs ?? r.pingMs,
-        keywords: v.keywords ?? r.keywords,
         tags: v.tags ?? r.tags,
-        verifiedPlayers: v.verified,
-        verifiedAt: v.verifiedAt,
+        // Keep the last real count when this check could not produce one (D-160),
+        // matching what the cache now stores.
+        verifiedPlayers: v.verified ?? r.verifiedPlayers,
+        verifiedAt: v.verified == null ? r.verifiedAt : v.verifiedAt,
         verdict: v.verdict,
       });
     }

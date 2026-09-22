@@ -2,7 +2,9 @@
   // Friends tab (D-092): Steam friends with presence, who is in DayZ and on which
   // server, and a Join that goes through the usual join dialog. Polled every 30 s
   // while the tab is open; Steam answers from its local cache.
-  import { invoke } from "@tauri-apps/api/core";
+  // Every command through the logging wrapper: a failure is recorded with its
+  // command name before it is rethrown (D-158/D-160).
+  import { invokeLogged as invoke } from "./log";
   import { untrack } from "svelte";
   import { SvelteMap } from "svelte/reactivity";
   import { avatarDataUrl } from "./avatar";

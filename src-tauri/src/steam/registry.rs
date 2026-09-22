@@ -98,7 +98,7 @@ pub fn strip_verbatim(p: &Path) -> PathBuf {
     }
 }
 
-mod process {
+pub mod process {
     use std::path::Path;
 
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
@@ -113,6 +113,12 @@ mod process {
 
     /// PID of a live `steam.exe`. When `steam_path` is known the image must live
     /// under it, so an unrelated binary called steam.exe does not count.
+    /// PID of any running process with this image name. Used to notice that DayZ
+    /// is already playing before starting a second copy of it (D-160).
+    pub fn find_named(exe: &str) -> Option<u32> {
+        pids_named(exe).into_iter().next()
+    }
+
     pub fn find_steam(steam_path: Option<&Path>) -> Option<u32> {
         let want_prefix = steam_path.map(|p| p.to_string_lossy().to_ascii_lowercase());
         for pid in pids_named("steam.exe") {

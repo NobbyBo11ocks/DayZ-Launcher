@@ -31,7 +31,10 @@ use super::DAYZ_APP_ID;
 
 const BATCH_INTERVAL: Duration = Duration::from_millis(100);
 const TICK_ACTIVE: Duration = Duration::from_millis(10);
-const TICK_IDLE: Duration = Duration::from_millis(50);
+/// Nothing is in flight, so the only reason to wake is to notice a new command,
+/// which the 100 ms batch interval already bounds. 50 ms doubled the host's share
+/// of the idle CPU budget for nothing (D-160).
+const TICK_IDLE: Duration = Duration::from_millis(100);
 /// Steam's per-request ceiling; a partition returning exactly this many is truncated.
 pub const STEAM_LIST_CAP: usize = 10_000;
 /// A non-forced refresh is ignored when the last one completed more recently than this.
@@ -172,6 +175,10 @@ pub struct RefreshDone {
     /// `steam` for the master server, `lan` for LAN discovery (D-087), `dzsa` for
     /// the fallback list (D-089).
     pub source: &'static str,
+    /// The request never reached Steam (no session). The caller must not treat this
+    /// as a completed refresh: it is an answer so the UI can stop waiting (D-160).
+    #[serde(default)]
+    pub rejected: bool,
 }
 
 /// Where a friend is playing, from `ISteamFriends::GetFriendGamePlayed` (S-64).
@@ -715,6 +722,14 @@ fn query_details(ugc: &UGC, ids: Vec<u64>, reply: mpsc::Sender<Result<Vec<ItemDe
 
 /// How often the thread retries `SteamAPI_Init` while Steam is not running (D-125).
 const STEAM_RETRY: Duration = Duration::from_secs(10);
+/// How often a live session is checked for "Steam has gone away" (D-160).
+const LIVENESS_INTERVAL: Duration = Duration::from_secs(5);
+/// The check has to fail for this long before the session is dropped, so that a
+/// momentary reconnect inside Steam does not tear a working session down.
+const LIVENESS_GRACE: Duration = Duration::from_secs(15);
+/// A partition Steam never calls back about is abandoned after this long. The
+/// slowest healthy partition measured on 2026-09-21 took 39 s (D-136).
+const PARTITION_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// Answers a command that cannot be served because there is no Steam session.
 fn reject(cmd: Cmd, events: &UnboundedSender<SteamEvent>, e: String) {
@@ -754,6 +769,7 @@ fn reject(cmd: Cmd, events: &UnboundedSender<SteamEvent>, e: String) {
                 partitions: Vec::new(),
                 capped: false,
                 stopped_early: true,
+                rejected: true,
                 source: if partitions.iter().any(|p| p.contains_key("lan")) {
                     "lan"
                 } else {
@@ -802,6 +818,13 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
 
     let env_idle = idle_timeout();
     let mut last_activity = Instant::now();
+    let mut last_liveness = Instant::now();
+    // Since when the liveness check has been failing.
+    let mut lost_since: Option<Instant> = None;
+    // Set when the session was dropped because Steam went away: unlike the idle
+    // release, that one has to come back by itself.
+    let mut reconnect = false;
+    let mut next_reopen = Instant::now();
     let mut active: Option<ActiveRefresh> = None;
     let mut sync: Option<ActiveSync> = None;
     let mut unsub: Option<ActiveUnsubscribe> = None;
@@ -831,13 +854,21 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                     Ok(s) => {
                         session = Some(s);
                         last_activity = Instant::now();
+                        reconnect = false;
+                        lost_since = None;
                         shared.set_status(&events, |st| {
+                            st.initialized = true;
                             st.idle = false;
                             st.error = None;
                         });
                     }
                     Err(e) => {
-                        shared.set_status(&events, |st| st.error = Some(e.clone()));
+                        // A failed re-open left `initialized` true, so the UI kept
+                        // reporting a connection that no longer existed (D-160).
+                        shared.set_status(&events, |st| {
+                            st.initialized = false;
+                            st.error = Some(e.clone());
+                        });
                         reject(cmd, &events, e);
                         continue;
                     }
@@ -933,6 +964,84 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
             shared.set_status(&events, |st| st.idle = true);
         }
 
+        // Steam can quit while the launcher runs, and Steamworks does not report it:
+        // the session was left in place, `initialized` stayed true, an in-flight
+        // refresh never completed and every later command went to a dead client, with
+        // "Refreshing…" on screen until the app was restarted (D-160).
+        if session.is_some() && last_liveness.elapsed() >= LIVENESS_INTERVAL {
+            last_liveness = Instant::now();
+            let alive = session.as_ref().is_some_and(|s| s.client.user().logged_on());
+            match (alive, lost_since) {
+                (true, _) => lost_since = None,
+                (false, None) => lost_since = Some(Instant::now()),
+                (false, Some(t)) if t.elapsed() >= LIVENESS_GRACE => {
+                    crate::log_warn!("steam", "the Steam session is gone; dropping it");
+                    lost_since = None;
+                    session = None;
+                    reconnect = true;
+                    next_reopen = Instant::now() + STEAM_RETRY;
+                    // Everything in flight belongs to the session that just died, and
+                    // each one holds a spinner in the UI until it is answered.
+                    if let Some(r) = active.take() {
+                        let _ = events.send(SteamEvent::Done(RefreshDone {
+                            total: 0,
+                            responded: 0,
+                            failed: 0,
+                            inflated: 0,
+                            elapsed_ms: r.started.elapsed().as_millis() as u64,
+                            partitions: Vec::new(),
+                            capped: false,
+                            stopped_early: true,
+                            rejected: true,
+                            source: "steam",
+                        }));
+                    }
+                    if let Some(job) = sync.take() {
+                        let _ = events.send(SteamEvent::SyncDone(SyncDone {
+                            job: job.job,
+                            ok: false,
+                            error: Some("Steam closed during the download".into()),
+                            items: Vec::new(),
+                            elapsed_ms: job.started.elapsed().as_millis() as u64,
+                        }));
+                    }
+                    if let Some(u) = unsub.take() {
+                        let _ = u.reply.send(Err("Steam closed".into()));
+                    }
+                    shared.set_status(&events, |st| {
+                        st.initialized = false;
+                        st.refreshing = false;
+                        st.idle = false;
+                        st.error = Some("Steam is no longer running".into());
+                    });
+                }
+                (false, Some(_)) => {}
+            }
+        }
+
+        // A session lost that way has to come back on its own: nobody is going to press
+        // anything while the UI says Steam is gone.
+        if session.is_none() && reconnect && Instant::now() >= next_reopen {
+            match open_session() {
+                Ok(s) => {
+                    let steam_id = s.client.user().steam_id().raw();
+                    let persona = s.client.friends().name();
+                    session = Some(s);
+                    reconnect = false;
+                    last_activity = Instant::now();
+                    crate::log_info!("steam", "session re-opened after Steam came back");
+                    shared.set_status(&events, |st| {
+                        st.initialized = true;
+                        st.idle = false;
+                        st.error = None;
+                        st.steam_id = Some(steam_id);
+                        st.persona = Some(persona);
+                    });
+                }
+                Err(_) => next_reopen = Instant::now() + STEAM_RETRY,
+            }
+        }
+
         let Some(s) = session.as_ref() else {
             std::thread::sleep(TICK_IDLE);
             continue;
@@ -965,6 +1074,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                             elapsed_ms: r.started.elapsed().as_millis() as u64,
                             capped: r.results.iter().any(|p| p.capped),
                             stopped_early: r.stopped_early,
+                            rejected: false,
                             partitions: std::mem::take(&mut r.results),
                         };
                         let _ = events.send(SteamEvent::Done(done));
@@ -978,14 +1088,19 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
             if let Some(r) = active.as_mut() {
                 if let Some(p) = r.current.as_mut() {
                     let finished = p.done.get();
-                    if finished.is_some() || p.last_flush.elapsed() >= BATCH_INTERVAL {
+                    // Steam calls back once per partition; when it never does, nothing
+                    // else in this loop can end the refresh (D-160).
+                    let timed_out =
+                        finished.is_none() && p.started.elapsed() >= PARTITION_TIMEOUT;
+                    if finished.is_some() || timed_out || p.last_flush.elapsed() >= BATCH_INTERVAL
+                    {
                         let batch: Vec<ServerRow> = std::mem::take(&mut *p.rows.borrow_mut());
                         if !batch.is_empty() {
                             let _ = events.send(SteamEvent::Batch(batch));
                         }
                         p.last_flush = Instant::now();
                     }
-                    if let Some(response) = finished {
+                    if finished.is_some() || timed_out {
                         let total = p
                             .req
                             .lock()
@@ -997,10 +1112,21 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                         }
                         let p = r.current.take().expect("current partition");
                         r.next_allowed = Instant::now() + PARTITION_GAP;
-                        if total == 0 && response == ServerResponse::NoServersListedOnMasterServer {
+                        let no_answer = timed_out
+                            || (total == 0
+                                && finished == Some(ServerResponse::NoServersListedOnMasterServer));
+                        if no_answer {
                             r.consecutive_empty += 1;
                         } else {
                             r.consecutive_empty = 0;
+                        }
+                        if timed_out {
+                            crate::log_warn!(
+                                "steam",
+                                "partition {:?} never answered in {} s; abandoned",
+                                p.filters,
+                                PARTITION_TIMEOUT.as_secs()
+                            );
                         }
                         r.results.push(PartitionResult {
                             filters: p.filters,
@@ -1009,7 +1135,10 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                             failed: p.failed.get(),
                             inflated: p.inflated.get(),
                             elapsed_ms: p.started.elapsed().as_millis() as u64,
-                            response: format!("{response:?}"),
+                            response: match finished {
+                                Some(response) => format!("{response:?}"),
+                                None => "NoAnswer".into(),
+                            },
                             capped: total >= STEAM_LIST_CAP,
                         });
                     }

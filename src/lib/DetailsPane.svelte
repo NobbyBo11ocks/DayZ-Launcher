@@ -3,7 +3,9 @@
   // mods with installed state, verification verdict with its reason. Layout rules
   // (D-081): nothing may overflow the 360 px column, long lists collapse behind a
   // toggle, and the player sessions are summarised instead of listed.
-  import { invoke } from "@tauri-apps/api/core";
+  // Every command through the logging wrapper: a failure is recorded with its
+  // command name before it is rethrown (D-158/D-160).
+  import { invokeLogged as invoke } from "./log";
   import Flag from "./Flag.svelte";
   import Sparkline from "./Sparkline.svelte";
   import { external } from "./external";

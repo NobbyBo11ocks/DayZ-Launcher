@@ -4,7 +4,9 @@
   // Pictures are host-made thumbnails (D-111). A video plays in a player that is
   // created on click and destroyed on close (D-150), so an idle home page still has
   // no embedded player and the memory budget holds.
-  import { invoke } from "@tauri-apps/api/core";
+  // Every command through the logging wrapper: a failure is recorded with its
+  // command name before it is rethrown (D-158/D-160).
+  import { invokeLogged as invoke } from "./log";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { SvelteSet } from "svelte/reactivity";
   import { news, type NewsView } from "./state/news.svelte";
@@ -180,9 +182,13 @@
         <button class="btn small secondary" onclick={() => open(`https://www.youtube.com/watch?v=${playing?.id}`)}>On YouTube</button>
         <button class="btn small secondary" onclick={() => (playing = null)} aria-label="Close the video">Close</button>
       </div>
+      <!-- `frame-src` says what may be framed, not what the frame may do: without
+           a sandbox the player could navigate the whole window away on a click.
+           allow-top-navigation is deliberately absent (D-160). -->
       <iframe
         src={embed(playing.id)}
         title={playing.title}
+        sandbox="allow-scripts allow-same-origin allow-presentation allow-popups allow-popups-to-escape-sandbox"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
         allowfullscreen
         referrerpolicy="strict-origin-when-cross-origin"

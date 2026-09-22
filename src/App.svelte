@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
+  // Every command through the logging wrapper: a failure is recorded with its
+  // command name before it is rethrown (D-158/D-160).
+  import { invokeLogged as invoke } from "./lib/log";
   import Diagnostics from "./lib/Diagnostics.svelte";
   import Favourites from "./lib/Favourites.svelte";
   import Friends from "./lib/Friends.svelte";
