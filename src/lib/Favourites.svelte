@@ -52,6 +52,7 @@
         onFavourite={(id) => servers.toggleFavourite(id)}
         alerts={servers.favouriteAlerts}
         onAlert={(id) => servers.toggleAlert(id)}
+        friendsOn={servers.friendsOn}
       />
       {#if selected}
         <DetailsPane row={selected} localVersion={servers.localVersion} />

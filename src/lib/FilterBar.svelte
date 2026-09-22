@@ -16,7 +16,7 @@
 
   const f = $derived(servers.filters);
   const fmt = new Intl.NumberFormat();
-  const toggle = (key: "notFull" | "notEmpty" | "hasQueue" | "noPassword" | "battleyeOnly" | "dayOnly" | "versionMine" | "hideUntrusted") => {
+  const toggle = (key: "notFull" | "notEmpty" | "hasQueue" | "noPassword" | "battleyeOnly" | "dayOnly" | "versionMine" | "hideUntrusted" | "friendsOnly") => {
     servers.filters[key] = !servers.filters[key];
     servers.saveFilters();
   };
@@ -101,6 +101,9 @@
     <button class="chip" class:on={f.dayOnly} aria-pressed={f.dayOnly} onclick={() => toggle("dayOnly")}>Daytime</button>
     <button class="chip" class:on={f.versionMine} aria-pressed={f.versionMine} onclick={() => toggle("versionMine")} disabled={!servers.localVersion} title={servers.localVersion ? `Only ${servers.localVersion}` : "DayZ not found"}>
       My version
+    </button>
+    <button class="chip" class:on={f.friendsOnly} aria-pressed={f.friendsOnly} onclick={() => toggle("friendsOnly")} title="Only servers a Steam friend is playing on right now">
+      Friends <span class="num">{servers.friendsOn.size}</span>
     </button>
 
     <label class="ping" title="0 = no limit">

@@ -130,6 +130,7 @@
       onVisible={(ids) => servers.verifyVisible(ids)}
       onActivate={(id) => (servers.joiningId = id)}
       onFavourite={(id) => servers.toggleFavourite(id)}
+      friendsOn={servers.friendsOn}
     />
     {#if servers.selected}
       <DetailsPane row={servers.selected} localVersion={servers.localVersion} />

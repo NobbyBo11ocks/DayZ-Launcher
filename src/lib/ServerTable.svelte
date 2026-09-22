@@ -18,6 +18,7 @@
     onFavourite,
     alerts,
     onAlert,
+    friendsOn,
   }: {
     rows: ServerRow[];
     selectedId: string | null;
@@ -33,6 +34,8 @@
     /** Watched servers and the toggle; only the Favourites view passes them (D-083). */
     alerts?: Set<string>;
     onAlert?: (id: string) => void;
+    /** Friend names by server id (D-128): rows get a marker with the names in its tooltip. */
+    friendsOn?: Map<string, string[]>;
   } = $props();
 
   const ROW = 36;
@@ -211,6 +214,12 @@
                 {#if r.tags.firstPersonOnly}<span class="pill" title="First person only">1PP</span>{/if}
                 {#if r.tags.modded}<span class="pill" title="Modded">MOD</span>{/if}
                 {#if r.tags.dlc}<span class="pill" title="Requires DLC">DLC</span>{/if}
+                {#if friendsOn?.has(r.id)}
+                  {@const names = friendsOn.get(r.id) ?? []}
+                  <span class="pill friends" title="Friends here: {names.join(', ')}">
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="5" r="3" /><path d="M2.6 14.4c0-3 2.4-5 5.4-5s5.4 2 5.4 5" /></svg>{names.length}
+                  </span>
+                {/if}
               </span>
               <span class="name">{r.name}</span>
             </div>
@@ -276,6 +285,8 @@
   .flags { display: inline-flex; gap: 4px; flex: none; }
   .flag { font-size: 11px; }
   .pill { font-size: 10px; line-height: 14px; padding: 0 5px; border-radius: 4px; background: var(--bg-row); color: var(--fg-muted); border: 1px solid var(--border); }
+  .pill.friends { display: inline-flex; align-items: center; gap: 3px; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); background: color-mix(in srgb, var(--accent) 14%, var(--bg-row)); font-weight: 600; }
+  .pill.friends svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .name { overflow: hidden; text-overflow: ellipsis; }
   .c-num { text-align: right; }
   .c-time .glyph { color: var(--fg-muted); margin-right: 3px; }

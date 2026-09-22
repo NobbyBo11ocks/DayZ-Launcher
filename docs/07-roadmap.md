@@ -36,6 +36,7 @@ Out of scope for v1: Linux, server-owner listing/boosts, accounts, telemetry. (T
 | v0.1.15 | Short accent "Join again" button on the home page, no news Refresh button | D-121 |
 | v0.1.16 | Stale-registry note removed from the join dialog | D-123 |
 | v0.1.17 | Steam thread retries init every 10 s when Steam starts after the launcher | D-125 |
+| v0.1.18 | Friends marker on server rows and a "Friends" quick filter | D-128 |
 | infra | GitHub Actions CI and tag-driven release workflow, release tools (`make_latest.js`, `verify_update_sig.js`, `nsis_template_check.js`) | D-063, D-071 |
 
 Candidates, not scheduled: code signing (Q11), a "friends on this server" marker in the browser once Q21 shows how DayZ reports servers to Steam.

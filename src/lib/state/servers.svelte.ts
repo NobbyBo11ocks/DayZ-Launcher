@@ -49,6 +49,8 @@ export type Filters = {
   maxPing: number;
   versionMine: boolean;
   hideUntrusted: boolean;
+  /** Only servers a Steam friend is playing on (D-128). */
+  friendsOnly: boolean;
 };
 
 const FILTERS_KEY = "dayz-launcher.filters.v1";
@@ -87,6 +89,7 @@ export const defaultFilters = (): Filters => ({
   maxPing: 0,
   versionMine: false,
   hideUntrusted: true,
+  friendsOnly: false,
 });
 
 /** localStorage cache for an instant start; the settings file wins once read (D-070). */
@@ -144,6 +147,8 @@ class ServersStore {
   navigate = $state<string | null>(null);
   /** Friends in DayZ right now, for the title bar (D-103); polled while the Steam session is active. */
   friendsInDayz = $state<number | null>(null);
+  /** Friend names by the id of the server they play on (D-128); from the same poll. */
+  friendsOn = new SvelteMap<string, string[]>();
 
   #pending = new SvelteSet<string>();
   #unlisten: UnlistenFn[] = [];
@@ -180,7 +185,8 @@ class ServersStore {
       [f.notFull, f.notEmpty, f.hasQueue, f.noPassword, f.battleyeOnly, f.dayOnly, f.versionMine].filter(Boolean).length +
       (f.mod ? 1 : 0) +
       (f.maxPing > 0 ? 1 : 0) +
-      (f.hideUntrusted ? 0 : 1)
+      (f.hideUntrusted ? 0 : 1) +
+      (f.friendsOnly ? 1 : 0)
     );
   });
 
@@ -224,6 +230,7 @@ class ServersStore {
       if (f.dayOnly && !(r.tags.timeMinutes != null && r.tags.timeMinutes >= 6 * 60 && r.tags.timeMinutes < 20 * 60)) continue;
       if (f.maxPing > 0 && r.pingMs > f.maxPing) continue;
       if (f.versionMine && this.localVersion && r.version !== this.localVersion) continue;
+      if (f.friendsOnly && !this.friendsOn.has(r.id)) continue;
       out.push(r);
     }
     const { key, dir } = this.sort;
@@ -397,6 +404,25 @@ class ServersStore {
     try {
       const list = await invoke<FriendInfo[]>("friends_list");
       this.friendsInDayz = list.filter((f) => f.inDayz).length;
+      // Servers with friends (D-128): by ip:queryPort when Steam reports the query
+      // port, else by ip + game port against the known rows.
+      const on = new Map<string, string[]>();
+      for (const f of list) {
+        if (!f.server) continue;
+        let id: string | null = f.server.queryPort > 0 ? `${f.server.ip}:${f.server.queryPort}` : null;
+        if (!id || !this.rows.has(id)) {
+          id = null;
+          for (const r of this.rows.values()) {
+            if (r.ip === f.server.ip && r.gamePort === f.server.gamePort) {
+              id = r.id;
+              break;
+            }
+          }
+        }
+        if (id) on.set(id, [...(on.get(id) ?? []), f.name]);
+      }
+      for (const key of [...this.friendsOn.keys()]) if (!on.has(key)) this.friendsOn.delete(key);
+      for (const [key, names] of on) this.friendsOn.set(key, names);
     } catch {
       /* Steam busy or gone: keep the last value */
     }

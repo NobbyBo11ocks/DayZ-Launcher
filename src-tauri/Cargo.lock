@@ -772,7 +772,7 @@ dependencies = [
 
 [[package]]
 name = "dayz-launcher"
-version = "0.1.17"
+version = "0.1.18"
 dependencies = [
  "bytes",
  "image",
