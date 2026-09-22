@@ -70,20 +70,33 @@ pub struct NewsItem {
     pub video: Option<String>,
 }
 
-/// First `[img src="…"]` or `[img]…[/img]`, with `{STEAM_CLAN_IMAGE}` expanded;
-/// only `https://` results are returned.
+/// First usable picture: `[img src="…"]` or `[img]…[/img]` with `{STEAM_CLAN_IMAGE}`
+/// expanded, `https://` only. GIFs are skipped: Steam posts open with a 43-byte
+/// transparent spacer GIF (S-69), which would render as a blank card.
 fn first_image(contents: &str) -> Option<String> {
-    let src = if let Some(i) = contents.find("[img src=\"") {
-        let start = i + "[img src=\"".len();
-        let end = contents[start..].find('"')? + start;
-        &contents[start..end]
-    } else {
-        let start = contents.find("[img]")? + "[img]".len();
-        let end = contents[start..].find("[/img]")? + start;
-        &contents[start..end]
-    };
-    let url = src.trim().replace("{STEAM_CLAN_IMAGE}", CLAN_IMAGE_BASE);
-    (url.starts_with("https://") && !url.contains(char::is_whitespace)).then_some(url)
+    let mut rest = contents;
+    while let Some(i) = rest.find("[img") {
+        let tag = &rest[i..];
+        let (src, consumed) = if let Some(t) = tag.strip_prefix("[img src=\"") {
+            let end = t.find('"')?;
+            (&t[..end], i + "[img src=\"".len() + end)
+        } else if let Some(t) = tag.strip_prefix("[img]") {
+            let end = t.find("[/img]")?;
+            (&t[..end], i + "[img]".len() + end)
+        } else {
+            rest = &rest[i + 4..];
+            continue;
+        };
+        let url = src.trim().replace("{STEAM_CLAN_IMAGE}", CLAN_IMAGE_BASE);
+        let usable = url.starts_with("https://")
+            && !url.contains(char::is_whitespace)
+            && !url.to_ascii_lowercase().ends_with(".gif");
+        if usable {
+            return Some(url);
+        }
+        rest = &rest[consumed..];
+    }
+    None
 }
 
 /// YouTube id from the first `[previewyoutube="ID;full"]` (S-69).
@@ -317,6 +330,15 @@ mod tests {
             None
         );
         assert_eq!(first_image("no pictures here"), None);
+        // Steam's transparent spacer GIF comes first in many posts: take the next picture.
+        assert_eq!(
+            first_image("[img src=\"{STEAM_CLAN_IMAGE}/4458811/30cb5d44e276505b1d4c053c8b25525da228db30.gif\"][/img][p]text[/p][img src=\"{STEAM_CLAN_IMAGE}/4458811/real.png\"][/img]").as_deref(),
+            Some("https://clan.akamai.steamstatic.com/images/4458811/real.png")
+        );
+        assert_eq!(
+            first_image("[img src=\"{STEAM_CLAN_IMAGE}/4458811/only.gif\"][/img]"),
+            None
+        );
         assert_eq!(first_video("[previewyoutube=\"\"]"), None);
         assert_eq!(first_video("text"), None);
     }

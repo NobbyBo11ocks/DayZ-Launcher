@@ -5,11 +5,11 @@
   // the browser: no embedded players, so the memory budget holds.
   import { invoke } from "@tauri-apps/api/core";
   import { openUrl } from "@tauri-apps/plugin-opener";
-  import { untrack } from "svelte";
+  import { SvelteSet } from "svelte/reactivity";
   import { news, type NewsView } from "./state/news.svelte";
   import { servers } from "./state/servers.svelte";
   import { updates } from "./state/updates.svelte";
-  import type { FriendInfo, NewsItem } from "./types";
+  import type { NewsItem } from "./types";
 
   $effect(() => {
     news.beginVisit();
@@ -34,29 +34,21 @@
     { id: "press", label: "With press", title: "Also the press feeds Steam attaches to DayZ" },
   ];
 
-  const steamOk = $derived(servers.steam?.initialized === true);
-  let friendsInDayz = $state<number | null>(null);
-  $effect(() => {
-    if (!steamOk) return;
-    untrack(() => {
-      void invoke<FriendInfo[]>("friends_list")
-        .then((l) => (friendsInDayz = l.filter((f) => f.inDayz).length))
-        .catch(() => {});
-    });
-  });
-
   const hour = new Date().getHours();
   const greeting = hour < 5 ? "Still up" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   const name = $derived(servers.steam?.persona ?? "Survivor");
-  const online = $derived(servers.done?.responded ?? servers.verifySummary?.total ?? null);
   const lastJoin = $derived(servers.history[0] ?? null);
   const featured = $derived(news.list[0] ?? null);
   const rest = $derived(news.list.slice(1, 25));
-  const fmt = new Intl.NumberFormat();
+  /** Chips only when there is something to say; the counts live in the title bar (D-103). */
+  const showChips = $derived(servers.favourites.size > 0 || updates.state === "available");
 
   const day = (unix: number) => new Date(unix * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
   const isNew = (n: NewsItem) => n.official && n.date > news.visitSeen;
-  const thumb = (n: NewsItem, big = false) => n.image ?? (n.video ? `https://i.ytimg.com/vi/${n.video}/${big ? "hqdefault" : "mqdefault"}.jpg` : null);
+  /** Posts whose picture failed to load: the card falls back to text (a broken image is worse than none). */
+  const broken = new SvelteSet<string>();
+  const thumb = (n: NewsItem, big = false) =>
+    broken.has(n.gid) ? null : (n.image ?? (n.video ? `https://i.ytimg.com/vi/${n.video}/${big ? "hqdefault" : "mqdefault"}.jpg` : null));
   const watch = (n: NewsItem) => `https://www.youtube.com/watch?v=${n.video}`;
 
   function open(url: string) {
@@ -87,13 +79,12 @@
       {/if}
       <div class="text">
         <h1>{greeting}, {name}</h1>
-        <p class="chips">
-          <span class="chip">DayZ {servers.localVersion ?? "not found"}</span>
-          {#if online != null}<span class="chip">{fmt.format(online)} servers with players</span>{:else if servers.fromCache}<span class="chip">{fmt.format(servers.fromCache)} servers known</span>{/if}
-          {#if friendsInDayz != null}<span class="chip">{friendsInDayz} friend{friendsInDayz === 1 ? "" : "s"} in DayZ</span>{/if}
-          {#if servers.favourites.size}<span class="chip">{servers.favourites.size} favourite{servers.favourites.size === 1 ? "" : "s"}</span>{/if}
-          {#if updates.state === "available"}<span class="chip accent">Launcher {updates.version} available in Settings</span>{/if}
-        </p>
+        {#if showChips}
+          <p class="chips">
+            {#if servers.favourites.size}<span class="chip">{servers.favourites.size} favourite{servers.favourites.size === 1 ? "" : "s"}</span>{/if}
+            {#if updates.state === "available"}<span class="chip accent">Launcher {updates.version} available in Settings</span>{/if}
+          </p>
+        {/if}
       </div>
     </div>
     <div class="actions">
@@ -111,10 +102,10 @@
         <button class="segbtn" class:on={news.view === v.id} role="tab" aria-selected={news.view === v.id} title={v.title} onclick={() => (news.view = v.id)}>{v.label}</button>
       {/each}
     </div>
-    {#if news.fetchedAt}<span class="muted">checked {new Date(news.fetchedAt * 1000).toLocaleTimeString()}</span>{/if}
-    <span class="muted">refreshes every 30 min</span>
-    <button class="btn small secondary" onclick={() => void news.refresh()} disabled={news.loading}>{news.loading ? "Refreshing…" : "Refresh"}</button>
     {#if news.error}<span class="error">{news.error}</span>{/if}
+    <button class="btn small secondary push" onclick={() => void news.refresh()} disabled={news.loading} title={news.fetchedAt ? `Checked ${new Date(news.fetchedAt * 1000).toLocaleTimeString()}; refreshes every 30 minutes` : "Refreshes every 30 minutes"}>
+      {news.loading ? "Refreshing…" : "Refresh"}
+    </button>
   </div>
 
   <div class="scroll">
@@ -122,7 +113,7 @@
       <article class="featured" class:update={featured.update}>
         {#if thumb(featured, true)}
           <button class="media" onclick={() => open(featured.video ? watch(featured) : featured.url)} aria-label={featured.video ? "Watch the video" : "Open the post"}>
-            <img src={thumb(featured, true)} alt="" />
+            <img src={thumb(featured, true)} alt="" onerror={() => broken.add(featured.gid)} />
             {#if featured.video}<span class="play" aria-hidden="true"></span>{/if}
           </button>
         {/if}
@@ -147,7 +138,7 @@
           <article class="card" class:update={n.update}>
             {#if thumb(n)}
               <button class="media" onclick={() => open(n.video ? watch(n) : n.url)} aria-label={n.video ? "Watch the video" : "Open the post"}>
-                <img src={thumb(n)} alt="" loading="lazy" />
+                <img src={thumb(n)} alt="" loading="lazy" onerror={() => broken.add(n.gid)} />
                 {#if n.video}<span class="play small" aria-hidden="true"></span>{/if}
               </button>
             {/if}
@@ -180,7 +171,7 @@
   .avatar { width: 56px; height: 56px; border-radius: 50%; border: 2px solid var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent); flex: none; }
   .avatar.placeholder { display: grid; place-items: center; background: var(--bg-row); color: var(--accent); font-weight: 700; font-size: 22px; }
   .text { min-width: 0; }
-  .text h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .text h1 { margin: 0; font-size: 23px; font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; }
   .chip { padding: 2px 9px; border-radius: 999px; background: color-mix(in srgb, var(--fg) 7%, transparent); border: 1px solid var(--border); font-size: 11.5px; color: var(--fg-muted); white-space: nowrap; }
   .chip.accent { color: #111; background: var(--accent); border-color: transparent; font-weight: 600; }
@@ -189,6 +180,7 @@
   .btn { all: unset; cursor: pointer; padding: 8px 14px; border-radius: 10px; background: var(--accent); color: #111; font-weight: 600; white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
   .btn.secondary { background: var(--bg-row); color: var(--fg); border: 1px solid var(--border); font-weight: 500; }
   .btn.small { padding: 4px 10px; font-size: 12px; border-radius: var(--radius); }
+  .btn.push { margin-left: auto; }
   .btn:hover { filter: brightness(1.08); }
   .btn.secondary:hover { border-color: var(--accent); filter: none; }
   .btn:disabled { opacity: 0.6; cursor: default; }

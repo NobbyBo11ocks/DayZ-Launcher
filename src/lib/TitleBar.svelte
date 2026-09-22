@@ -2,14 +2,16 @@
   // Frameless window chrome (docs/06 §1). Needs core:window:allow-{minimize,
   // toggle-maximize,close,start-dragging} in capabilities/default.json.
   // Slim and unlabelled (D-091): the bar is a drag handle plus the three controls;
-  // only an update notice appears in it.
+  // it carries a muted status (servers with players, friends in DayZ, D-103) and
+  // an update notice when one is pending.
   import { getCurrentWindow } from "@tauri-apps/api/window";
 
-  let { notice = "" }: { notice?: string } = $props();
+  let { status = "", notice = "" }: { status?: string; notice?: string } = $props();
   const win = getCurrentWindow();
 </script>
 
 <header class="titlebar" data-tauri-drag-region>
+  {#if status}<span class="status" data-tauri-drag-region>{status}</span>{/if}
   {#if notice}<span class="notice" data-tauri-drag-region>{notice}</span>{/if}
   <span class="spacer" data-tauri-drag-region></span>
   <div class="controls">
@@ -26,8 +28,10 @@
 </header>
 
 <style>
-  .titlebar { grid-area: top; display: flex; align-items: center; gap: 12px; height: 30px; padding: 0 0 0 12px; background: var(--bg-elev); border-bottom: 1px solid var(--border); user-select: none; }
-  .notice { font-size: 12px; color: var(--accent); }
+  .titlebar { grid-area: top; display: flex; align-items: center; gap: 14px; height: 30px; padding: 0 0 0 14px; background: var(--bg-elev); border-bottom: 1px solid var(--border); user-select: none; }
+  /* Accent-coloured so the counts read as part of the theme (user request, D-103). */
+  .status { font-size: 12px; font-weight: 500; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .notice { font-size: 12px; color: var(--accent); white-space: nowrap; }
   .spacer { flex: 1; height: 100%; }
   .controls { display: flex; height: 100%; }
   .wbtn { all: unset; width: 40px; height: 100%; display: inline-flex; align-items: center; justify-content: center; color: var(--fg-muted); cursor: default; }

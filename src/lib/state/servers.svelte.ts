@@ -13,6 +13,7 @@ import {
   type CachedServers,
   type Favourite,
   type FavouriteAlert,
+  type FriendInfo,
   type HistoryEntry,
   type ImportResult,
   type ModScanSummary,
@@ -101,6 +102,8 @@ function loadFilters(): Filters {
 
 /** Re-verify a visible row when its verification is older than this. */
 const STALE_SECS = 120;
+/** Title-bar friend count poll (D-103); Steam answers from its local cache. */
+const FRIENDS_POLL_MS = 60_000;
 
 /** Private (RFC 1918), loopback and link-local IPv4: what Steam's LAN discovery returns (D-087). */
 export function isLanIp(ip: string): boolean {
@@ -139,6 +142,8 @@ class ServersStore {
   modScanning = $state(false);
   /** Set by a view that wants the app to switch section (Mods → Servers with a mod filter). */
   navigate = $state<string | null>(null);
+  /** Friends in DayZ right now, for the title bar (D-103); polled while the Steam session is active. */
+  friendsInDayz = $state<number | null>(null);
 
   #pending = new SvelteSet<string>();
   #unlisten: UnlistenFn[] = [];
@@ -322,6 +327,7 @@ class ServersStore {
       await listen<SteamStatus>("steam:status", (ev) => {
         this.steam = ev.payload;
         this.maybeAutoRefresh();
+        if (this.friendsInDayz == null) void this.pollFriends();
       }),
       await listen<Verification[]>("servers:verified", (ev) => this.applyVerifications(ev.payload)),
       await listen<VerifySummary>("servers:verify-done", (ev) => {
@@ -347,6 +353,24 @@ class ServersStore {
       }),
     );
     this.maybeAutoRefresh();
+    void this.pollFriends();
+    setInterval(() => void this.pollFriends(), FRIENDS_POLL_MS);
+  }
+
+  /**
+   * Friends-in-DayZ count for the title bar (D-103). Skipped while the Steam session
+   * is released so the poll never wakes it; the backend does not count the read as
+   * activity, so the idle release still happens.
+   */
+  async pollFriends() {
+    const s = this.steam;
+    if (!s?.initialized || s.idle) return;
+    try {
+      const list = await invoke<FriendInfo[]>("friends_list");
+      this.friendsInDayz = list.filter((f) => f.inDayz).length;
+    } catch {
+      /* Steam busy or gone: keep the last value */
+    }
   }
 
   #dzsaTried = false;

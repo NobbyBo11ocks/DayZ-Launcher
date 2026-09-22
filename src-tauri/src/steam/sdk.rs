@@ -736,11 +736,17 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => return,
             };
-            last_activity = Instant::now();
+            // Presence reads (friends list, avatar) come from Steam's local cache and
+            // must not keep an otherwise idle session alive (D-077, D-103); every
+            // other command, and a session re-opened for any command, counts.
+            if !matches!(cmd, Cmd::Friends { .. } | Cmd::Avatar { .. }) {
+                last_activity = Instant::now();
+            }
             if session.is_none() && !matches!(cmd, Cmd::Shutdown) {
                 match open_session() {
                     Ok(s) => {
                         session = Some(s);
+                        last_activity = Instant::now();
                         shared.set_status(&events, |st| {
                             st.idle = false;
                             st.error = None;
