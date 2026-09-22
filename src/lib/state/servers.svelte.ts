@@ -165,6 +165,16 @@ class ServersStore {
 
   untrustedCount = $derived([...this.rows.values()].filter(isUntrusted).length);
 
+  /**
+   * Servers with a trusted head-count above zero (title bar, D-105). Cached rows make
+   * it instant at start; it then follows the refresh and verification batches live.
+   */
+  populatedCount = $derived.by(() => {
+    let n = 0;
+    for (const r of this.rows.values()) if (!isUntrusted(r) && trustedPlayers(r) > 0) n++;
+    return n;
+  });
+
   /** Distinct countries with counts, most common first (rows without a country are skipped). */
   countries = $derived.by(() => {
     const counts = new Map<string, number>();

@@ -87,17 +87,6 @@
   /** List views manage their own edges; the rest get padding and must fit the viewport (D-094). */
   const listViews: ReadonlySet<Section> = new Set<Section>(["servers", "lan", "favourites", "friends"]);
 
-  // Title-bar status (D-103): servers with players from the last refresh, friends in DayZ.
-  const fmt = new Intl.NumberFormat();
-  const titleStatus = $derived.by(() => {
-    const parts: string[] = [];
-    const online = servers.done?.responded ?? servers.verifySummary?.total ?? null;
-    if (online != null) parts.push(`${fmt.format(online)} servers with players`);
-    const f = servers.friendsInDayz;
-    if (f != null) parts.push(`${f} friend${f === 1 ? "" : "s"} in DayZ`);
-    return parts.join(" · ");
-  });
-
   // A view can ask for a section switch (Mods → Servers with a mod filter, D-080).
   $effect(() => {
     const want = servers.navigate;
@@ -109,7 +98,8 @@
 </script>
 
 <div class="shell">
-  <TitleBar status={titleStatus} notice={updates.state === "available" ? `Update ${updates.version} available in Settings` : ""} />
+  <!-- Title-bar counts (D-103, D-105, D-106): servers with players live from the row cache, friends in DayZ. -->
+  <TitleBar servers={servers.rows.size > 0 ? servers.populatedCount : null} friends={servers.friendsInDayz} notice={updates.state === "available" ? `Update ${updates.version} available in Settings` : ""} />
 
   <nav class="rail" aria-label="Sections">
     {#each sections as s (s.id)}
