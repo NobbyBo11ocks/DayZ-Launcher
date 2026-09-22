@@ -5,7 +5,5 @@ pub mod dzsa;
 pub mod model;
 pub mod verify;
 
-pub use cache::{
-    Cache, HistoryEntry, ModCatalogEntry, ModsIndex, PopulationSample, ServerMods,
-};
+pub use cache::{Cache, HistoryEntry, ModCatalogEntry, ModsIndex, PopulationSample, ServerMods};
 pub use model::ServerRow;

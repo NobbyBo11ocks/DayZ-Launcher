@@ -825,10 +825,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
             // Presence reads (friends list, avatar) come from Steam's local cache and
             // must not keep an otherwise idle session alive (D-077, D-103); every
             // other command, and a session re-opened for any command, counts.
-            if !matches!(
-                cmd,
-                Cmd::Friends { .. } | Cmd::FriendAvatar { .. }
-            ) {
+            if !matches!(cmd, Cmd::Friends { .. } | Cmd::FriendAvatar { .. }) {
                 last_activity = Instant::now();
             }
             if session.is_none() && !matches!(cmd, Cmd::Shutdown) {
@@ -937,7 +934,9 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
         // "Refreshing…" on screen until the app was restarted (D-160).
         if session.is_some() && last_liveness.elapsed() >= LIVENESS_INTERVAL {
             last_liveness = Instant::now();
-            let alive = session.as_ref().is_some_and(|s| s.client.user().logged_on());
+            let alive = session
+                .as_ref()
+                .is_some_and(|s| s.client.user().logged_on());
             match (alive, lost_since) {
                 (true, _) => lost_since = None,
                 (false, None) => lost_since = Some(Instant::now()),
@@ -1057,10 +1056,8 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                     let finished = p.done.get();
                     // Steam calls back once per partition; when it never does, nothing
                     // else in this loop can end the refresh (D-160).
-                    let timed_out =
-                        finished.is_none() && p.started.elapsed() >= PARTITION_TIMEOUT;
-                    if finished.is_some() || timed_out || p.last_flush.elapsed() >= BATCH_INTERVAL
-                    {
+                    let timed_out = finished.is_none() && p.started.elapsed() >= PARTITION_TIMEOUT;
+                    if finished.is_some() || timed_out || p.last_flush.elapsed() >= BATCH_INTERVAL {
                         let batch: Vec<ServerRow> = std::mem::take(&mut *p.rows.borrow_mut());
                         if !batch.is_empty() {
                             let _ = events.send(SteamEvent::Batch(batch));

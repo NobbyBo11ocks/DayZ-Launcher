@@ -50,8 +50,6 @@ pub fn app_info() -> AppInfo {
     }
 }
 
-
-
 /// Full Steam / DayZ / Workshop inventory (M1).
 #[tauri::command]
 pub async fn diagnostics() -> AppResult<Diagnostics> {
@@ -73,7 +71,6 @@ pub async fn diagnostics() -> AppResult<Diagnostics> {
     }
     result
 }
-
 
 /// Installed DayZ version in A2S form (`1.29.163709`), for the "version = mine" filter.
 #[tauri::command]
@@ -395,7 +392,11 @@ async fn publish(
     let _ = tauri::async_runtime::spawn_blocking(move || {
         if let Ok(mut c) = c.lock() {
             if let Err(e) = c.apply_verifications(&results) {
-                crate::log_error!("cache", "apply_verifications of {} failed: {e}", results.len());
+                crate::log_error!(
+                    "cache",
+                    "apply_verifications of {} failed: {e}",
+                    results.len()
+                );
             }
             let samples: Vec<(String, i64, i32, i32)> = results
                 .iter()
@@ -407,7 +408,11 @@ async fn publish(
                 .collect();
             if !samples.is_empty() {
                 if let Err(e) = c.population_add(&samples) {
-                    crate::log_error!("cache", "population_add of {} sample(s) failed: {e}", samples.len());
+                    crate::log_error!(
+                        "cache",
+                        "population_add of {} sample(s) failed: {e}",
+                        samples.len()
+                    );
                 }
             }
         }
@@ -555,7 +560,11 @@ pub async fn run_mod_scan(
                 // One transaction for the chunk, not one per server: measured
                 // 43-51 ms against 8-10 ms for 200 servers (D-160).
                 if let Err(e) = c.replace_server_mods_many(&batch, now) {
-                    crate::log_error!("cache", "server mods for {} row(s) failed: {e}", batch.len());
+                    crate::log_error!(
+                        "cache",
+                        "server mods for {} row(s) failed: {e}",
+                        batch.len()
+                    );
                 }
             }
         })
@@ -654,7 +663,6 @@ pub async fn mods_unsubscribe(
     );
     Ok(out)
 }
-
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -798,7 +806,6 @@ pub async fn news_cached(state: State<'_, AppState>) -> AppResult<NewsCached> {
     .map_err(|e| AppError::Internal(format!("news task failed: {e}")))?
 }
 
-
 /// A friend's 32×32 Steam avatar for the Friends tab (D-115); `None` until Steam has it.
 #[tauri::command]
 pub async fn friend_avatar(
@@ -852,7 +859,6 @@ pub fn log_ui(level: String, target: String, message: String) {
     let target = format!("ui:{}", flatten(&target, 24));
     crate::log::write(lvl, &target, flatten(&message, 2000));
 }
-
 
 /// Steam friends with presence and, for those in DayZ, their server (D-092).
 #[tauri::command]
@@ -1362,7 +1368,12 @@ pub async fn launch_game(
         .map(|l| l.name.as_str())
         .collect();
     if !created.is_empty() {
-        crate::log_info!("mods", "created {} junction(s): {}", created.len(), created.join(", "));
+        crate::log_info!(
+            "mods",
+            "created {} junction(s): {}",
+            created.len(),
+            created.join(", ")
+        );
     }
     crate::log_info!(
         "launch",
@@ -1849,7 +1860,9 @@ pub async fn import_official_favourites(
         // The count was already tallied above, so swallowing these writes reported a
         // successful import that saved nothing (D-160). Fail loudly instead.
         let stored = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-            let mut c = c.lock().map_err(|_| "the cache lock is poisoned".to_string())?;
+            let mut c = c
+                .lock()
+                .map_err(|_| "the cache lock is poisoned".to_string())?;
             c.upsert(&rows).map_err(|e| e.to_string())?;
             // One transaction and one checkpoint for the whole import: per favourite
             // it measured 111.8 ms for 50 against 6.7 ms this way (D-175).
@@ -1863,7 +1876,11 @@ pub async fn import_official_favourites(
             Err(e) => Err(e.to_string()),
         };
         if let Err(e) = stored {
-            crate::log_error!("cache", "favourite import of {} row(s) failed: {e}", new_rows.len());
+            crate::log_error!(
+                "cache",
+                "favourite import of {} row(s) failed: {e}",
+                new_rows.len()
+            );
             return Err(AppError::Internal(format!(
                 "read {} favourite(s) but could not save them: {e}",
                 new_rows.len()

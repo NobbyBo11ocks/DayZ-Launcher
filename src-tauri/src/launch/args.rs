@@ -156,7 +156,10 @@ mod tests {
 
     #[test]
     fn display_masks_the_password() {
-        let args = vec!["-connect=1.2.3.4".to_string(), "-password=hunter2".to_string()];
+        let args = vec![
+            "-connect=1.2.3.4".to_string(),
+            "-password=hunter2".to_string(),
+        ];
         let line = display_command_line("DayZ_BE.exe", &args);
         assert!(line.ends_with("-password=********"), "{line}");
         assert!(!line.contains("hunter2"));
