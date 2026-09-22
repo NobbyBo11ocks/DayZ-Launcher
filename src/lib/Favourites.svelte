@@ -26,7 +26,6 @@
       </button>
       <span class="muted">
         {servers.favouriteRows.length} favourite{servers.favouriteRows.length === 1 ? "" : "s"}
-        {#if servers.favouriteAlerts.size}· 🔔 {servers.favouriteAlerts.size} watched{/if}
         {#if imported}· imported {imported.imported}, {imported.already} already there{#if imported.unreachable}, {imported.unreachable} offline right now{/if}{/if}
       </span>
       {#if servers.error}<span class="error">{servers.error}</span>{/if}
@@ -35,7 +34,7 @@
   {#if servers.favourites.size === 0}
     <div class="empty">
       <p>No favourites yet.</p>
-      <p class="muted">Press <kbd>F</kbd> on a server or click its star. The official launcher's favourites can be imported with the button above. The bell on a favourite alerts you when a slot frees up or the server comes back online.</p>
+      <p class="muted">Press <kbd>F</kbd> on a server or click its star. The official launcher's favourites can be imported with the button above.</p>
     </div>
   {:else}
     <div class="main" class:with-pane={selected != null}>
@@ -50,8 +49,6 @@
         onVisible={(ids) => servers.verifyVisible(ids)}
         onActivate={(id) => (servers.joiningId = id)}
         onFavourite={(id) => servers.toggleFavourite(id)}
-        alerts={servers.favouriteAlerts}
-        onAlert={(id) => servers.toggleAlert(id)}
         friendsOn={servers.friendsOn}
         modsByServer={servers.modsByServer}
         empty="These favourites are not in the list yet. They appear after the next refresh, or once Steam answers."

@@ -7,7 +7,6 @@
 import { invokeLogged as invoke } from "../log";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
-import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { uiPrefs } from "./uiprefs.svelte";
 import { describe, logInfo, logWarn } from "../log";
@@ -16,7 +15,6 @@ import {
   trustedPlayers,
   type CachedServers,
   type Favourite,
-  type FavouriteAlert,
   type FriendInfo,
   type HistoryEntry,
   type ImportResult,
@@ -72,23 +70,6 @@ const VERIFY_DEADLINE_MS = 5 * 60_000;
 const SCAN_DEADLINE_MS = 20 * 60_000;
 const WATCHDOG_MS = 30_000;
 
-/**
- * Windows toast for a favourite alert when the launcher is not the focused window
- * (D-086); the in-app toast and taskbar flash cover the focused case. Permission is
- * asked for on the first alert only.
- */
-async function notifyIfUnfocused(a: FavouriteAlert) {
-  try {
-    if (await getCurrentWindow().isFocused()) return;
-    if (!(await isPermissionGranted()) && (await requestPermission()) !== "granted") return;
-    sendNotification({
-      title: a.kind === "slot" ? "Free slot" : "Back online",
-      body: `${a.name}: ${a.players}/${a.maxPlayers}`,
-    });
-  } catch {
-    /* notifications unavailable; the in-app toast remains */
-  }
-}
 
 export const defaultFilters = (): Filters => ({
   search: "",
@@ -202,9 +183,6 @@ class ServersStore {
   #scanningSince = 0;
   favourites = new SvelteSet<string>();
   /** Favourites the backend watches for a free slot or a return online (D-083). */
-  favouriteAlerts = new SvelteSet<string>();
-  /** Alerts not yet dismissed, newest last (at most five). */
-  alerts = $state<FavouriteAlert[]>([]);
   history = $state<HistoryEntry[]>([]);
   /** Server the join dialog is open for. */
   joiningId = $state<string | null>(null);
@@ -496,15 +474,6 @@ class ServersStore {
         this.modScanning = false;
         this.#scanningSince = 0;
       }),
-      await listen<FavouriteAlert>("favourite:alert", (ev) => {
-        logInfo("alert", `${ev.payload.name}: ${ev.payload.kind === "slot" ? "a slot freed up" : "back online"} (${ev.payload.players}/${ev.payload.maxPlayers})`);
-        // One entry per server; the newest replaces an older one for the same server.
-        this.alerts = [...this.alerts.filter((a) => a.id !== ev.payload.id), ev.payload].slice(-5);
-        void getCurrentWindow()
-          .requestUserAttention(UserAttentionType.Informational)
-          .catch(() => {});
-        void notifyIfUnfocused(ev.payload);
-      }),
     );
     this.maybeAutoRefresh();
     void this.pollFriends();
@@ -700,30 +669,12 @@ class ServersStore {
   async loadFavourites() {
     const list = await invoke<Favourite[]>("favourites_list");
     this.favourites.clear();
-    this.favouriteAlerts.clear();
     for (const f of list) {
       this.favourites.add(f.id);
-      if (f.alert) this.favouriteAlerts.add(f.id);
     }
   }
 
-  /** Watch or stop watching a favourite (D-083). */
-  async toggleAlert(id: string) {
-    const on = !this.favouriteAlerts.has(id);
-    if (on) this.favouriteAlerts.add(id);
-    else this.favouriteAlerts.delete(id);
-    try {
-      await invoke("favourite_alert_set", { id, on });
-    } catch (e) {
-      this.error = String(e);
-      if (on) this.favouriteAlerts.delete(id);
-      else this.favouriteAlerts.add(id);
-    }
-  }
 
-  dismissAlert(at: number) {
-    this.alerts = this.alerts.filter((a) => a.at !== at);
-  }
 
   async toggleFavourite(id: string) {
     const on = !this.favourites.has(id);

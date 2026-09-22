@@ -191,48 +191,17 @@ impl Cache {
              CREATE INDEX IF NOT EXISTS server_mods_mod ON server_mods(mod_id, name);",
         )?;
         conn.execute_batch(USER_SCHEMA)?;
-        // Additive migration of a user table (D-083): the alert flag on favourites.
-        let has_alert = conn
-            .prepare("PRAGMA table_info(favourites)")?
-            .query_map([], |r| r.get::<_, String>(1))?
-            .filter_map(Result::ok)
-            .any(|c| c == "alert");
-        if !has_alert {
-            conn.execute_batch(
-                "ALTER TABLE favourites ADD COLUMN alert INTEGER NOT NULL DEFAULT 0;",
-            )?;
-        }
         Ok(Self { conn })
     }
 
     // ----- favourites --------------------------------------------------------
 
-    /// `(id, added_at, alert)` newest first.
-    pub fn favourites(&self) -> rusqlite::Result<Vec<(String, i64, bool)>> {
+    /// `(id, added_at)` newest first.
+    pub fn favourites(&self) -> rusqlite::Result<Vec<(String, i64)>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, added_at, alert FROM favourites ORDER BY added_at DESC")?;
-        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? != 0)))?;
-        rows.collect()
-    }
-
-    /// Watch (or stop watching) a favourite for a free slot / a return online (D-083).
-    pub fn favourite_alert_set(&self, id: &str, on: bool) -> rusqlite::Result<()> {
-        self.conn.execute(
-            "UPDATE favourites SET alert = ?2 WHERE id = ?1",
-            params![id, i64::from(on)],
-        )?;
-        Ok(())
-    }
-
-    /// Watched favourites that have a cached row: `(id, ip, query_port, name)`.
-    pub fn favourites_watched(&self) -> rusqlite::Result<Vec<(String, String, u16, String)>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT f.id, s.ip, s.query_port, s.name FROM favourites f JOIN servers s ON s.id = f.id WHERE f.alert = 1",
-        )?;
-        let rows = stmt.query_map([], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? as u16, r.get(3)?))
-        })?;
+            .prepare("SELECT id, added_at FROM favourites ORDER BY added_at DESC")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
         rows.collect()
     }
 
@@ -551,10 +520,9 @@ impl Cache {
     /// Drops rows not confirmed for `max_age_secs` (and their mod lists); returns how many were removed.
     pub fn prune(&self, max_age_secs: i64) -> rusqlite::Result<usize> {
         let cutoff = ServerRow::now_unix() - max_age_secs;
-        // Never prune a favourite (D-159): `favourites_watched` joins `servers`, so
-        // dropping the row silently stopped the alert watcher and emptied the
-        // Favourites view for any server that was offline, or simply absent from the
-        // populated partition, for 30 days.
+        // Never prune a favourite (D-159): dropping the row emptied the Favourites
+        // view for any server that was offline, or simply absent from the populated
+        // partition, for 30 days.
         let n = self.conn.execute(
             "DELETE FROM servers
              WHERE last_seen < ?1 AND id NOT IN (SELECT id FROM favourites)",
@@ -775,8 +743,8 @@ mod tests {
         assert_eq!(c.count().unwrap(), 0);
     }
 
-    /// A favourite must survive the 30-day prune (D-159): the alert watcher joins
-    /// `servers`, so losing the row stops the watch and empties the Favourites view.
+    /// A favourite must survive the 30-day prune (D-159): losing the row empties the
+    /// Favourites view for anything that has been offline for a month.
     #[test]
     fn prune_keeps_favourites() {
         let mut c = Cache::open_in_memory().unwrap();
@@ -788,11 +756,6 @@ mod tests {
         assert_eq!(c.prune(-1).unwrap(), 1, "only the unfavourited row goes");
         assert_eq!(c.count().unwrap(), 1);
         assert_eq!(c.favourites().unwrap().len(), 1);
-        assert_eq!(
-            c.favourites_watched().unwrap().len(),
-            0,
-            "not watched unless the alert flag is set, but the row is still there"
-        );
     }
 
     #[test]

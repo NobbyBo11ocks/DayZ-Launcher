@@ -70,8 +70,10 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_notification::init())
         // External links (news posts, Workshop pages) open in the default browser (D-099).
+        // DayZ update posts raise a Windows notification when the window is not
+        // focused (D-099). Favourite alerts used this too until D-182.
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         // Size, position and maximised state come back on the next start (D-098);
         // visibility, decorations and fullscreen are left alone (frameless window).
@@ -148,13 +150,6 @@ pub fn run() {
                 a2s: a2s.clone(),
                 settings,
             });
-
-            // Watches favourites with the alert flag: one INFO per minute each (D-083).
-            tauri::async_runtime::spawn(commands::watch_favourites(
-                app.handle().clone(),
-                Arc::clone(&cache),
-                a2s.clone(),
-            ));
 
             // Forwards Steam-thread events to the WebView, persists batches, and
             // verifies populated servers (docs/11 R2–R5) once a refresh completes.
@@ -353,7 +348,6 @@ pub fn run() {
             commands::launch_game,
             commands::favourites_list,
             commands::favourite_set,
-            commands::favourite_alert_set,
             commands::history_list,
             commands::history_clear,
             commands::population_history,

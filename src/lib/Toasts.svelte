@@ -1,15 +1,8 @@
 <script lang="ts">
-  // Favourite alerts (D-083) and DayZ update posts (D-099): stacked in the top-right
-  // corner until dismissed.
+  // DayZ update posts (D-099): stacked in the top-right corner until dismissed.
+  // Favourite alerts used to share this rail; they were removed in D-182.
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { news } from "./state/news.svelte";
-  import { servers } from "./state/servers.svelte";
-
-  function join(id: string, at: number) {
-    servers.select(id);
-    servers.joiningId = id;
-    servers.dismissAlert(at);
-  }
 
   function read(gid: string, url: string) {
     void openUrl(url).catch(() => {});
@@ -17,20 +10,8 @@
   }
 </script>
 
-{#if servers.alerts.length || news.alerts.length}
+{#if news.alerts.length}
   <div class="toasts" role="status" aria-live="polite">
-    {#each servers.alerts as a (a.at)}
-      <div class="toast">
-        <div class="text">
-          <strong>{a.name}</strong>
-          <span class="muted">
-            {#if a.kind === "slot"}has a free slot: {a.players}/{a.maxPlayers}{:else}is back online: {a.players}/{a.maxPlayers}{/if}
-          </span>
-        </div>
-        <button class="btn" onclick={() => join(a.id, a.at)}>Join</button>
-        <button class="close" onclick={() => servers.dismissAlert(a.at)} aria-label="Dismiss">✕</button>
-      </div>
-    {/each}
     {#each news.alerts as n (n.gid)}
       <div class="toast">
         <div class="text">
