@@ -9,6 +9,7 @@ pub mod geoip;
 pub mod launch;
 pub mod news;
 pub mod perf;
+pub mod proc;
 pub mod settings;
 pub mod steam;
 
@@ -35,8 +36,27 @@ const CACHE_MAX_AGE_SECS: i64 = 30 * 24 * 3600;
 /// Population samples older than this are dropped (the sparkline shows 72 h).
 const POPULATION_MAX_AGE_SECS: i64 = 7 * 24 * 3600;
 
+/// Elevation matching (D-119): DayZ inherits our level and must match Steam's, so
+/// when Steam is elevated and we are not, restart elevated before anything else.
+/// The result is kept for Diagnostics and the join plan.
+static ELEVATION: OnceLock<proc::ElevationState> = OnceLock::new();
+
+pub fn elevation() -> proc::ElevationState {
+    ELEVATION
+        .get()
+        .copied()
+        .unwrap_or(proc::ElevationState::Matched)
+}
+
 pub fn run() {
     let _ = STARTED.set(Instant::now());
+    let steam_pid = steam::registry::detect().pid;
+    let state = proc::elevation_state(steam_pid);
+    if state == proc::ElevationState::SteamHigher && proc::relaunch_elevated() {
+        return;
+    }
+    let _ = ELEVATION.set(state);
+    proc::set_priority(proc::Priority::High);
     tauri::Builder::default()
         // Must be the first plugin (its README): a second launch hands its arguments
         // to the running instance, which just comes to the front (D-079).

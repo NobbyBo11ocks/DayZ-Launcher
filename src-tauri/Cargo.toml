@@ -1,6 +1,6 @@
 [package]
 name = "dayz-launcher"
-version = "0.1.13"
+version = "0.1.14"
 description = "Windows DayZ Standalone launcher: server browser, mod sync, direct launch"
 authors = ["DayZ Launcher contributors"]
 edition = "2021"
@@ -29,6 +29,9 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_Threading",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_ProcessStatus",
+    "Win32_Security",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 tokio = { version = "1.53.1", features = ["net", "time", "sync", "macros", "rt-multi-thread"] }
 bytes = "1"

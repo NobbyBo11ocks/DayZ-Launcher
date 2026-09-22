@@ -1123,6 +1123,20 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
     }
     if !diag.steam.running {
         warnings.push("Steam is not running; DayZ cannot start without it.".into());
+    } else if diag.steam.registry_pid != diag.steam.pid {
+        warnings.push(format!(
+            "Steam's registry entry names an old Steam process ({} instead of {}). If DayZ reports that it cannot find Steam, quit Steam completely, start it again, then join.",
+            diag.steam.registry_pid, diag.steam.pid
+        ));
+    }
+    match crate::elevation() {
+        crate::proc::ElevationState::LauncherHigher => warnings.push(
+            "The launcher runs as administrator but Steam does not; DayZ started from here cannot reach Steam. Start the launcher normally, or Steam as administrator.".into(),
+        ),
+        crate::proc::ElevationState::SteamHigher => warnings.push(
+            "Steam runs as administrator but the launcher does not; DayZ started from here cannot reach Steam. Start the launcher as administrator.".into(),
+        ),
+        crate::proc::ElevationState::Matched => {}
     }
     let settings = state.settings.get();
     let profile_name = if settings.profile_name.trim().is_empty() {
@@ -1266,7 +1280,15 @@ pub async fn launch_game(
     .map_err(|e| AppError::Internal(format!("launch task failed: {e}")))??;
 
     let args = launch::build_args(&spec);
-    let (mut child, launched) = launch::spawn(&game_dir, &args)?;
+    // While the game runs the launcher steps aside (D-119); the exit watcher restores it.
+    crate::proc::set_priority(crate::proc::Priority::BelowNormal);
+    let (mut child, launched) = match launch::spawn(&game_dir, &args) {
+        Ok(v) => v,
+        Err(e) => {
+            crate::proc::set_priority(crate::proc::Priority::High);
+            return Err(e);
+        }
+    };
     {
         let c = Arc::clone(&state.cache);
         let row_for_history = row.clone();
@@ -1292,6 +1314,7 @@ pub async fn launch_game(
         let code = child.wait().ok().and_then(|s| s.code());
         #[cfg(debug_assertions)]
         eprintln!("[launch] pid {pid} exited with {code:?}");
+        crate::proc::set_priority(crate::proc::Priority::High);
         let _ = app.emit("launch:exited", &LaunchExited { pid, code });
     });
     Ok(launched)

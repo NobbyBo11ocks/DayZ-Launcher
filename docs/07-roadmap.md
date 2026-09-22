@@ -32,6 +32,7 @@ Out of scope for v1: Linux, server-owner listing/boosts, accounts, telemetry. (T
 | v0.1.11 | Servers page header: two compact rows, direct-connect popover, one control style; checkpoints after joins and favourites | D-108, D-110 |
 | v0.1.12 | News pictures as host-made 640 px thumbnails (memory and bandwidth); main window created after setup (start-up race) | D-111–D-114 |
 | v0.1.13 | Friend avatars, cache counts in Diagnostics, Mods empty state | D-115 |
+| v0.1.14 | Join-plan warning when Steam's `ActiveProcess` pid is stale, high priority with step-down while DayZ runs, elevation matched to Steam | D-118, D-119 |
 | infra | GitHub Actions CI and tag-driven release workflow, release tools (`make_latest.js`, `verify_update_sig.js`, `nsis_template_check.js`) | D-063, D-071 |
 
 Candidates, not scheduled: code signing (Q11), a "friends on this server" marker in the browser once Q21 shows how DayZ reports servers to Steam.
