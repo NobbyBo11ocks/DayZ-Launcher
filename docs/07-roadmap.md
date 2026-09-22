@@ -33,7 +33,8 @@ Out of scope for v1: Linux, server-owner listing/boosts, accounts, telemetry. (T
 | v0.1.12 | News pictures as host-made 640 px thumbnails (memory and bandwidth); main window created after setup (start-up race) | D-111–D-114 |
 | v0.1.13 | Friend avatars, cache counts in Diagnostics, Mods empty state | D-115 |
 | v0.1.14 | Join-plan warning when Steam's `ActiveProcess` pid is stale, high priority with step-down while DayZ runs, elevation matched to Steam | D-118, D-119 |
-| v0.1.15 | Short accent "Join again" button on the home page | D-121 |
+| v0.1.15 | Short accent "Join again" button on the home page, no news Refresh button | D-121 |
+| v0.1.16 | Stale-registry note removed from the join dialog | D-123 |
 | infra | GitHub Actions CI and tag-driven release workflow, release tools (`make_latest.js`, `verify_update_sig.js`, `nsis_template_check.js`) | D-063, D-071 |
 
 Candidates, not scheduled: code signing (Q11), a "friends on this server" marker in the browser once Q21 shows how DayZ reports servers to Steam.

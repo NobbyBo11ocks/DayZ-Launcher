@@ -1123,11 +1123,6 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
     }
     if !diag.steam.running {
         warnings.push("Steam is not running; DayZ cannot start without it.".into());
-    } else if diag.steam.registry_pid != diag.steam.pid {
-        warnings.push(format!(
-            "Steam's registry entry names an old Steam process ({} instead of {}). If DayZ reports that it cannot find Steam, quit Steam completely, start it again, then join.",
-            diag.steam.registry_pid, diag.steam.pid
-        ));
     }
     match crate::elevation() {
         crate::proc::ElevationState::LauncherHigher => warnings.push(
