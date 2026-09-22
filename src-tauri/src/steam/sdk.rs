@@ -263,6 +263,12 @@ enum Cmd {
         job: u64,
         ids: Vec<u64>,
     },
+    /// Which of these Workshop items Steam says are out of date, live (D-191).
+    /// `None` means the client could not be asked, which is not the same as "none".
+    StaleItems {
+        ids: Vec<u64>,
+        reply: mpsc::Sender<Option<Vec<u64>>>,
+    },
     ItemDetails {
         ids: Vec<u64>,
         reply: mpsc::Sender<Result<Vec<ItemDetails>, String>>,
@@ -315,6 +321,8 @@ pub struct SteamWorker {
     idle_after: Arc<Mutex<Option<Duration>>>,
     /// Only the original handle shuts the thread down when dropped.
     owner: bool,
+    /// The worker thread, so exit can wait for Steamworks to shut down properly.
+    join: Arc<Mutex<Option<std::thread::JoinHandle<()>>>>,
 }
 
 impl SteamWorker {
@@ -336,7 +344,7 @@ impl SteamWorker {
             last_done: Arc::clone(&last_done),
             idle_after: Arc::clone(&idle_after),
         };
-        std::thread::Builder::new()
+        let join = std::thread::Builder::new()
             .name("steamworks".into())
             .spawn(move || run(rx, events, shared))
             .expect("spawn steamworks thread");
@@ -346,6 +354,7 @@ impl SteamWorker {
             last_done,
             idle_after,
             owner: true,
+            join: Arc::new(Mutex::new(Some(join))),
         }
     }
 
@@ -357,6 +366,7 @@ impl SteamWorker {
             last_done: Arc::clone(&self.last_done),
             idle_after: Arc::clone(&self.idle_after),
             owner: false,
+            join: Arc::clone(&self.join),
         }
     }
 
@@ -458,6 +468,22 @@ impl SteamWorker {
             .map_err(|_| "Steam did not answer the friends query in 10 s".to_string())?
     }
 
+    /// Subscribed Workshop items Steam currently considers out of date. Blocking.
+    ///
+    /// `None` means the client could not be asked — no session, a stopped thread or a
+    /// timeout — which callers must not read as "nothing is stale"; it is the signal to
+    /// fall back to the `.acf` view (D-191).
+    pub fn stale_items(&self, ids: Vec<u64>) -> Option<Vec<u64>> {
+        if ids.is_empty() {
+            return Some(Vec::new());
+        }
+        let (reply, rx) = mpsc::channel();
+        if self.cmd.send(Cmd::StaleItems { ids, reply }).is_err() {
+            return None;
+        }
+        rx.recv_timeout(Duration::from_secs(5)).ok().flatten()
+    }
+
     /// A friend's small (32×32) avatar, if Steam has it cached (D-115). Blocking.
     pub fn friend_avatar(&self, steam_id: u64) -> Result<Option<Avatar>, String> {
         let s = self.status();
@@ -493,6 +519,27 @@ impl SteamWorker {
             out.extend(got);
         }
         Ok(out)
+    }
+}
+
+impl SteamWorker {
+    /// Stops the worker and waits for `SteamAPI_Shutdown`.
+    ///
+    /// Tauri exits through `process::exit`, so `Drop` never runs and the Steamworks
+    /// threads were still live when the process went away — `steamclient` then asserts
+    /// *"Illegal termination of worker thread 'SocketThread'"* and fast-fails with
+    /// 0xC0000409 instead of exiting, which also abandons whatever is still in the
+    /// write-ahead log. Waiting is bounded: the thread checks for commands every
+    /// 100 ms at worst (D-190).
+    pub fn shutdown(&self) {
+        if !self.owner {
+            return;
+        }
+        let _ = self.cmd.send(Cmd::Shutdown);
+        let handle = self.join.lock().ok().and_then(|mut h| h.take());
+        if let Some(h) = handle {
+            let _ = h.join();
+        }
     }
 }
 
@@ -704,8 +751,10 @@ fn query_details(ugc: &UGC, ids: Vec<u64>, reply: mpsc::Sender<Result<Vec<ItemDe
 
 /// How often the thread retries `SteamAPI_Init` while Steam is not running (D-125).
 const STEAM_RETRY: Duration = Duration::from_secs(10);
-/// How often a live session is checked for "Steam has gone away" (D-160).
-const LIVENESS_INTERVAL: Duration = Duration::from_secs(5);
+/// How often a live session is checked for "Steam has gone away" (D-160). The probe
+/// is a process snapshot measured at 2.46 ms here, so ten seconds keeps it at 0.025 %
+/// of one core against an 0.2 % idle budget (docs/05 §6, D-192).
+const LIVENESS_INTERVAL: Duration = Duration::from_secs(10);
 /// The check has to fail for this long before the session is dropped, so that a
 /// momentary reconnect inside Steam does not tear a working session down.
 const LIVENESS_GRACE: Duration = Duration::from_secs(15);
@@ -716,6 +765,9 @@ const PARTITION_TIMEOUT: Duration = Duration::from_secs(180);
 /// Answers a command that cannot be served because there is no Steam session.
 fn reject(cmd: Cmd, events: &UnboundedSender<SteamEvent>, e: String) {
     match cmd {
+        Cmd::StaleItems { reply, .. } => {
+            let _ = reply.send(None);
+        }
         Cmd::ItemDetails { reply, .. } => {
             let _ = reply.send(Err(e));
         }
@@ -803,10 +855,6 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
     let mut last_liveness = Instant::now();
     // Since when the liveness check has been failing.
     let mut lost_since: Option<Instant> = None;
-    // Set when the session was dropped because Steam went away: unlike the idle
-    // release, that one has to come back by itself.
-    let mut reconnect = false;
-    let mut next_reopen = Instant::now();
     let mut active: Option<ActiveRefresh> = None;
     let mut sync: Option<ActiveSync> = None;
     let mut unsub: Option<ActiveUnsubscribe> = None;
@@ -833,7 +881,6 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                     Ok(s) => {
                         session = Some(s);
                         last_activity = Instant::now();
-                        reconnect = false;
                         lost_since = None;
                         shared.set_status(&events, |st| {
                             st.initialized = true;
@@ -867,6 +914,22 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                         }));
                     }
                     sync = Some(start_sync(ugc, job, ids));
+                }
+                Cmd::StaleItems { ids, reply } => {
+                    // Subscribed *and* out of date. An item can be installed on disk
+                    // without a subscription — left over from an unsubscribe Steam has
+                    // not collected, or pulled in by something else — and Steam does
+                    // not maintain those, so offering to update one is offering
+                    // something the client will not do (D-191).
+                    let stale = ids
+                        .into_iter()
+                        .filter(|&id| {
+                            let st = ugc.item_state(PublishedFileId(id));
+                            st.contains(ItemState::SUBSCRIBED)
+                                && st.contains(ItemState::NEEDS_UPDATE)
+                        })
+                        .collect();
+                    let _ = reply.send(Some(stale));
                 }
                 Cmd::ItemDetails { ids, reply } => query_details(ugc, ids, reply),
                 Cmd::Unsubscribe { ids, reply } => {
@@ -932,79 +995,97 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
         // the session was left in place, `initialized` stayed true, an in-flight
         // refresh never completed and every later command went to a dead client, with
         // "Refreshing…" on screen until the app was restarted (D-160).
+        // D-160 used `ISteamUser::BLoggedOn` to notice Steam going away. It is the
+        // wrong signal: it reports false whenever the client is briefly offline or
+        // reconnecting, which happens routinely, so the launcher tore the session down
+        // and rebuilt it in a loop — logged live as "session is gone" / "session
+        // re-opened" ten seconds apart, with a refresh landing "0 listed, 0 answered,
+        // early=true" in between. Dropping the `Client` also calls `SteamAPI_Shutdown`
+        // while Steam's own socket thread is mid-flight, which is what made
+        // `steamclient` assert and fast-fail the process.
+        //
+        // `SteamAPI_IsSteamRunning` was the next attempt and is no better: it answers
+        // from `HKCU\Software\Valve\Steam\ActiveProcess\pid`, the one value this
+        // repository already records as unreliable — D-026 caught it reading 16884
+        // while the live steam.exe was 15176, and it still read 16884 against 14916
+        // today. A launcher built on it declared "Steam is no longer running" twenty
+        // seconds after every start, with Steam plainly up (D-192). `registry::detect`
+        // is what the rest of the app has always used: it enumerates processes and
+        // requires the image to live under `SteamPath`, so it needs no cooperation from
+        // Steam and no key can make it wrong.
+        //
+        // The session is no longer dropped when this fires: an unusable `Client` costs
+        // nothing to hold, and holding it keeps `SteamAPI_Shutdown` out of a code path
+        // that cannot run it safely. Only the deliberate idle release (D-077), which
+        // runs when nothing is in flight, still drops it (D-190).
         if session.is_some() && last_liveness.elapsed() >= LIVENESS_INTERVAL {
             last_liveness = Instant::now();
-            let alive = session
-                .as_ref()
-                .is_some_and(|s| s.client.user().logged_on());
+            let alive = crate::steam::registry::detect().running;
             match (alive, lost_since) {
-                (true, _) => lost_since = None,
+                (true, None) => {}
+                (true, Some(_)) => {
+                    // It came back inside the grace period, or after we reported it gone.
+                    lost_since = None;
+                    if !shared
+                        .status
+                        .lock()
+                        .map(|st| st.initialized)
+                        .unwrap_or(false)
+                    {
+                        crate::log_info!("steam", "Steam is back");
+                        shared.set_status(&events, |st| {
+                            st.initialized = true;
+                            st.error = None;
+                        });
+                    }
+                }
                 (false, None) => lost_since = Some(Instant::now()),
                 (false, Some(t)) if t.elapsed() >= LIVENESS_GRACE => {
-                    crate::log_warn!("steam", "the Steam session is gone; dropping it");
-                    lost_since = None;
-                    session = None;
-                    reconnect = true;
-                    next_reopen = Instant::now() + STEAM_RETRY;
-                    // Everything in flight belongs to the session that just died, and
-                    // each one holds a spinner in the UI until it is answered.
-                    if let Some(r) = active.take() {
-                        let _ = events.send(SteamEvent::Done(RefreshDone {
-                            total: 0,
-                            responded: 0,
-                            failed: 0,
-                            inflated: 0,
-                            elapsed_ms: r.started.elapsed().as_millis() as u64,
-                            partitions: Vec::new(),
-                            capped: false,
-                            stopped_early: true,
-                            rejected: true,
-                            source: "steam",
-                        }));
+                    // Report it once, not every interval.
+                    if shared
+                        .status
+                        .lock()
+                        .map(|st| st.initialized)
+                        .unwrap_or(false)
+                    {
+                        crate::log_warn!("steam", "Steam is no longer running");
+                        // Everything in flight belonged to a Steam that is gone, and
+                        // each one holds a spinner in the UI until it is answered.
+                        if let Some(r) = active.take() {
+                            let _ = events.send(SteamEvent::Done(RefreshDone {
+                                total: 0,
+                                responded: 0,
+                                failed: 0,
+                                inflated: 0,
+                                elapsed_ms: r.started.elapsed().as_millis() as u64,
+                                partitions: Vec::new(),
+                                capped: false,
+                                stopped_early: true,
+                                rejected: true,
+                                source: "steam",
+                            }));
+                        }
+                        if let Some(job) = sync.take() {
+                            let _ = events.send(SteamEvent::SyncDone(SyncDone {
+                                job: job.job,
+                                ok: false,
+                                error: Some("Steam closed during the download".into()),
+                                items: Vec::new(),
+                                elapsed_ms: job.started.elapsed().as_millis() as u64,
+                            }));
+                        }
+                        if let Some(u) = unsub.take() {
+                            let _ = u.reply.send(Err("Steam closed".into()));
+                        }
+                        shared.set_status(&events, |st| {
+                            st.initialized = false;
+                            st.refreshing = false;
+                            st.idle = false;
+                            st.error = Some("Steam is no longer running".into());
+                        });
                     }
-                    if let Some(job) = sync.take() {
-                        let _ = events.send(SteamEvent::SyncDone(SyncDone {
-                            job: job.job,
-                            ok: false,
-                            error: Some("Steam closed during the download".into()),
-                            items: Vec::new(),
-                            elapsed_ms: job.started.elapsed().as_millis() as u64,
-                        }));
-                    }
-                    if let Some(u) = unsub.take() {
-                        let _ = u.reply.send(Err("Steam closed".into()));
-                    }
-                    shared.set_status(&events, |st| {
-                        st.initialized = false;
-                        st.refreshing = false;
-                        st.idle = false;
-                        st.error = Some("Steam is no longer running".into());
-                    });
                 }
                 (false, Some(_)) => {}
-            }
-        }
-
-        // A session lost that way has to come back on its own: nobody is going to press
-        // anything while the UI says Steam is gone.
-        if session.is_none() && reconnect && Instant::now() >= next_reopen {
-            match open_session() {
-                Ok(s) => {
-                    let steam_id = s.client.user().steam_id().raw();
-                    let persona = s.client.friends().name();
-                    session = Some(s);
-                    reconnect = false;
-                    last_activity = Instant::now();
-                    crate::log_info!("steam", "session re-opened after Steam came back");
-                    shared.set_status(&events, |st| {
-                        st.initialized = true;
-                        st.idle = false;
-                        st.error = None;
-                        st.steam_id = Some(steam_id);
-                        st.persona = Some(persona);
-                    });
-                }
-                Err(_) => next_reopen = Instant::now() + STEAM_RETRY,
             }
         }
 

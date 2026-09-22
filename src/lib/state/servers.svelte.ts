@@ -449,12 +449,6 @@ class ServersStore {
       // than leaving a bare backend string on screen.
       this.error = `The cached server list could not be read (${describe(e)}). Refresh to fetch a new one.`;
     }
-    try {
-      this.steam = await invoke<SteamStatus>("steam_status");
-      this.localVersion = await invoke<string | null>("local_game_version");
-    } catch (e) {
-      logWarn("steam", `status unavailable at start: ${describe(e)}`);
-    }
     // Favourites are the user's own data and live in their own tables: a failure to
     // read the server list must not take them off the screen with it.
     await this.loadFavourites();
@@ -503,6 +497,17 @@ class ServersStore {
         this.#scanningSince = 0;
       }),
     );
+    // Only now that `steam:status` is being listened for. The worker emits the
+    // "session open" status exactly once, so reading the snapshot before registering
+    // meant an event landing in between was lost for the whole session: Refresh stayed
+    // disabled, nothing refreshed automatically, and the DZSA fallback downloaded
+    // ~24 MB instead (D-190).
+    try {
+      this.steam = await invoke<SteamStatus>("steam_status");
+      this.localVersion = await invoke<string | null>("local_game_version");
+    } catch (e) {
+      logWarn("steam", `status unavailable at start: ${describe(e)}`);
+    }
     this.maybeAutoRefresh();
     void this.pollFriends();
     setInterval(() => void this.pollFriends(), FRIENDS_POLL_MS);
@@ -588,13 +593,19 @@ class ServersStore {
     this.dzsaLoading = true;
     this.done = null;
     this.verifySummary = null;
+    // Armed before the call, not after: the host emits `servers:verify-done` from
+    // inside the command when the list has nothing to verify (D-162), so setting it
+    // afterwards re-armed a flag that had already been cleared and the watchdog then
+    // invented a failure five minutes later (D-190).
+    this.verifying = true;
+    this.#verifyingSince = Date.now();
     try {
       await invoke<number>("servers_dzsa");
-      this.verifying = true;
-      this.#verifyingSince = Date.now();
       void this.loadModsIndex();
     } catch (e) {
       this.error = String(e);
+      this.verifying = false;
+      this.#verifyingSince = 0;
     } finally {
       this.dzsaLoading = false;
     }

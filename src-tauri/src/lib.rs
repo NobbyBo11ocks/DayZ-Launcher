@@ -362,6 +362,7 @@ pub fn run() {
             commands::junctions_remove_dangling,
             commands::mods_index,
             commands::mods_scan,
+            commands::mods_stale,
             commands::friends_list,
             commands::news_fetch,
             commands::news_cached,
@@ -379,6 +380,22 @@ pub fn run() {
             commands::direct_connect,
             commands::import_official_favourites
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|handle, event| {
+            // Tauri exits through `process::exit`, so `Drop` never runs: the Steamworks
+            // threads were still live when the process went away, `steamclient` asserted
+            // "Illegal termination of worker thread 'SocketThread'" and the app
+            // fast-failed with 0xC0000409 instead of exiting 0 — abandoning anything
+            // still in the write-ahead log on the way out (D-190).
+            if matches!(event, tauri::RunEvent::Exit) {
+                if let Some(state) = handle.try_state::<AppState>() {
+                    state.steam.shutdown();
+                    if let Ok(c) = state.cache.lock() {
+                        c.checkpoint();
+                    }
+                }
+                log_info!("app", "exited cleanly");
+            }
+        });
 }

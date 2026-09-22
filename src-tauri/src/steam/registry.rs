@@ -182,3 +182,21 @@ pub mod process {
         }
     }
 }
+
+#[cfg(test)]
+mod cost {
+    /// What the liveness probe costs, since it runs every `LIVENESS_INTERVAL` for as
+    /// long as the launcher is open and the idle-CPU budget is 0.2 % of one core
+    /// (docs/05 §6). Ignored by default: it reads the live machine.
+    #[test]
+    #[ignore]
+    fn detect_is_cheap_enough_to_poll() {
+        let start = std::time::Instant::now();
+        for _ in 0..20 {
+            let _ = super::detect();
+        }
+        let each = start.elapsed() / 20;
+        println!("registry::detect(): {:?} each", each);
+        assert!(each < std::time::Duration::from_millis(50));
+    }
+}

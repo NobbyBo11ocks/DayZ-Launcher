@@ -605,6 +605,18 @@ impl Cache {
         tx.commit()
     }
 
+    /// The mod list last read from this server, newest scan wins. Used when a launch
+    /// cannot reach the server for a fresh list (D-190).
+    pub fn mods_for(&self, id: &str) -> rusqlite::Result<Vec<(u64, String)>> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT mod_id, name FROM server_mods WHERE server_id = ?1")?;
+        let rows = stmt.query_map(params![id], |r| {
+            Ok((r.get::<_, i64>(0)? as u64, r.get::<_, String>(1)?))
+        })?;
+        rows.collect()
+    }
+
     /// Same as [`Self::replace_server_mods`] for many servers in one transaction (DZSA import).
     pub fn replace_server_mods_many(
         &mut self,

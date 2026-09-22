@@ -603,6 +603,19 @@ pub async fn run_mod_scan(
     summary
 }
 
+/// Workshop items with an update waiting, asked of the running Steam client rather
+/// than read from its `.acf` — the file is only as fresh as the last time Steam
+/// checked, so a mod its author updated could sit stale indefinitely (D-191).
+/// `null` means Steam could not be asked, which is not "nothing is stale": the caller
+/// keeps the file's answer in that case.
+#[tauri::command]
+pub async fn mods_stale(state: State<'_, AppState>, ids: Vec<u64>) -> AppResult<Option<Vec<u64>>> {
+    let steam = state.steam.clone_handle();
+    tauri::async_runtime::spawn_blocking(move || steam.stale_items(ids))
+        .await
+        .map_err(|e| AppError::Internal(format!("stale check failed: {e}")))
+}
+
 /// Stored mod lists and the mod catalogue for the browser's mod filter (D-080).
 #[tauri::command]
 pub async fn mods_index(state: State<'_, AppState>) -> AppResult<crate::browser::ModsIndex> {
@@ -1115,6 +1128,25 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
                 Ok(Err(e)) => warnings.push(format!("Workshop details unavailable: {e}")),
                 Err(e) => warnings.push(format!("Workshop details task failed: {e}")),
             }
+            // `needs_update` above came from `appworkshop_221100.acf`, which is only as
+            // fresh as the last time Steam checked; a mod its author updated can read as
+            // up to date there and be rejected by the server. The running client knows
+            // better, and it only reports items the user is actually subscribed to —
+            // Steam does not maintain the others, so an update offered for one is an
+            // update that will never arrive. Its answer replaces the file's; the file is
+            // the fallback for when it cannot be asked (D-191).
+            let installed: Vec<u64> = mods.iter().filter(|m| m.installed).map(|m| m.id).collect();
+            if !installed.is_empty() {
+                let cmd = state.steam.clone_handle();
+                if let Ok(Some(stale)) =
+                    tauri::async_runtime::spawn_blocking(move || cmd.stale_items(installed)).await
+                {
+                    let stale: HashSet<u64> = stale.into_iter().collect();
+                    for m in &mut mods {
+                        m.needs_update = stale.contains(&m.id);
+                    }
+                }
+            }
         }
     }
 
@@ -1282,7 +1314,40 @@ pub async fn launch_game(
                     .collect()
             })
             .unwrap_or_default(),
-        Err(_) => Vec::new(),
+        Err(e) => {
+            // This used to fall back to an empty list, which does not mean "no mods" —
+            // it means "we could not ask". DayZ then started vanilla and connected to a
+            // modded server, which rejects it, and the only trace was a log line saying
+            // "0 mod link(s)". RULES is the lossiest of the three queries, and the join
+            // dialog plans against a *different* one, so a plan that listed twelve mods
+            // could still launch with none (D-190).
+            let cached = {
+                let c = Arc::clone(&state.cache);
+                let want = id.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    c.lock().ok().and_then(|c| c.mods_for(&want).ok())
+                })
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+            };
+            if cached.is_empty() && row.tags.modded {
+                return Err(AppError::Internal(format!(
+                    "Could not read {}'s mod list ({e}), and nothing is cached for it. \
+                     Starting without mods would be rejected by the server, so nothing was started — try again in a moment.",
+                    row.name
+                )));
+            }
+            if !cached.is_empty() {
+                crate::log_warn!(
+                    "launch",
+                    "the server did not answer RULES ({e}); using the {} mod(s) from the last scan",
+                    cached.len()
+                );
+            }
+            cached
+        }
     };
     // A saved launch profile can override the current launch settings for this
     // launch only (D-088); an unknown name falls back to the current settings.
@@ -1723,7 +1788,9 @@ pub async fn import_official_favourites(
         });
     }
     while let Some(joined) = probes.join_next().await {
-        let Ok((e, id, probed)) = joined else { continue };
+        let Ok((e, id, probed)) = joined else {
+            continue;
+        };
         let row = match probed {
             Some(r) => r,
             None => {

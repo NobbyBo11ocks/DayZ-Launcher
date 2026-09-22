@@ -10,6 +10,7 @@
   import { revealItemInDir } from "@tauri-apps/plugin-opener";
   import { SvelteSet } from "svelte/reactivity";
   import { external } from "./external";
+  import { modUpdates } from "./state/mods.svelte";
   import { servers } from "./state/servers.svelte";
   import { fmtBytes, type Diagnostics, type JunctionCleanup, type SyncDone, type SyncProgress, type UnsubscribeResult, type WorkshopItemInfo } from "./types";
 
@@ -42,6 +43,9 @@
     try {
       data = await invoke<Diagnostics>("diagnostics");
       error = null;
+      // The `.acf` is only as fresh as the last time Steam checked, so the live
+      // answer is folded in here too — same source the sidebar badge counts (D-191).
+      void modUpdates.check(data);
     } catch (e) {
       error = String(e);
     }
@@ -92,7 +96,14 @@
     return () => unlisteners.forEach((u) => u());
   });
 
-  const all = $derived(data?.workshop?.items ?? []);
+  /** The `.acf`'s `needsUpdate` corrected by Steam's live, subscription-aware
+   *  answer, so this page, the join dialog and the sidebar badge all agree (D-191). */
+  const all = $derived(
+    (data?.workshop?.items ?? []).map((i) => {
+      const stale = modUpdates.stale.has(i.id);
+      return stale === i.needsUpdate ? i : { ...i, needsUpdate: stale };
+    }),
+  );
   const junctionsById = $derived(new Map((data?.junctions ?? []).filter((j) => j.workshopId != null).map((j) => [j.workshopId as number, j])));
   const dangling = $derived((data?.junctions ?? []).filter((j) => !j.targetExists).length);
   /** `mod.cpp` names are sometimes a localisation key (`$STR_nam_mod_terrain_name`);

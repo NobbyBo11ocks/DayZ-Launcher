@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { listen } from "@tauri-apps/api/event";
   import { describe, installErrorHooks, logError } from "./lib/log";
   import Favourites from "./lib/Favourites.svelte";
   import Friends from "./lib/Friends.svelte";
@@ -13,6 +14,7 @@
   import TitleBar from "./lib/TitleBar.svelte";
   import Toasts from "./lib/Toasts.svelte";
   import Welcome from "./lib/Welcome.svelte";
+  import { modUpdates } from "./lib/state/mods.svelte";
   import { news } from "./lib/state/news.svelte";
   import { prefs } from "./lib/state/prefs.svelte";
   import { servers } from "./lib/state/servers.svelte";
@@ -24,6 +26,17 @@
   // Uncaught errors and rejected promises reach the log before anything else runs (D-158).
   installErrorHooks();
 
+
+  // Workshop updates are checked at start and every fifteen minutes, so a mod its
+  // author updated shows up without opening the Mods page (D-191).
+  $effect(() => {
+    modUpdates.start();
+    const off = listen("mods:done", () => void modUpdates.check());
+    return () => {
+      modUpdates.stop();
+      void off.then((f) => f());
+    };
+  });
 
   $effect(() => {
     void servers.start();
@@ -118,6 +131,7 @@
         <span class="glyph" aria-hidden="true">{s.glyph}</span>
         <span class="text">{s.label}</span>
         {#if s.id === "news" && news.unread > 0}<span class="badge" aria-label="{news.unread} new posts">{news.unread > 99 ? "99+" : news.unread}</span>{/if}
+        {#if s.id === "mods" && modUpdates.count > 0}<span class="badge" aria-label="{modUpdates.count} mods have an update waiting" title="{modUpdates.count} mod{modUpdates.count === 1 ? "" : "s"} can be updated">{modUpdates.count > 99 ? "99+" : modUpdates.count}</span>{/if}
       </button>
     {/each}
   </nav>
