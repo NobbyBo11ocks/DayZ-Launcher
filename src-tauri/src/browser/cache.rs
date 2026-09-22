@@ -226,6 +226,7 @@ impl Cache {
             self.conn
                 .execute("DELETE FROM favourites WHERE id = ?1", params![id])?;
         }
+        self.checkpoint();
         Ok(())
     }
 
@@ -237,7 +238,15 @@ impl Cache {
              ON CONFLICT(id, joined_at) DO NOTHING",
             params![row.id, ServerRow::now_unix(), row.name, row.ip, row.game_port as i64, mods as i64],
         )?;
+        // A join is rare and precious: move it from the write-ahead log into the main
+        // file at once, so a lost or truncated `-wal` cannot take it with it (Q22).
+        self.checkpoint();
         Ok(())
+    }
+
+    /// Folds the write-ahead log into the database file without blocking readers.
+    pub fn checkpoint(&self) {
+        let _ = self.conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);");
     }
 
     pub fn history(&self, limit: usize) -> rusqlite::Result<Vec<HistoryEntry>> {

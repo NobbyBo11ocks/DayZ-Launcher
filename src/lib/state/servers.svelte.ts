@@ -165,6 +165,25 @@ class ServersStore {
 
   untrustedCount = $derived([...this.rows.values()].filter(isUntrusted).length);
 
+  /** Filters away from their defaults, all rows of the bar (D-108). */
+  activeFilterCount = $derived.by(() => {
+    const f = this.filters;
+    return (
+      this.moreFilterCount + (f.perspective !== "any" ? 1 : 0) + (f.mods !== "any" ? 1 : 0) + (f.map ? 1 : 0) + (f.country ? 1 : 0)
+    );
+  });
+
+  /** Filters away from their defaults in the fold-away row only (D-108). */
+  moreFilterCount = $derived.by(() => {
+    const f = this.filters;
+    return (
+      [f.notFull, f.notEmpty, f.hasQueue, f.noPassword, f.battleyeOnly, f.dayOnly, f.versionMine].filter(Boolean).length +
+      (f.mod ? 1 : 0) +
+      (f.maxPing > 0 ? 1 : 0) +
+      (f.hideUntrusted ? 0 : 1)
+    );
+  });
+
   /**
    * Servers with a trusted head-count above zero (title bar, D-105). Cached rows make
    * it instant at start; it then follows the refresh and verification batches live.
