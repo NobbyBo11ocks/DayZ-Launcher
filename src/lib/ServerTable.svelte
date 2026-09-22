@@ -159,13 +159,16 @@
     {/each}
   </div>
 
+  {#if rows.length === 0 && empty}
+    <p class="no-rows">{empty}</p>
+  {/if}
+
   <div class="body" bind:this={body} onscroll={onScroll} role="rowgroup">
-    {#if rows.length === 0 && empty}
-      <p class="no-rows">{empty}</p>
-    {/if}
-    <div class="spacer" style="height: {rows.length * ROW}px">
-      <div class="window" style="transform: translateY({start * ROW}px)">
-        {#each slice as r (r.id)}
+    <!-- `presentation` on both wrappers: they exist to size and offset the window, and
+         a generic element between a rowgroup and its rows breaks ownership (D-189). -->
+    <div class="spacer" role="presentation" style="height: {rows.length * ROW}px">
+      <div class="window" role="presentation" style="transform: translateY({start * ROW}px)">
+        {#each slice as r, i (r.id)}
           {@const pop = trustedPlayers(r)}
           {@const untrusted = isUntrusted(r)}
           {@const unchecked = isUnchecked(r)}
@@ -180,6 +183,7 @@
             class:untrusted
             role="row"
             tabindex="-1"
+            aria-rowindex={start + i + 1}
             aria-selected={r.id === selectedId}
             onclick={(e) => {
               // A click on the selected row clears the selection and collapses the
@@ -193,7 +197,7 @@
               onActivate(r.id);
             }}
           >
-            <div class="cell c-name" title={r.description || r.name}>
+            <div role="gridcell" class="cell c-name" title={r.description || r.name}>
               <button
                 class="star"
                 class:on={favourites.has(r.id)}
@@ -221,10 +225,10 @@
               </span>
               <span class="name">{r.name}</span>
             </div>
-            <div class="cell c-map">{r.map}</div>
+            <div role="gridcell" class="cell c-map">{r.map}</div>
             <!-- Mod count from the last scan (D-146); a dash means this server has not
                  been scanned yet, which is not the same as "no mods". -->
-            <div class="cell c-num mods" class:muted={mods === undefined} title={mods === undefined ? "Mod list not scanned yet" : mods === 0 ? "Vanilla" : `${mods} mods`}>
+            <div role="gridcell" class="cell c-num mods" class:muted={mods === undefined} title={mods === undefined ? "Mod list not scanned yet" : mods === 0 ? "Vanilla" : `${mods} mods`}>
               {mods ?? "–"}
             </div>
             <div
@@ -254,14 +258,14 @@
                 {pop}/{r.maxPlayers}{#if r.tags.queue}<span class="muted"> +{r.tags.queue}</span>{/if}
               </span>
             </div>
-            <div class="cell c-num {pingClass(r.pingMs)}">{r.pingMs}</div>
-            <div class="cell c-time">
+            <div role="gridcell" class="cell c-num {pingClass(r.pingMs)}">{r.pingMs}</div>
+            <div role="gridcell" class="cell c-time">
               {#if r.tags.timeMinutes != null}
                 <span class="glyph" aria-hidden="true">{r.tags.timeMinutes >= 6 * 60 && r.tags.timeMinutes < 20 * 60 ? "☀" : "☾"}</span>
               {/if}
               {clock(r.tags.timeMinutes)}
             </div>
-            <div class="cell c-ver" class:warn={localVersion != null && r.version !== localVersion}>{r.version}</div>
+            <div role="gridcell" class="cell c-ver" class:warn={localVersion != null && r.version !== localVersion}>{r.version}</div>
           </div>
         {/each}
       </div>

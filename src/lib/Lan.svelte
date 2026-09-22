@@ -75,8 +75,23 @@
   .main.with-pane { grid-template-columns: 1fr 360px; }
   .warn { color: var(--warn); }
   .error { color: var(--danger); }
-  @media (max-width: 1000px) {
-    .main.with-pane { grid-template-columns: 1fr; }
-    .main > :global(aside) { display: none; }
+  /* Below this the table and a 360 px pane cannot both fit: the table's min-content
+     width is 700 px, so the row needs 1060 px of content and the pane was clipped off
+     the right edge between 1001 and 1239 px — at 1101 px about 40 % of it, including
+     the Join button. It floats over the list now instead of being clipped or hidden,
+     which is D-153's open recommendation: at the 960 px minimum a row click used to
+     select the row and visibly do nothing (D-189). */
+  @media (max-width: 1240px) {
+    .main { position: relative; }
+    .main.with-pane { grid-template-columns: minmax(0, 1fr); }
+    .main > :global(aside) {
+      position: absolute;
+      inset: 0 0 0 auto;
+      width: min(360px, 100%);
+      z-index: 15;
+      background: var(--bg-elev);
+      border-left: 1px solid var(--border);
+      box-shadow: -12px 0 32px rgb(0 0 0 / 0.35);
+    }
   }
 </style>

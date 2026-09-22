@@ -1701,17 +1701,30 @@ pub async fn import_official_favourites(
     };
     let mut new_rows = Vec::new();
     let mut targets = Vec::new();
+    // Probe them together rather than one after another (D-188). Awaited in sequence,
+    // a list with dead entries costs the sum of its timeouts: measured 21.9 s for 50
+    // favourites, 75.9 s when none of them answered, against 1.63 s either way this
+    // way. The client's own 128-permit semaphore and 400 pps pacer already bound the
+    // burst, so the traffic shape is unchanged (D-037).
+    let mut probes = tokio::task::JoinSet::new();
     for e in entries {
         let id = ServerRow::id_for(&e.query_ip, e.query_port);
         if existing.contains(&id) {
             result.already += 1;
             continue;
         }
-        let ip: std::net::IpAddr = match e.query_ip.parse() {
-            Ok(ip) => ip,
-            Err(_) => continue,
+        let Ok(ip) = e.query_ip.parse::<std::net::IpAddr>() else {
+            continue;
         };
-        let row = match probe_server(&state.a2s, ip, &[e.query_port], None).await {
+        let client = state.a2s.clone();
+        probes.spawn(async move {
+            let probed = probe_server(&client, ip, &[e.query_port], None).await;
+            (e, id, probed)
+        });
+    }
+    while let Some(joined) = probes.join_next().await {
+        let Ok((e, id, probed)) = joined else { continue };
+        let row = match probed {
             Some(r) => r,
             None => {
                 result.unreachable += 1;

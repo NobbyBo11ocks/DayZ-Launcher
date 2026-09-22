@@ -265,28 +265,49 @@ class ServersStore {
   list = $derived.by(() => {
     void this.#rowsVersion;
     const f = this.filters;
+    // Read every filter once, not once per row: `filters` is a `$state` proxy, and a
+    // proxy get is ~24x a plain read. Seventeen of them across 19 000 rows, ten times
+    // a second during a refresh, was the single most expensive thing in the app (D-188).
     const q = f.search.trim().toLowerCase();
+    const hideUntrusted = f.hideUntrusted;
+    const perspective = f.perspective;
+    const map = f.map;
+    const country = f.country;
+    const mod = f.mod;
+    const notFull = f.notFull;
+    const notEmpty = f.notEmpty;
+    const hasQueue = f.hasQueue;
+    const noPassword = f.noPassword;
+    const battleyeOnly = f.battleyeOnly;
+    const mods = f.mods;
+    const dayOnly = f.dayOnly;
+    const maxPing = f.maxPing;
+    const versionMine = f.versionMine;
+    const friendsOnly = f.friendsOnly;
+    const localVersion = this.localVersion;
+    const modsByServer = this.modsByServer;
+    const friendsOn = this.friendsOn;
     const out: ServerRow[] = [];
     for (const r of this.rows.values()) {
-      if (f.hideUntrusted && isUntrusted(r)) continue;
+      if (hideUntrusted && isUntrusted(r)) continue;
       if (q && !(r.name.toLowerCase().includes(q) || r.map.toLowerCase().includes(q) || r.ip.startsWith(q))) continue;
-      if (f.perspective === "1pp" && !r.tags.firstPersonOnly) continue;
-      if (f.perspective === "3pp" && r.tags.firstPersonOnly) continue;
-      if (f.map && r.map !== f.map) continue;
-      if (f.country && r.country !== f.country) continue;
-      if (f.mod && !this.modsByServer.get(r.id)?.includes(f.mod)) continue;
+      if (perspective === "1pp" && !r.tags.firstPersonOnly) continue;
+      if (perspective === "3pp" && r.tags.firstPersonOnly) continue;
+      if (map && r.map !== map) continue;
+      if (country && r.country !== country) continue;
+      if (mod && !modsByServer.get(r.id)?.includes(mod)) continue;
       const pop = trustedPlayers(r);
-      if (f.notFull && pop >= r.maxPlayers) continue;
-      if (f.notEmpty && pop <= 0) continue;
-      if (f.hasQueue && !(r.tags.queue && r.tags.queue > 0)) continue;
-      if (f.noPassword && r.password) continue;
-      if (f.battleyeOnly && !r.tags.battleye) continue;
-      if (f.mods === "modded" && !r.tags.modded) continue;
-      if (f.mods === "vanilla" && r.tags.modded) continue;
-      if (f.dayOnly && !(r.tags.timeMinutes != null && r.tags.timeMinutes >= 6 * 60 && r.tags.timeMinutes < 20 * 60)) continue;
-      if (f.maxPing > 0 && r.pingMs > f.maxPing) continue;
-      if (f.versionMine && this.localVersion && r.version !== this.localVersion) continue;
-      if (f.friendsOnly && !this.friendsOn.has(r.id)) continue;
+      if (notFull && pop >= r.maxPlayers) continue;
+      if (notEmpty && pop <= 0) continue;
+      if (hasQueue && !(r.tags.queue && r.tags.queue > 0)) continue;
+      if (noPassword && r.password) continue;
+      if (battleyeOnly && !r.tags.battleye) continue;
+      if (mods === "modded" && !r.tags.modded) continue;
+      if (mods === "vanilla" && r.tags.modded) continue;
+      if (dayOnly && !(r.tags.timeMinutes != null && r.tags.timeMinutes >= 6 * 60 && r.tags.timeMinutes < 20 * 60)) continue;
+      if (maxPing > 0 && r.pingMs > maxPing) continue;
+      if (versionMine && localVersion && r.version !== localVersion) continue;
+      if (friendsOnly && !friendsOn.has(r.id)) continue;
       out.push(r);
     }
     const { key, dir } = this.sort;
