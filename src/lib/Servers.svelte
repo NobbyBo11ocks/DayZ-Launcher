@@ -95,10 +95,12 @@
             </form>
           {/if}
         </div>
-        <button class="btn" onclick={() => servers.refresh(true, false)} disabled={busy} title="Servers with players (about 40 s)">
+        <!-- One button (D-141): the full partition list starts with the populated
+             servers, so the rows people care about arrive in about 40 s and the empty
+             ones keep filling in behind them. -->
+        <button class="btn" onclick={() => servers.refresh(true, true)} disabled={busy} title="Fetch from Steam: servers with players first (about 40 s), then the empty ones (a few minutes)">
           {servers.steam?.refreshing ? "Refreshing…" : "Refresh"}
         </button>
-        <button class="btn secondary" onclick={() => servers.refresh(true, true)} disabled={busy} title="Also fetch empty servers, map by map (several minutes)">Full</button>
       </div>
     </div>
 
@@ -147,8 +149,6 @@
   .actions { display: flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
 
   .btn { all: unset; cursor: pointer; box-sizing: border-box; height: 28px; padding: 0 14px; display: inline-flex; align-items: center; border-radius: var(--radius); background: var(--accent); color: var(--accent-fg); font-weight: 600; font-size: 12.5px; white-space: nowrap; }
-  .btn.secondary { background: var(--bg-row); color: var(--fg); border: 1px solid var(--border); font-weight: 500; }
-  .btn.secondary:hover { border-color: var(--accent); }
   .btn:disabled { opacity: 0.5; cursor: default; }
   .btn:focus-visible { outline: 2px solid var(--fg); }
 

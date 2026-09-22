@@ -122,7 +122,7 @@
             {#if isNew(featured)}<span class="pill new">New</span>{/if}
           </div>
           <h3><button class="link" onclick={() => open(featured.url)} title={featured.url}>{featured.title}</button></h3>
-          {#if featured.summary}<p class="summary">{featured.summary}</p>{/if}
+          {#if featured.summary}<p class="summary clamp feat">{featured.summary}</p>{/if}
           <div class="links">
             <button class="btn small" onclick={() => open(featured.url)}>Read the full post</button>
             {#if featured.video}<button class="btn small secondary" onclick={() => open(watch(featured))}>Watch on YouTube</button>{/if}
@@ -206,7 +206,10 @@
 
   .featured { display: grid; grid-template-columns: minmax(280px, 42%) minmax(0, 1fr); border-radius: 14px; overflow: hidden; border: 1px solid var(--border); background: var(--bg-elev); }
   .featured.update { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
-  .featured .media { aspect-ratio: auto; height: 100%; min-height: 220px; }
+  /* Capped so the hero cannot eat the window on a large screen; the grid below keeps
+     more cards in view (D-143). */
+  .featured { max-height: 320px; }
+  .featured .media { aspect-ratio: auto; height: 100%; min-height: 200px; }
   .featured .body { padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
   .featured h3 { margin: 0; font-size: 19px; font-weight: 650; line-height: 1.25; }
   .links { display: flex; gap: 8px; margin-top: auto; padding-top: 4px; flex-wrap: wrap; }
@@ -221,6 +224,7 @@
   .link:focus-visible { outline: 2px solid var(--accent); border-radius: 4px; }
   .summary { margin: 0; font-size: 13px; color: var(--fg-muted); line-height: 1.5; overflow-wrap: anywhere; }
   .summary.clamp { display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .summary.feat { -webkit-line-clamp: 5; line-clamp: 5; }
 
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; padding-bottom: 4px; }
   .card { display: flex; flex-direction: column; border-radius: 12px; overflow: hidden; background: var(--bg-elev); border: 1px solid var(--border); transition: transform 150ms, border-color 150ms; min-width: 0; }

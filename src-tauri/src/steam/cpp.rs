@@ -29,14 +29,17 @@ impl CppValues {
             if key.is_empty() {
                 continue;
             }
-            let mut val = v.trim();
-            if let Some(stripped) = val.strip_suffix(';') {
-                val = stripped.trim();
-            }
-            let val = val
-                .strip_prefix('"')
-                .and_then(|s| s.strip_suffix('"'))
-                .unwrap_or(val);
+            let val = v.trim();
+            // A quoted value ends at its closing quote; whatever follows on the line
+            // (the `;` and any `// note`) is not part of it. Several published mods
+            // write `name = "Some Mod"; // name`, which used to be shown verbatim
+            // (D-143). A bare value ends at a line comment or the terminator.
+            let val = if let Some(rest) = val.strip_prefix('"') {
+                rest.find('"').map_or(rest, |end| &rest[..end])
+            } else {
+                let cut = val.find("//").map_or(val, |i| &val[..i]).trim();
+                cut.strip_suffix(';').unwrap_or(cut).trim()
+            };
             out.push((key.to_string(), val.to_string()));
         }
         Self(out)
@@ -96,5 +99,18 @@ mod tests {
         assert_eq!(m.get("NAME"), Some("X"));
         assert_eq!(m.get_u64("n"), Some(5));
         assert_eq!(m.get("bogus"), None);
+    }
+
+    /// Real `mod.cpp` lines from this machine's Workshop items (D-143).
+    #[test]
+    fn trailing_comments_and_terminators_are_not_part_of_the_value() {
+        let m = CppValues::parse(
+            "name = \"Uncuepa's Civilian Clothing\"; // name\nauthor=\"WindstrideClothing\" ;\nkey = $STR_nam_mod_terrain_name;\nurl = \"https://example.com/a//b\";\nplain = value ; // trailing\n",
+        );
+        assert_eq!(m.get("name"), Some("Uncuepa's Civilian Clothing"));
+        assert_eq!(m.get("author"), Some("WindstrideClothing"));
+        assert_eq!(m.get("key"), Some("$STR_nam_mod_terrain_name"));
+        assert_eq!(m.get("url"), Some("https://example.com/a//b"));
+        assert_eq!(m.get("plain"), Some("value"));
     }
 }

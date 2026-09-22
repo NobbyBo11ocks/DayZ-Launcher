@@ -49,7 +49,12 @@
     {/if}
   </header>
   {#if servers.history.length === 0}
-    <p class="muted">Servers you join appear here.</p>
+    <!-- Centred empty state, like LAN and Favourites (D-143). -->
+    <div class="empty">
+      <p>No recent servers.</p>
+      <p class="muted">Every server you join is listed here with its address and mod count, so you can rejoin it in one click. Clear the list at any time.</p>
+      <button class="btn" onclick={() => (servers.navigate = "servers")}>Browse servers</button>
+    </div>
   {:else}
     <div class="scroll">
       <table>
@@ -84,6 +89,9 @@
   .mono { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
   .star { color: var(--accent); }
   .spacer { flex: 1; }
+  .empty { margin: auto; text-align: center; max-width: 440px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .empty p { margin: 0; }
+  .empty .btn { margin-top: 6px; }
   .btn { all: unset; cursor: pointer; padding: 4px 10px; border-radius: var(--radius); background: var(--accent); color: var(--accent-fg); font-weight: 600; font-size: 12px; }
   .btn.ghost { background: transparent; color: var(--fg-muted); border: 1px solid var(--border); font-weight: 500; }
   .btn.ghost:hover { color: var(--fg); }
