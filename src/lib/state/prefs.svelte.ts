@@ -7,6 +7,7 @@ export type Theme = "slate" | "light";
 export type Accent = "amber" | "orange" | "red" | "rose" | "pink" | "violet" | "indigo" | "blue" | "sky" | "teal" | "green" | "lime";
 
 const KEY = "dayz-launcher.prefs.v1";
+const NEWS_KEY = "dayz-launcher.news.v1";
 /** Colour-wheel order, as shown in Settings. Tokens live in app.css; the host list in settings.rs. */
 export const ACCENTS: Accent[] = ["amber", "orange", "red", "rose", "pink", "violet", "indigo", "blue", "sky", "teal", "green", "lime"];
 
@@ -31,12 +32,23 @@ function loadCache(): { theme: Theme; accent: Accent } {
 class Prefs {
   theme = $state<Theme>("slate");
   accent = $state<Accent>(DEFAULT_ACCENT);
+  /**
+   * Whether the News page exists at all (D-174). Cached in localStorage like the
+   * theme so the sidebar paints the right shape on the first frame, with the settings
+   * file winning as soon as it is read.
+   */
+  news = $state(true);
   #fromFile = false;
 
   constructor() {
     const c = loadCache();
     this.theme = c.theme;
     this.accent = c.accent;
+    try {
+      this.news = localStorage.getItem(NEWS_KEY) !== "off";
+    } catch {
+      /* storage unavailable */
+    }
     void uiPrefs.ready.then((u) => {
       // A file that still has the defaults and no onboarding mark has never been
       // written by this build: seed it from the cache instead of overriding the cache
@@ -46,9 +58,21 @@ class Prefs {
         this.theme = normTheme(u.theme);
         this.accent = normAccent(u.accent);
       }
+      this.news = u.news !== false;
       this.#fromFile = true;
       uiPrefs.patch({ theme: this.theme, accent: this.accent });
     });
+  }
+
+  /** Shows or hides the News page, and stops the feed being fetched (D-174). */
+  setNews(on: boolean) {
+    this.news = on;
+    try {
+      localStorage.setItem(NEWS_KEY, on ? "on" : "off");
+    } catch {
+      /* ignore */
+    }
+    uiPrefs.patch({ news: on });
   }
 
   /** Applies to <html> and persists. Called from an $effect in App.svelte. */

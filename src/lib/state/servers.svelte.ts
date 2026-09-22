@@ -1,15 +1,16 @@
 // Server browser state (Svelte 5 runes, docs/05 §5). One instance for the app.
-// Rows live in a SvelteMap keyed by "ip:queryPort"; batches from the Steam thread
-// mutate it in place, and the visible list is derived from filters + sort.
+// Rows live in a plain Map keyed by "ip:queryPort" with one version source (D-176);
+// batches from the Steam thread mutate it in place and bump the version, and the
+// visible list is derived from filters + sort.
 // Every command through the logging wrapper: a failure is recorded with its
-// command name before it is rethrown (D-158/D-160).
+// command name before it is rethrown (D-158).
 import { invokeLogged as invoke } from "../log";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { uiPrefs } from "./uiprefs.svelte";
-import { describe, logWarn } from "../log";
+import { describe, logInfo, logWarn } from "../log";
 import {
   isUntrusted,
   trustedPlayers,
@@ -60,6 +61,16 @@ const FILTERS_KEY = "dayz-launcher.filters.v1";
 
 /** How long incoming rows are pooled before one merge into `rows` (D-160). */
 const ROW_FLUSH_MS = 350;
+
+/**
+ * A pass that never reports back leaves its spinner on screen for ever, because the
+ * matching `done` event is the only thing that clears it. These are deliberately far
+ * above the measured times — a full verification of 2 600 servers took 39 s and a mod
+ * scan of 2 400 a few minutes — so a slow machine is never cut short (D-160).
+ */
+const VERIFY_DEADLINE_MS = 5 * 60_000;
+const SCAN_DEADLINE_MS = 20 * 60_000;
+const WATCHDOG_MS = 30_000;
 
 /**
  * Windows toast for a favourite alert when the launcher is not the focused window
@@ -118,15 +129,35 @@ const COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: "bas
 
 /** Private (RFC 1918), loopback and link-local IPv4: what Steam's LAN discovery returns (D-087). */
 export function isLanIp(ip: string): boolean {
-  const p = ip.split(".").map(Number);
-  if (p.length !== 4 || p.some((n) => !Number.isInteger(n))) return false;
-  const a = p[0] ?? 0;
-  const b = p[1] ?? 0;
-  return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+  // Called once per row while the LAN tab is open. `split(".").map(Number)` allocated
+  // two arrays and a closure per address — 6.97 ms against 1.07 ms over 19 000 (D-176).
+  const dot = ip.indexOf(".");
+  if (dot < 1) return false;
+  const a = +ip.slice(0, dot);
+  if (a === 10 || a === 127) return true;
+  if (a !== 172 && a !== 192 && a !== 169) return false;
+  const dot2 = ip.indexOf(".", dot + 1);
+  const b = +ip.slice(dot + 1, dot2 < 0 ? undefined : dot2);
+  return (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
 }
 
 class ServersStore {
-  rows = new SvelteMap<string, ServerRow>();
+  /**
+   * Every cached server by `ip:queryPort`. A plain `Map` with one version source
+   * rather than a `SvelteMap`: see D-176 — every consumer reads the whole map, so
+   * per-key sources were pure overhead. Anything reactive that reads it must read
+   * `this.#rowsVersion` first; `rowsChanged()` is the only writer.
+   */
+  rows = new Map<string, ServerRow>();
+  #rowsVersion = $state(0);
+  /** Call after any batch of writes to `rows`. */
+  rowsChanged() {
+    this.#rowsVersion++;
+  }
+  /** Reads the version so a derived or template re-runs when the map changes. */
+  get rowsTick(): number {
+    return this.#rowsVersion;
+  }
   /**
    * Rows waiting to be merged into `rows`. Steam delivers a batch every 100 ms and
    * every write invalidates the whole derived chain — filter, sort, maps, countries,
@@ -148,6 +179,8 @@ class ServersStore {
   fromCache = $state(0);
   lastRefresh = $state<number | null>(null);
   verifying = $state(false);
+  #verifyingSince = 0;
+  #scanningSince = 0;
   favourites = new SvelteSet<string>();
   /** Favourites the backend watches for a free slot or a return online (D-083). */
   favouriteAlerts = new SvelteSet<string>();
@@ -168,7 +201,7 @@ class ServersStore {
   /** Friend names by the id of the server they play on (D-128); from the same poll. */
   friendsOn = new SvelteMap<string, string[]>();
 
-  #pending = new SvelteSet<string>();
+  #pending = new Set<string>();
   #unlisten: UnlistenFn[] = [];
   #started = false;
   #autoRefreshed = false;
@@ -181,12 +214,14 @@ class ServersStore {
 
   /** Distinct maps with counts, most common first. */
   maps = $derived.by(() => {
+    void this.#rowsVersion;
     const counts = new Map<string, number>();
     for (const r of this.rows.values()) counts.set(r.map, (counts.get(r.map) ?? 0) + 1);
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
   });
 
   untrustedCount = $derived.by(() => {
+    void this.#rowsVersion;
     let n = 0;
     for (const r of this.rows.values()) if (isUntrusted(r)) n++;
     return n;
@@ -217,6 +252,7 @@ class ServersStore {
    * it instant at start; it then follows the refresh and verification batches live.
    */
   populatedCount = $derived.by(() => {
+    void this.#rowsVersion;
     let n = 0;
     for (const r of this.rows.values()) if (!isUntrusted(r) && trustedPlayers(r) > 0) n++;
     return n;
@@ -224,12 +260,14 @@ class ServersStore {
 
   /** Distinct countries with counts, most common first (rows without a country are skipped). */
   countries = $derived.by(() => {
+    void this.#rowsVersion;
     const counts = new Map<string, number>();
     for (const r of this.rows.values()) if (r.country) counts.set(r.country, (counts.get(r.country) ?? 0) + 1);
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
   });
 
   list = $derived.by(() => {
+    void this.#rowsVersion;
     const f = this.filters;
     const q = f.search.trim().toLowerCase();
     const out: ServerRow[] = [];
@@ -291,7 +329,10 @@ class ServersStore {
     return out;
   });
 
-  selected = $derived(this.selectedId ? (this.rows.get(this.selectedId) ?? null) : null);
+  selected = $derived.by(() => {
+    void this.#rowsVersion;
+    return this.selectedId ? (this.rows.get(this.selectedId) ?? null) : null;
+  });
 
   /** Catalogue entries, most widely used first. */
   modOptions = $derived(
@@ -302,6 +343,7 @@ class ServersStore {
 
   /** Populated modded servers whose mod list has not been scanned yet. */
   unscannedModded = $derived.by(() => {
+    void this.#rowsVersion;
     let n = 0;
     for (const r of this.rows.values()) {
       if (r.tags.modded && trustedPlayers(r) > 0 && !this.modsByServer.has(r.id)) n++;
@@ -346,6 +388,7 @@ class ServersStore {
 
   /** Favourite rows, search-filtered and sorted like the main list; trust filters do not apply. */
   favouriteRows = $derived.by(() => {
+    void this.#rowsVersion;
     const q = this.filters.search.trim().toLowerCase();
     const out: ServerRow[] = [];
     for (const id of this.favourites) {
@@ -360,6 +403,7 @@ class ServersStore {
 
   /** Rows with a local-network address (LAN tab, D-087), search-filtered, busiest first. */
   lanRows = $derived.by(() => {
+    void this.#rowsVersion;
     const q = this.filters.search.trim().toLowerCase();
     const out: ServerRow[] = [];
     for (const r of this.rows.values()) {
@@ -379,6 +423,7 @@ class ServersStore {
       this.fromCache = cached.rows.length;
       this.lastRefresh = cached.lastRefresh;
       for (const r of cached.rows) this.rows.set(r.id, r);
+      this.rowsChanged();
       this.steam = await invoke<SteamStatus>("steam_status");
       this.localVersion = await invoke<string | null>("local_game_version");
       await this.loadFavourites();
@@ -400,6 +445,7 @@ class ServersStore {
         this.flushRows();
         if (ev.payload.rejected) {
           this.verifying = false;
+          this.#verifyingSince = 0;
           this.error = "Steam did not answer the refresh, so the list was not updated.";
           return;
         }
@@ -415,17 +461,21 @@ class ServersStore {
       await listen<VerifySummary>("servers:verify-done", (ev) => {
         this.verifySummary = ev.payload;
         this.verifying = false;
+        this.#verifyingSince = 0;
       }),
       await listen<ModScanSummary>("servers:mods-start", (ev) => {
         this.modScan = ev.payload;
         this.modScanning = ev.payload.total > 0;
+        this.#scanningSince = Date.now();
       }),
       await listen<[ServerMods[], [number, string][]]>("servers:mods", (ev) => this.applyMods(ev.payload[0], ev.payload[1])),
       await listen<ModScanSummary>("servers:mods-done", (ev) => {
         this.modScan = ev.payload;
         this.modScanning = false;
+        this.#scanningSince = 0;
       }),
       await listen<FavouriteAlert>("favourite:alert", (ev) => {
+        logInfo("alert", `${ev.payload.name}: ${ev.payload.kind === "slot" ? "a slot freed up" : "back online"} (${ev.payload.players}/${ev.payload.maxPlayers})`);
         // One entry per server; the newest replaces an older one for the same server.
         this.alerts = [...this.alerts.filter((a) => a.id !== ev.payload.id), ev.payload].slice(-5);
         void getCurrentWindow()
@@ -437,6 +487,26 @@ class ServersStore {
     this.maybeAutoRefresh();
     void this.pollFriends();
     setInterval(() => void this.pollFriends(), FRIENDS_POLL_MS);
+    setInterval(() => this.#watchdog(), WATCHDOG_MS);
+  }
+
+  /**
+   * Clears a pass whose `done` event never arrived. Without this the status line
+   * read "verifying player counts…" or "scanning mod lists…" until the app was
+   * restarted, and the user had no way to tell a slow pass from a dead one (D-160).
+   */
+  #watchdog() {
+    const now = Date.now();
+    if (this.verifying && this.#verifyingSince && now - this.#verifyingSince > VERIFY_DEADLINE_MS) {
+      this.verifying = false;
+      this.#verifyingSince = 0;
+      this.error = "Player-count verification stopped answering. Refresh to try again.";
+    }
+    if (this.modScanning && this.#scanningSince && now - this.#scanningSince > SCAN_DEADLINE_MS) {
+      this.modScanning = false;
+      this.#scanningSince = 0;
+      logWarn("mods", "no mods-done inside the deadline; the flag was cleared");
+    }
   }
 
   /**
@@ -502,6 +572,7 @@ class ServersStore {
     try {
       await invoke<number>("servers_dzsa");
       this.verifying = true;
+      this.#verifyingSince = Date.now();
       void this.loadModsIndex();
     } catch (e) {
       this.error = String(e);
@@ -533,6 +604,7 @@ class ServersStore {
         this.done = null;
         this.verifySummary = null;
         this.verifying = true;
+        this.#verifyingSince = Date.now();
       }
     } catch (e) {
       this.error = String(e);
@@ -553,6 +625,7 @@ class ServersStore {
       // Keep verification results the Steam batch does not carry.
       this.rows.set(r.id, prev ? { ...r, verifiedPlayers: prev.verifiedPlayers, verifiedAt: prev.verifiedAt, verdict: prev.verdict } : r);
     }
+    this.rowsChanged();
   }
 
   applyVerifications(list: Verification[]) {
@@ -576,6 +649,7 @@ class ServersStore {
         verdict: v.verdict,
       });
     }
+    this.rowsChanged();
   }
 
   /** Called by the table with the ids currently on screen (debounced there). */
@@ -663,6 +737,7 @@ class ServersStore {
     try {
       const row = await invoke<ServerRow>("direct_connect", { address });
       this.rows.set(row.id, row);
+      this.rowsChanged();
       this.selectedId = row.id;
       return row;
     } catch (e) {

@@ -3,7 +3,7 @@
   // A full server can be waited for here (D-074): the dialog polls A2S_INFO every
   // 10 s and starts the game the moment the server reports a free slot.
   // Every command through the logging wrapper: a failure is recorded with its
-  // command name before it is rethrown (D-158/D-160).
+  // command name before it is rethrown (D-158).
   import { invokeLogged as invoke } from "./log";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
@@ -344,7 +344,5 @@
   .error { color: var(--danger); margin: 0; font-size: 12.5px; }
   footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
   .btn { all: unset; cursor: pointer; padding: 7px 16px; border-radius: var(--radius); background: var(--accent); color: var(--accent-fg); font-weight: 600; }
-  .btn.secondary { background: var(--bg-row); color: var(--fg); border: 1px solid var(--border); font-weight: 500; }
   .btn:disabled { opacity: 0.45; cursor: default; }
-  .btn:focus-visible { outline: 2px solid var(--fg); }
 </style>

@@ -35,6 +35,9 @@ pub struct UiPrefs {
     /// cannot be told apart from a deliberate choice.
     #[serde(default)]
     pub accent_default_v2: bool,
+    /// Show the News page at all (D-174). Off removes it from the sidebar and stops
+    /// the launcher fetching Steam's news feed, its pictures and YouTube previews.
+    pub news: bool,
 }
 
 impl Default for UiPrefs {
@@ -48,6 +51,7 @@ impl Default for UiPrefs {
             last_update_check_ms: 0,
             news_seen: 0,
             accent_default_v2: false,
+            news: true,
         }
     }
 }
@@ -116,6 +120,13 @@ pub struct Settings {
     /// Release the Steamworks session after this many idle minutes (0 = never). While
     /// connected, Steam shows the user as playing DayZ and counts playtime (D-077).
     pub steam_idle_minutes: u32,
+    /// Record what the launcher does to `logs/launcher.log` and the Logs page. Off
+    /// means nothing is written or kept at all (D-169).
+    pub logging: bool,
+    /// Log areas the user switched off (`steam`, `mods`, `join`, …). Muted areas are
+    /// dropped at the source, so they cost nothing (D-172).
+    #[serde(default)]
+    pub log_muted: Vec<String>,
     pub ui: UiPrefs,
 }
 
@@ -129,6 +140,8 @@ impl Default for Settings {
             no_pause: false,
             launch_profiles: Vec::new(),
             steam_idle_minutes: 15,
+            logging: true,
+            log_muted: Vec::new(),
             ui: UiPrefs::default(),
         }
     }

@@ -3,7 +3,7 @@
   // server, and a Join that goes through the usual join dialog. Polled every 30 s
   // while the tab is open; Steam answers from its local cache.
   // Every command through the logging wrapper: a failure is recorded with its
-  // command name before it is rethrown (D-158/D-160).
+  // command name before it is rethrown (D-158).
   import { invokeLogged as invoke } from "./log";
   import { untrack } from "svelte";
   import { SvelteMap } from "svelte/reactivity";
@@ -70,7 +70,10 @@
   // the first call is untracked to keep this effect from depending on it.
   $effect(() => {
     if (!steamOk) return;
-    untrack(() => void load());
+    // Same rule as the poll below (D-159): opening this page must not re-open an
+    // idle-released session either, or simply looking at it restarts Steam's
+    // playtime clock. Refresh does it deliberately when the user asks (D-160).
+    if (!servers.steam?.idle) untrack(() => void load());
     // Skip the poll while the Steam session is idle-released (D-159): asking for
     // friends re-opens it, which puts the user back to "Playing DayZ" in Steam and
     // restarts playtime — exactly what the idle release (D-077) exists to stop.
@@ -85,7 +88,7 @@
   const online = $derived(friends.filter((f) => f.state !== "offline").length);
 
   /** The friend's server when it is already in our list (by ip:queryPort). */
-  const serverOf = (f: FriendInfo) => (f.server ? (servers.rows.get(`${f.server.ip}:${f.server.queryPort}`) ?? null) : null);
+  const serverOf = (f: FriendInfo) => (f.server && servers.rowsTick >= 0 ? (servers.rows.get(`${f.server.ip}:${f.server.queryPort}`) ?? null) : null);
 
   async function join(f: FriendInfo) {
     if (!f.server) return;
@@ -96,9 +99,13 @@
       return;
     }
     joining = f.steamId;
+    error = null;
     const row = await servers.directConnect(`${f.server.ip}:${f.server.gamePort}`);
     joining = null;
     if (row) servers.joiningId = row.id;
+    // The store records the reason, but this page shows its own error line, so a
+    // friend on an unreachable server looked like a button that does nothing (D-160).
+    else error = servers.error ?? `${f.name}'s server did not answer; it may block queries or be behind a firewall.`;
   }
 </script>
 
@@ -111,6 +118,7 @@
         {friends.length} friend{friends.length === 1 ? "" : "s"} · {online} online · {inDayz} in DayZ
         {#if loadedAt}· updated {loadedAt}{/if}
       </span>
+      {#if servers.steam?.idle && !friends.length}<span class="muted">Steam session released while idle — press Refresh to fetch the list.</span>{/if}
       {#if error}<span class="error">{error}</span>{/if}
     </div>
   </div>
@@ -171,9 +179,6 @@
   .bar { display: flex; align-items: center; gap: 12px; font-size: 12px; }
   .check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
   .check input { accent-color: var(--accent); }
-  .btn { all: unset; cursor: pointer; padding: 6px 12px; border-radius: var(--radius); background: var(--accent); color: var(--accent-fg); font-weight: 600; }
-  .btn:disabled { opacity: 0.5; cursor: default; }
-  .btn:focus-visible { outline: 2px solid var(--fg); }
   .empty { margin: auto; text-align: center; max-width: 480px; }
   .empty p { margin: 4px 0; }
   .scroll { flex: 1; min-height: 0; overflow: auto; padding: 0 16px; }

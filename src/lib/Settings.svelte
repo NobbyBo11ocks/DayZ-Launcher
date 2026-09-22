@@ -2,7 +2,7 @@
   // Appearance, browser defaults, launch options and profiles, updates, Steam
   // (docs/06 §5). Two columns so the whole view fits the viewport (D-094).
   // Every command through the logging wrapper: a failure is recorded with its
-  // command name before it is rethrown (D-158/D-160).
+  // command name before it is rethrown (D-158).
   import { invokeLogged as invoke } from "./log";
   import { external } from "./external";
   import { ACCENTS, prefs, type Theme } from "./state/prefs.svelte";
@@ -156,6 +156,17 @@
         </label>
         <p class="muted note">
           While connected, Steam shows you as playing DayZ and counts playtime, like the official launcher. Releasing the session when idle stops that; it reconnects by itself for the next refresh, join or friends lookup.
+        </p>
+        <!-- Off removes the page and stops the feed being fetched at all (D-174). -->
+        <label class="row">
+          <span class="label">News page</span>
+          <span class="inline">
+            <input type="checkbox" checked={prefs.news} onchange={(e) => prefs.setNews(e.currentTarget.checked)} />
+            show DayZ news on a page of its own
+          </span>
+        </label>
+        <p class="muted note">
+          With it off the sidebar starts at Servers, and the launcher never contacts Steam's news feed, its picture CDN or YouTube.
         </p>
       {/if}
 

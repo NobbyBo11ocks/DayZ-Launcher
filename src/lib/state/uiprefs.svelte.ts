@@ -3,7 +3,7 @@
 // instant-start cache kept by the individual stores; this module is the single
 // writer to the file. Patches are coalesced so a burst of filter toggles is one write.
 // Every command through the logging wrapper: a failure is recorded with its
-// command name before it is rethrown (D-158/D-160).
+// command name before it is rethrown (D-158).
 import { invokeLogged as invoke } from "../log";
 import type { Settings, UiPrefs } from "../types";
 
@@ -16,6 +16,7 @@ export const defaultUiPrefs = (): UiPrefs => ({
   filters: null,
   lastUpdateCheckMs: 0,
   newsSeen: 0,
+  news: true,
 });
 
 /** Attempts to read the settings before giving up on the backend (D-112). */

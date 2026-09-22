@@ -5,7 +5,7 @@
 // on a per-row, per-frame or per-keystroke path.
 import { invoke } from "@tauri-apps/api/core";
 
-type Level = "debug" | "info" | "warn" | "error";
+type Level = "info" | "warn" | "error";
 
 /** Never throws and never awaits the caller: logging must not change behaviour. */
 export function log(level: Level, target: string, message: string): void {

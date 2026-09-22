@@ -16,7 +16,7 @@ Key-free server list straight from Steam · player counts verified with every se
 
 [**Download the latest release**](https://github.com/NobbyBo11ocks/dayz-launcher/releases/latest) · [Highlights](#highlights) · [How it works](#how-it-works) · [Install](#install) · [Build](#build-from-source) · [Docs](docs/00-README.md)
 
-<img src="docs/screenshots/home.jpg" width="900" alt="Home page: a welcome band with the Steam name and avatar, Join again, and the latest DayZ updates with pictures">
+<img src="docs/screenshots/home.jpg" width="900" alt="Home page: a welcome band with the Steam name and avatar and the latest DayZ updates with pictures">
 
 </div>
 
@@ -25,13 +25,13 @@ Key-free server list straight from Steam · player counts verified with every se
 - **Player counts you can trust.** Every populated server is queried directly and cross-checked against Steam. Inflated and fabricated counts are flagged, and hidden by default.
 - **Fast and light.** A Rust host, a plain Svelte 5 front end, a virtualised table and a SQLite cache. The last list is on screen well under a second after launch, and the installer is under 5 MB.
 - **One click from list to game.** Missing Workshop mods are subscribed and downloaded through Steam, the `!Workshop` junctions are created the way the official launcher does it, and DayZ starts through BattlEye with the official argument form.
-- **Nothing to sign up for.** No accounts, no API keys, no telemetry. It talks to Steam, to the game servers, and to GitHub for updates.
+- **Nothing to sign up for.** No accounts, no API keys, no telemetry. It talks to Steam, to the game servers, to GitHub for updates, and to YouTube for the previews and player on the home page.
 
 | Installer | Cold start to first frame | Populated-server refresh | Idle CPU | Memory, whole app |
 |:-:|:-:|:-:|:-:|:-:|
 | 4.7 MB | 0.43 s | 36 s | 0.4 % of one core | ≈ 300 MB |
 
-<sub>Measured on the reference machine; budgets, method and history in [docs/05 §6](docs/05-architecture-and-optimisation.md).</sub>
+<sub>Measured on the reference machine at v0.1.19; budgets, method and history in [docs/05 §6](docs/05-architecture-and-optimisation.md).</sub>
 
 ## Highlights
 
@@ -39,7 +39,7 @@ Key-free server list straight from Steam · player counts verified with every se
 |---|---|
 | Steam's own matchmaking list, no API key.<br>Filters for perspective, map, country, mod, queue, password, BattlEye, daytime, version, ping and friends.<br>Country flags from an offline table.<br>Live details: mods with installed ticks, 72 h population history, your past sessions on that server.<br>Find servers by mod. | Missing mods subscribed, downloaded and linked automatically.<br>Wait for a free slot on a full server.<br>Launch profiles: saved sets of launch options, picked in the join dialog.<br>Direct connect by address; the game port is resolved to the query port.<br>Mod management: update, unsubscribe. |
 | **Stay in touch** | **Stay in control** |
-| Home page with your Steam name and avatar, "Join again", and the latest DayZ updates with pictures and video previews, an unread badge and an alert when an update lands.<br>Friends: who is in DayZ, on which server, and a Join button; friend markers on server rows and a Friends filter.<br>LAN discovery.<br>Favourites with alerts (free slot, back online) as Windows toasts, a clearable list of recent servers, and import of the official launcher's favourites. | Signed automatic updates.<br>Per-user installer; the launcher runs at the same elevation as Steam.<br>Steam idle release, so the launcher does not count as playtime while it sits open.<br>Diagnostics with a performance section, cache counts and a confirmed clean-up of dangling `!Workshop` junctions.<br>Slim frameless window that remembers its size and position, a dark and a light theme, twelve accent colours; every view except the server list fits without scrolling.<br>Nothing to sign in to and nothing sent anywhere but Steam, the servers and GitHub.<br>DZSA list fallback when Steam is unavailable. |
+| Home page with your Steam name and avatar and the latest DayZ updates with pictures and video previews, an unread badge and an alert when an update lands.<br>Friends: who is in DayZ, on which server, and a Join button; friend markers on server rows and a Friends filter.<br>LAN discovery.<br>Favourites with alerts (free slot, back online) as Windows toasts, a clearable list of recent servers, and import of the official launcher's favourites. | Signed automatic updates.<br>Per-user installer; the launcher runs at the same elevation as Steam.<br>Steam idle release, so the launcher does not count as playtime while it sits open.<br>A Logs page: what the launcher has been doing, both halves of it, with the file one click away, a switch to stop recording altogether and a chip per area to mute. Nothing leaves the machine.<br>The News page can be switched off; with it off the launcher never contacts Steam's news feed, its picture CDN or YouTube.<br>A confirmed clean-up of dangling `!Workshop` junctions on the Mods page.<br>Slim frameless window that remembers its size and position, a dark and a light theme, twelve accent colours; every view except the server list fits without scrolling.<br>Nothing to sign in to; the only things contacted are Steam, the servers, GitHub and, on the home page, YouTube.<br>DZSA list fallback when Steam is unavailable. |
 
 <div align="center">
 
@@ -69,7 +69,7 @@ Every protocol and launch fact is tied to a source in [docs/08](docs/08-sources.
 ## Install
 
 1. Download `DZSA CrayZ Launcher_<version>_x64-setup.exe` from the [latest release](https://github.com/NobbyBo11ocks/dayz-launcher/releases/latest).
-2. Run it. It installs per user to `%LOCALAPPDATA%\Programs\DayZ Launcher` and adds a Start menu entry. WebView2 is installed silently if Windows does not have it.
+2. Run it. It installs per user to `%LOCALAPPDATA%\Programs\DZSA CrayZ Launcher` and adds a Start menu entry. WebView2 is installed silently if Windows does not have it.
 3. Start Steam, then the launcher. Updates are automatic: each release is signed with a minisign key and the app verifies the signature before installing.
 
 > **SmartScreen.** The installer is not code-signed yet, so Windows shows "Windows protected your PC" on first run. Click **More info**, then **Run anyway**. Code signing is tracked in [docs/12](docs/12-code-signing.md).
@@ -83,6 +83,7 @@ No accounts, no telemetry, no third-party analytics. The launcher talks to:
 - **Steam**: the local client for the server list, Workshop and friends; Steam's news feed and image CDN for the home page.
 - **The game servers**: direct A2S queries for ping, mods and players.
 - **GitHub**: the update manifest and installer.
+- **YouTube**: preview images for posts with a video, and `youtube-nocookie.com` while a video is playing. Only the News page does this, and it can be turned off in Settings; nothing else in the app contacts Google.
 - **DZSA's public list**: only when Steam is unavailable and you choose to load it.
 
 Its cache, favourites, history and settings stay in your local app-data folder.
@@ -121,7 +122,7 @@ npm run tauri build
 
 Output: `src-tauri/target/release/bundle/nsis/` (`DZSA CrayZ Launcher_<version>_x64-setup.exe` plus a `.sig` for the updater).
 
-The per-user installer defaults to `%LOCALAPPDATA%\Programs\DayZ Launcher`. Tauri's stock default, `%LOCALAPPDATA%\DayZ Launcher`, is the official DayZ Launcher's data folder, so `src-tauri/nsis/installer.nsi` is a copy of the stock template with that one line changed. After upgrading `@tauri-apps/cli`, run `node tools/nsis_template_check.js` (add `--write` to refresh the copy from the new tag).
+The per-user installer defaults to `%LOCALAPPDATA%\Programs\<product>`. `src-tauri/nsis/installer.nsi` is a copy of Tauri's stock template with that one line changed: the stock default is `%LOCALAPPDATA%\<product>`, which collided with the official DayZ Launcher's data folder under the app's original name, and the copy is kept because a program folder is where a program belongs. After upgrading `@tauri-apps/cli`, run `node tools/nsis_template_check.js` (add `--write` to refresh the copy from the new tag).
 
 Updater artifacts are signed with a minisign key. The private key lives outside the repository (`%USERPROFILE%\.tauri\dayz-launcher.key`); set it before building:
 
@@ -167,7 +168,7 @@ Run the workflow manually from the Actions tab for a build-only dry run.
 2. Create the GitHub release with the installer and its signature:
 
    ```bash
-   gh release create v0.1.19 "src-tauri/target/release/bundle/nsis/DayZ Launcher_0.1.19_x64-setup.exe" "src-tauri/target/release/bundle/nsis/DayZ Launcher_0.1.19_x64-setup.exe.sig" --title v0.1.19 --notes-file notes.md
+   gh release create v0.1.23 "src-tauri/target/release/bundle/nsis/DZSA CrayZ Launcher_0.1.23_x64-setup.exe" "src-tauri/target/release/bundle/nsis/DZSA CrayZ Launcher_0.1.23_x64-setup.exe.sig" --title v0.1.23 --notes-file notes.md
    ```
 
 3. Generate the update manifest from the uploaded asset (GitHub renames spaces in asset names to dots, so the URL must come from the API) and upload it:
@@ -197,7 +198,11 @@ src-tauri/src/       Rust host
   launch/            Argument builder, mod links, DayZ_BE.exe process
   news.rs            Steam news feed and host-made thumbnails
   proc.rs            Priority classes and elevation matching
+  log.rs             The app's own log: memory ring plus a rotating file
+  geoip.rs           Offline IP-to-country lookup read in place from the image
+  http.rs            Capped response bodies for every outbound fetch
 src-tauri/nsis/      Installer template (stock Tauri template, install dir changed)
+                     plus the header and sidebar bitmaps the setup wizard uses
 docs/                Research, architecture, budgets, sources, decisions log
 tools/               Node scripts: A2S probe and capture, GeoIP and flag builders, release helpers
 ```
@@ -212,6 +217,7 @@ tools/               Node scripts: A2S probe and capture, GeoIP and flag builder
 | `node tools/make_latest.js vX.Y.Z --notes notes.md` | Build `latest.json` from the uploaded release asset |
 | `node tools/nsis_template_check.js` | Diff our NSIS template against the installed Tauri CLI's |
 | `node tools/geoip_build.js` · `node tools/flags_build.js` | Rebuild the offline GeoIP table and the flag sprite |
+| `node tools/make_icon.js` | Redraw the app icon and write `icon.ico` plus the PNG sizes. Needs `sharp`, which is not a project dependency: `npm i --no-save sharp` first |
 
 ## Credits
 

@@ -5,6 +5,7 @@
   // toggle, and the player sessions are summarised instead of listed.
   // Every command through the logging wrapper: a failure is recorded with its
   // command name before it is rethrown (D-158/D-160).
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { invokeLogged as invoke } from "./log";
   import Flag from "./Flag.svelte";
   import Sparkline from "./Sparkline.svelte";
@@ -59,12 +60,19 @@
   let allMods = $state(false);
   let fullDesc = $state(false);
 
-  // Installed Workshop items, once per session (diagnostics is a few ms).
+  // Installed Workshop items (diagnostics is a few ms). Read once, then again after
+  // any Workshop download finishes: it was read once per session, so mods installed
+  // during the session kept their "missing" mark until a restart (D-160).
   $effect(() => {
     if (installed) return;
     invoke<Diagnostics>("diagnostics")
       .then((d) => (installed = new Set(d.workshop?.items.map((i) => i.id) ?? [])))
       .catch(() => (installed = new Set()));
+  });
+  $effect(() => {
+    let off: UnlistenFn | undefined;
+    void listen("mods:done", () => (installed = null)).then((f) => (off = f));
+    return () => off?.();
   });
 
   // Live INFO/RULES/PLAYER, once per selection.

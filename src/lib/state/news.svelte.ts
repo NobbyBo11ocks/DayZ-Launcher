@@ -4,19 +4,17 @@
 // toast and, when the window is not focused, a Windows notification. The store
 // also holds the signed-in user's avatar for the welcome header.
 // Every command through the logging wrapper: a failure is recorded with its
-// command name before it is rethrown (D-158/D-160).
+// command name before it is rethrown (D-158).
 import { invokeLogged as invoke } from "../log";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { SvelteMap } from "svelte/reactivity";
-import { avatarDataUrl } from "../avatar";
 import { uiPrefs } from "./uiprefs.svelte";
-import type { Avatar, NewsCached, NewsItem } from "../types";
+import type { NewsCached, NewsItem } from "../types";
 
 const REFRESH_MS = 30 * 60_000;
 /** On the very first run, only this many of the newest official posts count as unread. */
 const FIRST_RUN_UNREAD = 5;
-const AVATAR_TRIES = 3;
 
 export type NewsAlert = { gid: string; title: string; url: string; at: number };
 /** `updates`: official game-update posts (default); `official`: every Bohemia post; `press`: plus third-party feeds. */
@@ -47,14 +45,12 @@ class NewsStore {
   /** Update posts not yet dismissed, newest last (at most three). */
   alerts = $state<NewsAlert[]>([]);
   /** PNG data URL of the signed-in user's Steam avatar, once Steam has it. */
-  avatar = $state<string | null>(null);
   /** Object URLs of downscaled post pictures by gid (D-111); the backend caches the files. */
   thumbs = new SvelteMap<string, string>();
   #thumbPending = new Set<string>();
   #thumbFailed = new Set<string>();
   #started = false;
   #visiting = false;
-  #avatarTries = 0;
 
   list = $derived(this.items.filter((n) => (this.view === "press" ? true : n.official && (this.view === "official" || n.update))));
   /** Official posts newer than the seen mark: the rail badge. */
@@ -171,22 +167,6 @@ class NewsStore {
     return null;
   }
 
-  /** Steam's 64×64 avatar as raw RGBA, drawn to a canvas once; retried while Steam starts. */
-  async loadAvatar() {
-    if (this.avatar || this.#avatarTries >= AVATAR_TRIES) return;
-    this.#avatarTries++;
-    let a: Avatar | null = null;
-    try {
-      a = await invoke<Avatar | null>("steam_avatar");
-    } catch {
-      /* Steam not ready yet */
-    }
-    if (!a) {
-      if (this.#avatarTries < AVATAR_TRIES) setTimeout(() => void this.loadAvatar(), 3000);
-      return;
-    }
-    this.avatar = avatarDataUrl(a);
-  }
 }
 
 export const news = new NewsStore();

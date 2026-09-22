@@ -20,6 +20,7 @@
     onAlert,
     friendsOn,
     modsByServer,
+    empty,
   }: {
     rows: ServerRow[];
     selectedId: string | null;
@@ -37,6 +38,8 @@
     onAlert?: (id: string) => void;
     /** Friend names by server id (D-128): rows get a marker with the names in its tooltip. */
     friendsOn?: Map<string, string[]>;
+    /** What to say when there are no rows at all, instead of an empty grid (D-160). */
+    empty?: string;
     /** Scanned mod lists by server id (D-146): the Mods column counts them. */
     modsByServer?: Map<string, number[]>;
   } = $props();
@@ -162,6 +165,9 @@
   </div>
 
   <div class="body" bind:this={body} onscroll={onScroll} role="rowgroup">
+    {#if rows.length === 0 && empty}
+      <p class="no-rows">{empty}</p>
+    {/if}
     <div class="spacer" style="height: {rows.length * ROW}px">
       <div class="window" style="transform: translateY({start * ROW}px)">
         {#each slice as r (r.id)}
@@ -288,8 +294,9 @@
   .table:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
   .head, .row { display: grid; grid-template-columns: minmax(200px, 1fr) 130px 52px 96px 56px 64px 92px; align-items: center; }
   .head { border-bottom: 1px solid var(--border); background: var(--bg); }
-  .th { all: unset; cursor: pointer; padding: 0 8px; height: 30px; display: flex; align-items: center; color: var(--fg-muted); font-weight: 500; white-space: nowrap; }
-  .th:hover { color: var(--fg); }
+  /* Accent, like the title-bar counts (user request, D-177). */
+  .th { all: unset; cursor: pointer; padding: 0 8px; height: 30px; display: flex; align-items: center; color: var(--accent); font-weight: 500; white-space: nowrap; }
+  .th:hover { filter: brightness(1.15); }
   .th:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   /* The header is a separate grid from the body, so the body always reserves the
      scrollbar and the header matches it with padding. `scrollbar-gutter` on the header
@@ -302,6 +309,7 @@
   /* No will-change: the compositor layer cost more GPU memory than the transform saved (Q17, D-056). */
   .window { position: absolute; left: 0; right: 0; top: 0; }
   .row { height: 36px; border-bottom: 1px solid var(--border); cursor: default; }
+  .no-rows { margin: 28px auto 0; max-width: 46ch; text-align: center; color: var(--muted); font-size: 13px; line-height: 1.5; }
   .row:hover { background: var(--bg-row); }
   .row.selected { background: color-mix(in srgb, var(--accent) 18%, var(--bg-row)); box-shadow: inset 3px 0 0 var(--accent); }
   .row.untrusted { color: var(--fg-muted); }

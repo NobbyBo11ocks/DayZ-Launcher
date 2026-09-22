@@ -102,11 +102,15 @@ jobs:
           "installer: $($setup.Name) ($($setup.Length) bytes)"
           $p = Start-Process -FilePath $setup.FullName -ArgumentList '/S' -PassThru -Wait
           if ($p.ExitCode -ne 0) { throw "installer exit code $($p.ExitCode)" }
-          $dir = Join-Path $env:LOCALAPPDATA 'Programs\DayZ Launcher'
+          # Never hard-code the product name again: the rename to "DZSA CrayZ Launcher"
+          # moved the install folder and the uninstall key, this step threw, and the
+          # manifest rewrite below was skipped (D-160).
+          $product = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).productName
+          $dir = Join-Path $env:LOCALAPPDATA "Programs\$product"
           foreach ($f in 'dayz-launcher.exe', 'steam_api64.dll', 'uninstall.exe') {
             if (-not (Test-Path (Join-Path $dir $f))) { throw "missing $f in $dir" }
           }
-          $key = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\DayZ Launcher'
+          $key = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$product"
           "installed $($key.DisplayVersion) at $($key.InstallLocation)"
           $app = Start-Process -FilePath (Join-Path $dir 'dayz-launcher.exe') -PassThru
           Start-Sleep -Seconds 15
@@ -133,8 +137,10 @@ jobs:
       # metadata rather than the installer unless the caller sends an octet-stream Accept
       # header; the signature check then fails (v0.1.21, D-147). Our own generator takes
       # the browser download URL from the release listing, so rewrite the manifest with it.
+      # `always()`: whatever the smoke test decides, a published release must not be
+      # left advertising an installer URL the updater cannot fetch (D-160).
       - name: Rewrite latest.json with the browser download URL
-        if: env.PUBLISH == 'true'
+        if: always() && env.PUBLISH == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -143,7 +149,7 @@ jobs:
           gh release upload '${{ github.ref_name }}' 'src-tauri/target/release/bundle/nsis/latest.json' --clobber
 
       - name: Verify the published manifest and signature
-        if: env.PUBLISH == 'true'
+        if: always() && env.PUBLISH == 'true'
         shell: pwsh
         run: |
           $ok = $false

@@ -3,7 +3,8 @@
 //!
 //! Nothing leaves the machine. Lines go to `<app local data>/logs/launcher.log`, which
 //! rotates at 2 MB to `launcher.1.log`, and the last few hundred are kept in memory so
-//! Diagnostics can show them without touching the disk.
+//! the Logs page can show them without touching the disk. The whole thing can be
+//! switched off in Settings (D-169).
 //!
 //! Volume is the point of failure for a log like this: anything on a per-row or per-frame
 //! path must not call it. The call sites are starts, ends, counts and errors.
@@ -12,10 +13,48 @@ use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::SystemTime;
 
 use serde::Serialize;
+
+/// Off means nothing is recorded at all — no file, no memory ring (D-169). The
+/// setting drives it; it starts on so a failure during start-up is still caught.
+static ENABLED: AtomicBool = AtomicBool::new(true);
+
+/// Turns recording on or off. Switching it off also drops what is already in memory,
+/// so "no logging" means exactly that.
+pub fn set_enabled(on: bool) {
+    ENABLED.store(on, Ordering::Relaxed);
+    if !on {
+        if let Ok(mut s) = sink().lock() {
+            s.ring.clear();
+        }
+    }
+}
+
+pub fn enabled() -> bool {
+    ENABLED.load(Ordering::Relaxed)
+}
+
+/// Areas the user has switched off (D-172). An entry's area is its target up to the
+/// first `:`, so muting `ui` silences `ui:ipc` and `ui:window` together.
+static MUTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+pub fn set_muted(areas: Vec<String>) {
+    if let Ok(mut m) = MUTED.lock() {
+        *m = areas;
+    }
+}
+
+fn muted(target: &str) -> bool {
+    let area = target.split_once(':').map_or(target, |(a, _)| a);
+    MUTED
+        .lock()
+        .map(|m| m.iter().any(|x| x == area))
+        .unwrap_or(false)
+}
 
 const MAX_BYTES: u64 = 2 * 1024 * 1024;
 const RING: usize = 400;
@@ -23,7 +62,6 @@ const RING: usize = 400;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Level {
-    Debug,
     Info,
     Warn,
     Error,
@@ -32,7 +70,6 @@ pub enum Level {
 impl fmt::Display for Level {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Level::Debug => "DEBUG",
             Level::Info => "INFO",
             Level::Warn => "WARN",
             Level::Error => "ERROR",
@@ -98,6 +135,9 @@ pub fn path() -> Option<PathBuf> {
 
 /// Appends one entry. Never panics and never blocks on a poisoned lock.
 pub fn write(level: Level, target: &str, message: impl Into<String>) {
+    if !enabled() || muted(target) {
+        return;
+    }
     let entry = Entry {
         at: now_ms(),
         level,
@@ -171,11 +211,6 @@ macro_rules! log_warn {
 macro_rules! log_error {
     ($target:expr, $($arg:tt)*) => { $crate::log::write($crate::log::Level::Error, $target, format!($($arg)*)) };
 }
-#[macro_export]
-macro_rules! log_debug {
-    ($target:expr, $($arg:tt)*) => { $crate::log::write($crate::log::Level::Debug, $target, format!($($arg)*)) };
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

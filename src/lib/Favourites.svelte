@@ -54,6 +54,7 @@
         onAlert={(id) => servers.toggleAlert(id)}
         friendsOn={servers.friendsOn}
         modsByServer={servers.modsByServer}
+        empty="These favourites are not in the list yet. They appear after the next refresh, or once Steam answers."
       />
       {#if selected}
         <DetailsPane row={selected} localVersion={servers.localVersion} />

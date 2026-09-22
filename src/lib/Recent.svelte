@@ -9,7 +9,7 @@
   });
 
   async function joinAgain(h: HistoryEntry) {
-    if (servers.rows.has(h.id)) {
+    if (servers.rowsTick >= 0 && servers.rows.has(h.id)) {
       servers.select(h.id);
       servers.joiningId = h.id;
       return;
@@ -63,7 +63,7 @@
           <!-- Index in the key: two joins to the same server in the same second are
                otherwise duplicate keys and Svelte throws (D-151). -->
           {#each servers.history as h, i (`${h.id}@${h.joinedAt}#${i}`)}
-            {@const live = servers.rows.get(h.id)}
+            {@const live = servers.rowsTick >= 0 ? servers.rows.get(h.id) : undefined}
             <tr>
               <td class="muted">{when(h.joinedAt)}</td>
               <td>{live?.name ?? h.name}{#if servers.favourites.has(h.id)} <span class="star" title="Favourite">★</span>{/if}</td>
@@ -95,10 +95,6 @@
   .empty p { margin: 0; }
   .empty .btn { margin-top: 6px; }
   .btn { all: unset; cursor: pointer; padding: 4px 10px; border-radius: var(--radius); background: var(--accent); color: var(--accent-fg); font-weight: 600; font-size: 12px; }
-  .btn.ghost { background: transparent; color: var(--fg-muted); border: 1px solid var(--border); font-weight: 500; }
-  .btn.ghost:hover { color: var(--fg); }
   .btn.danger { background: var(--danger); color: #fff; }
-  .btn:disabled { opacity: 0.5; cursor: default; }
-  .btn:focus-visible { outline: 2px solid var(--fg); }
   .error { color: var(--danger); }
 </style>

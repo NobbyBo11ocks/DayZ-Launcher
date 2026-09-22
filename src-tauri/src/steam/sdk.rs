@@ -274,9 +274,6 @@ enum Cmd {
     Friends {
         reply: FriendsReply,
     },
-    Avatar {
-        reply: mpsc::Sender<Option<Avatar>>,
-    },
     FriendAvatar {
         steam_id: u64,
         reply: mpsc::Sender<Option<Avatar>>,
@@ -459,21 +456,6 @@ impl SteamWorker {
             .map_err(|_| "steamworks thread has stopped".to_string())?;
         rx.recv_timeout(Duration::from_secs(10))
             .map_err(|_| "Steam did not answer the friends query in 10 s".to_string())?
-    }
-
-    /// The local user's avatar, if Steam has it cached (D-100). Blocking: call from
-    /// a blocking task. `Ok(None)` when the image is not loaded yet.
-    pub fn avatar(&self) -> Result<Option<Avatar>, String> {
-        let s = self.status();
-        if !s.initialized {
-            return Err(s.error.unwrap_or_else(|| "Steam is not initialised".into()));
-        }
-        let (reply, rx) = mpsc::channel();
-        self.cmd
-            .send(Cmd::Avatar { reply })
-            .map_err(|_| "steamworks thread has stopped".to_string())?;
-        rx.recv_timeout(Duration::from_secs(5))
-            .map_err(|_| "Steam did not answer the avatar query in 5 s".to_string())
     }
 
     /// A friend's small (32×32) avatar, if Steam has it cached (D-115). Blocking.
@@ -743,7 +725,7 @@ fn reject(cmd: Cmd, events: &UnboundedSender<SteamEvent>, e: String) {
         Cmd::Friends { reply } => {
             let _ = reply.send(Err(e));
         }
-        Cmd::Avatar { reply } | Cmd::FriendAvatar { reply, .. } => {
+        Cmd::FriendAvatar { reply, .. } => {
             let _ = reply.send(None);
         }
         Cmd::Sync { job, .. } => {
@@ -845,7 +827,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
             // other command, and a session re-opened for any command, counts.
             if !matches!(
                 cmd,
-                Cmd::Friends { .. } | Cmd::Avatar { .. } | Cmd::FriendAvatar { .. }
+                Cmd::Friends { .. } | Cmd::FriendAvatar { .. }
             ) {
                 last_activity = Instant::now();
             }
@@ -898,21 +880,6 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                 }
                 Cmd::Friends { reply } => {
                     let _ = reply.send(Ok(list_friends(&s.client)));
-                }
-                Cmd::Avatar { reply } => {
-                    let me = s.client.user().steam_id();
-                    let avatar = s
-                        .client
-                        .friends()
-                        .get_friend(me)
-                        .medium_avatar()
-                        .filter(|rgba| rgba.len() == 64 * 64 * 4)
-                        .map(|rgba| Avatar {
-                            width: 64,
-                            height: 64,
-                            rgba,
-                        });
-                    let _ = reply.send(avatar);
                 }
                 Cmd::FriendAvatar { steam_id, reply } => {
                     let avatar = s

@@ -10,7 +10,6 @@ pub mod http;
 pub mod launch;
 pub mod log;
 pub mod news;
-pub mod perf;
 pub mod proc;
 pub mod settings;
 pub mod steam;
@@ -126,19 +125,14 @@ pub fn run() {
                     }
                 }
             }));
-            // The row count is a SELECT COUNT(*) over ~19 000 rows and the line is
-            // only for the log, so it is not worth holding the first frame (D-160).
-            {
-                let c = Arc::clone(&cache);
-                let at = db_path.display().to_string();
-                tauri::async_runtime::spawn_blocking(move || {
-                    let n = c.lock().map(|c| c.count().unwrap_or(0)).unwrap_or(0);
-                    log_info!("cache", "open {n} rows at {at}");
-                });
-            }
-            #[cfg(debug_assertions)]
-            eprintln!("[setup] cache at {} ({} rows)", db_path.display(), cache.lock().map(|c| c.count().unwrap_or(0)).unwrap_or(0));
             let settings = SettingsStore::load(&app.path().app_config_dir()?.join("settings.json"));
+            // Start-up logs before this point are kept deliberately: they are the ones
+            // that explain a failure to start. From here the user's choice applies (D-169).
+            {
+                let s = settings.get();
+                log::set_enabled(s.logging);
+                log::set_muted(s.log_muted);
+            }
 
             let last_refresh = cache
                 .lock()
@@ -171,26 +165,6 @@ pub fn run() {
                     match ev {
                         SteamEvent::Status(s) => {
                             // Status changes are rare and always interesting (D-158).
-                            if let Some(err) = &s.error {
-                                log_warn!("steam", "status: initialized={} refreshing={} error={err}", s.initialized, s.refreshing);
-                            } else {
-                                log_info!(
-                                    "steam",
-                                    "status: initialized={} refreshing={} persona={:?} at {} ms",
-                                    s.initialized,
-                                    s.refreshing,
-                                    s.persona,
-                                    uptime_ms()
-                                );
-                            }
-                            #[cfg(debug_assertions)]
-                            eprintln!(
-                                "[steam] status: initialized={} refreshing={} error={:?} at {} ms",
-                                s.initialized,
-                                s.refreshing,
-                                s.error,
-                                uptime_ms()
-                            );
                             let _ = handle.emit("steam:status", &s);
                         }
                         SteamEvent::Batch(rows) => {
@@ -241,19 +215,6 @@ pub fn run() {
                                 d.elapsed_ms,
                                 d.partitions.len()
                             );
-                            for p in &d.partitions {
-                                log_debug!(
-                                    "steam",
-                                    "  partition {:?}: {} total, {} ok, {} failed, {} inflated, {} ms, {}",
-                                    p.filters,
-                                    p.total,
-                                    p.responded,
-                                    p.failed,
-                                    p.inflated,
-                                    p.elapsed_ms,
-                                    p.response
-                                );
-                            }
                             let _ = handle.emit("servers:done", &d);
                             // A LAN scan is not a list refresh: it must not push the
                             // automatic refresh's throttle or age out cached rows, and a
@@ -325,6 +286,22 @@ pub fn run() {
                                 d.elapsed_ms,
                                 d.error.as_deref().map(|e| format!(" ({e})")).unwrap_or_default()
                             );
+                            if d.ok {
+                                log_info!(
+                                    "mods",
+                                    "downloaded {} item(s) in {} ms",
+                                    d.items.len(),
+                                    d.elapsed_ms
+                                );
+                            } else {
+                                log_warn!(
+                                    "mods",
+                                    "download of {} item(s) failed after {} ms: {}",
+                                    d.items.len(),
+                                    d.elapsed_ms,
+                                    d.error.as_deref().unwrap_or("no reason given")
+                                );
+                            }
                             let _ = handle.emit("mods:done", &d);
                         }
                     }
@@ -347,10 +324,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_info,
-            commands::perf_first_paint,
-            commands::perf_sample,
             commands::diagnostics,
-            commands::diagnostics_export,
             commands::local_game_version,
             commands::steam_status,
             commands::settings_get,
@@ -365,19 +339,17 @@ pub fn run() {
             commands::join_plan,
             commands::mods_sync,
             commands::mods_unsubscribe,
+            commands::junctions_remove_dangling,
             commands::mods_index,
             commands::mods_scan,
-            commands::junctions_remove_dangling,
             commands::friends_list,
             commands::news_fetch,
             commands::news_cached,
             commands::news_thumb,
             commands::friend_avatar,
-            commands::cache_stats,
             commands::logs_recent,
             commands::logs_path,
             commands::log_ui,
-            commands::steam_avatar,
             commands::launch_game,
             commands::favourites_list,
             commands::favourite_set,

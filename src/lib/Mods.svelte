@@ -4,14 +4,14 @@
   // on top of the single-item management from D-075. Fits the viewport; only the
   // table scrolls (D-094).
   // Every command through the logging wrapper: a failure is recorded with its
-  // command name before it is rethrown (D-158/D-160).
+  // command name before it is rethrown (D-158).
   import { invokeLogged as invoke } from "./log";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { revealItemInDir } from "@tauri-apps/plugin-opener";
   import { SvelteSet } from "svelte/reactivity";
   import { external } from "./external";
   import { servers } from "./state/servers.svelte";
-  import { fmtBytes, type Diagnostics, type SyncDone, type SyncProgress, type UnsubscribeResult, type WorkshopItemInfo } from "./types";
+  import { fmtBytes, type Diagnostics, type JunctionCleanup, type SyncDone, type SyncProgress, type UnsubscribeResult, type WorkshopItemInfo } from "./types";
 
   /** Jump to the server list filtered to servers running this mod (D-080). */
   function showServers(id: number) {
@@ -42,6 +42,28 @@
       error = null;
     } catch (e) {
       error = String(e);
+    }
+  }
+
+  // Dangling-junction clean-up (D-093), which used to live on the Diagnostics page
+  // and moved here with it (D-170). Junctions are shared with the official launcher,
+  // so this is confirmed, and it only ever removes entries whose target folder is
+  // gone — never one the launcher did not create and never a live one.
+  let confirmClean = $state(false);
+  let cleaning = $state(false);
+  async function cleanJunctions() {
+    confirmClean = false;
+    cleaning = true;
+    try {
+      const r = await invoke<JunctionCleanup>("junctions_remove_dangling");
+      const failed = r.failed.map((f) => `${f.name} (${f.error})`).join(", ");
+      notice = `Removed ${r.removed.length} stale junction${r.removed.length === 1 ? "" : "s"}${failed ? `; could not remove ${failed}` : ""}.`;
+      error = failed ? `Could not remove ${failed}` : null;
+      await load();
+    } catch (e) {
+      error = String(e);
+    } finally {
+      cleaning = false;
     }
   }
 
@@ -193,6 +215,17 @@
       <span class="muted">{all.length} installed · {fmtBytes(totalSize)}{#if dangling} · {dangling} stale junction{dangling === 1 ? "" : "s"}{/if}</span>
     {/if}
     <span class="spacer"></span>
+    {#if dangling}
+      {#if confirmClean}
+        <span class="muted">Remove {dangling} stale junction{dangling === 1 ? "" : "s"}? Only ones whose target folder is gone.</span>
+        <button class="btn danger" onclick={cleanJunctions}>Yes</button>
+        <button class="btn" onclick={() => (confirmClean = false)}>No</button>
+      {:else}
+        <button class="btn" onclick={() => (confirmClean = true)} disabled={cleaning || !!updating} title="Delete the !Workshop junctions whose target folder no longer exists">
+          {cleaning ? "Removing…" : `Clean ${dangling} stale`}
+        </button>
+      {/if}
+    {/if}
     {#if stale.length}
       <button class="btn accent" onclick={() => update(stale.map((i) => i.id))} disabled={!!updating}>
         {updating ? `Updating… ${updating.installed}/${updating.total}` : `Update all ${stale.length}`}
@@ -329,9 +362,6 @@
   .btn:hover { border-color: var(--accent); }
   .btn:disabled { opacity: 0.5; cursor: default; }
   .btn.accent { background: var(--accent); color: var(--accent-fg); font-weight: 600; border-color: transparent; }
-  .btn.ghost { background: transparent; color: var(--fg-muted); }
-  .btn.ghost:hover { color: var(--fg); }
-  .btn.danger { border-color: var(--danger); color: var(--danger); }
   .btn.slim { height: 22px; padding: 0 8px; }
   .th { all: unset; cursor: pointer; }
   .th:hover { color: var(--fg); }

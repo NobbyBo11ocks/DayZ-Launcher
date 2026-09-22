@@ -25,7 +25,7 @@ Goal: the fastest way from "open launcher" to "in game", in a dark, quiet, infor
 
 - News (D-099) sits first with an unread badge (③ above); it is a padded view of cards that scrolls inside, not a table.
 
-- Responsive: rail collapses to icons < 1100 px; details pane hidden < 1000 px; table drops the "time" and "version" columns < 900 px.
+- Responsive: rail collapses to icons < 1100 px; details pane hidden < 1000 px. The third breakpoint specified here — dropping "time" and "version" below 900 px — was never built and is unreachable anyway: the window minimum is 960 px. The open recommendation from D-153 stands: make the pane an overlay at small widths rather than hiding it, so Join is reachable at the minimum size.
 - Only the server list views scroll their table. Recent, Mods, Settings, Diagnostics and Friends fit the viewport (`.content.padded` is `overflow: hidden`); when the window is smaller than their content, a table or a column scrolls on its own, never the page (D-094).
 
 ## 2. Server table
@@ -34,10 +34,13 @@ Goal: the fastest way from "open launcher" to "in game", in a dark, quiet, infor
 |---|---|
 | Flag + name | country flag (from offline GeoIP, Q5), server name, lock icon if password, shield if BattlEye, "1PP" pill for `no3rd`, DLC pill |
 | Map | short map name with colour dot per terrain |
-| Players | **Verified** head-count from A2S_PLAYER for every row on screen (`players/max`, `+queue` from `lqs`; bar behind the text). Until verified, show the INFO number dimmed with a "reported" tooltip; when INFO exceeds the verified count by more than 2, show a warning glyph "inflated player count". More than half of community servers spoof INFO (D-038) |
-| Time | in-game clock with sun/moon glyph; tooltip shows `etm`/`entm` acceleration |
+| Mods | number of mods from the scanned list, blank when the server has not been scanned (D-146) |
+| Players | **Verified** head-count from A2S_PLAYER for every row on screen (`players/max`, `+queue` from `lqs`). The fill bars specified here were removed in v0.1.3 (D-069): at 36 px they read as noise behind the numbers. An unverified count is dimmed and marked "?" (D-160); an untrusted one gets a warning glyph. More than half of community servers spoof INFO (D-038) |
 | Ping | numeric with 3-band colour (green < 60, amber < 120, red) |
-| Actions | favourite star, join button on hover |
+| Time | in-game clock with sun/moon glyph; tooltip shows `etm`/`entm` acceleration |
+| Version | the server's build, amber when it differs from the local client |
+
+The favourite star and the alert bell live in the name cell, not a separate Actions column; there is no per-row join button — Enter or a double-click opens the join dialog.
 
 Row height 36 px, hover highlight, keyboard navigation (↑/↓, Enter = join, F = favourite, / = focus search).
 
@@ -47,7 +50,7 @@ Header: name, map, version (red badge if it differs from the local client), JOIN
 
 ## 4. Filters
 
-Chips above the table: Perspective (1PP/3PP), Map, Not full, Not empty, Has queue, No password, BattlEye only, Modded/Vanilla, Day only, Time acceleration, Max ping, Mods (multi-select from the union of seen mods), Version = mine. All filters persist.
+Chips above the table: Perspective (1PP/3PP), Map, Country (D-073), Not full, Not empty, Has queue, No password, BattlEye only, Modded/Vanilla, Day only, Max ping, Mod (one, chosen from the union of seen mods, D-080), Version = mine, Friends (D-128) and Hide inflated. All filters persist. Two specified here were never built: a time-acceleration filter, and multi-select on mods — one mod answers "which servers run this", which is the question people actually ask.
 
 ## 5. Visual system
 

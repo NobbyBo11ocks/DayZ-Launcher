@@ -8,11 +8,10 @@
   import ServerTable from "./ServerTable.svelte";
   import { servers } from "./state/servers.svelte";
   // Every command through the logging wrapper: a failure is recorded with its
-  // command name before it is rethrown (D-158/D-160).
+  // command name before it is rethrown (D-158).
   import { invokeLogged as invoke } from "./log";
 
   /** Per mount; the backend keeps only the first mark it ever receives. */
-  let firstPaintMarked = false;
 
   let filterBar = $state<FilterBar | null>(null);
   let direct = $state("");
@@ -40,12 +39,6 @@
 
   // The store is started once by App.svelte and never stopped (D-084).
 
-  // Start-up timing for Diagnostics (D-078): the first frame that shows rows.
-  $effect(() => {
-    if (firstPaintMarked || servers.list.length === 0) return;
-    firstPaintMarked = true;
-    requestAnimationFrame(() => void invoke("perf_first_paint").catch(() => {}));
-  });
 
   function onKey(e: KeyboardEvent) {
     const target = e.target as HTMLElement | null;
@@ -65,6 +58,7 @@
     const d = servers.done;
     const v = servers.verifySummary;
     const parts: string[] = [];
+    void servers.rowsTick;
     parts.push(`${fmt.format(servers.list.length)} of ${fmt.format(servers.rows.size)} shown`);
     if (s?.refreshing) parts.push("refreshing from Steam…");
     else if (servers.dzsaLoading) parts.push("downloading the DZSA list…");
@@ -112,6 +106,13 @@
 
     <div class="statusline">
       <span class="status">{status}</span>
+      <!-- The scan runs itself after a refresh, but until now there was no way to ask
+           for it: a mod filter with unscanned servers was a dead end (D-160). -->
+      {#if servers.unscannedModded > 0 && !servers.modScanning}
+        <button class="link" onclick={() => void servers.scanMods(false)} title="Read the mod list of every populated modded server that has not been scanned">
+          Scan {fmt.format(servers.unscannedModded)} mod list{servers.unscannedModded === 1 ? "" : "s"}
+        </button>
+      {/if}
       {#if servers.steam && !servers.steam.initialized}
         <span class="warn" title={servers.steam.error ?? ""}>Steam is not running; the launcher connects as soon as it starts.</span>
         <button class="link" onclick={() => servers.loadDzsa()} disabled={servers.dzsaLoading} title="Download the DZSA Launcher's public server list (about 24 MB) instead">
@@ -136,6 +137,11 @@
       onFavourite={(id) => servers.toggleFavourite(id)}
       friendsOn={servers.friendsOn}
       modsByServer={servers.modsByServer}
+      empty={servers.rowsTick >= 0 && servers.rows.size === 0
+        ? servers.steam?.initialized
+          ? "No servers yet. Refresh asks Steam for the list; it takes about forty seconds."
+          : "No servers yet, and Steam has not answered. Start Steam, or load the DZSA list above."
+        : "No server matches these filters. Clear the search, or widen the filters above."}
     />
     {#if servers.selected}
       <DetailsPane row={servers.selected} localVersion={servers.localVersion} />
@@ -144,6 +150,8 @@
 </div>
 
 <style>
+  .link { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; }
+  .link:hover { filter: brightness(1.15); }
   .servers { display: flex; flex-direction: column; height: 100%; min-height: 0; }
   .top { display: flex; flex-direction: column; gap: 6px; padding: 8px 16px 6px; border-bottom: 1px solid var(--border); background: var(--bg-elev); }
   /* The filter block wraps inside itself; the buttons at the right stay on the first line. */
@@ -152,8 +160,6 @@
   .actions { display: flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
 
   .btn { all: unset; cursor: pointer; box-sizing: border-box; height: 28px; padding: 0 14px; display: inline-flex; align-items: center; border-radius: var(--radius); background: var(--accent); color: var(--accent-fg); font-weight: 600; font-size: 12.5px; white-space: nowrap; }
-  .btn:disabled { opacity: 0.5; cursor: default; }
-  .btn:focus-visible { outline: 2px solid var(--fg); }
 
   .iconbtn { all: unset; cursor: pointer; box-sizing: border-box; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg-muted); }
   .iconbtn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; }

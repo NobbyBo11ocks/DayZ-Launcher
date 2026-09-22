@@ -18,17 +18,18 @@ One window, no tray icon by default, no background service. When the window is m
 | `steam/locate.rs` | registry → SteamPath, libraries, game folder, exe version | `winreg`, `keyvalues-parser` |
 | `steam/workshop.rs` | `appworkshop_221100.acf`, `meta.cpp`, junction inventory | `keyvalues-parser`, `junction`, `notify` |
 | `steam/sdk.rs` | Steamworks client thread: server list, UGC subscribe/download/progress | `steamworks` |
-| `a2s/codec.rs` | packet build/parse, split-packet reassembly, challenge | `bytes` |
-| `a2s/dayz_rules.rs` | fragment join + unescape + payload decode (spec in [03](03-server-discovery-and-a2s.md)) | – |
-| `a2s/client.rs` | bounded-concurrency UDP fan-out, timeouts, retries, RTT | `tokio` |
-| `browser/` | server store, refresh scheduler, filters, cache | `rusqlite` (bundled, WAL) |
-| `launch/` | `-mod=` builder, junction creation, `DayZ_BE.exe` spawn, exit watch | `std::process` |
-| `commands.rs` / `events.rs` | Tauri IPC surface (typed, camelCase) | `tauri`, `serde` |
-| `settings.rs` | JSON settings in `%APPDATA%\<app>\settings.json` | `serde_json` |
+| `a2s/{reader,packet}.rs` | packet build/parse, split-packet reassembly, challenge | – |
+| `a2s/{info,rules,players,tags}.rs` | INFO, DayZ's mod payload in RULES, PLAYER, keyword tags (spec in [03](03-server-discovery-and-a2s.md)) | – |
+| `a2s/client.rs` | bounded-concurrency UDP fan-out, pacing, timeouts, retries, RTT | `tokio` |
+| `browser/{model,cache,verify,dzsa}.rs` | server row, SQLite cache, trust rules R2–R5, DZSA fallback list | `rusqlite` (bundled, WAL) |
+| `launch/{args,mods,process}.rs` | `-mod=` builder, junction creation, `DayZ_BE.exe` spawn, exit watch | `std::process` |
+| `commands.rs` | Tauri IPC surface (typed, camelCase); events are emitted from `lib.rs` | `tauri`, `serde` |
+| `settings.rs` | JSON settings in `%APPDATA%\<app>\settings.json`, written temp + rename | `serde_json` |
+| `news.rs`, `geoip.rs`, `proc.rs`, `log.rs`, `http.rs`, `error.rs` | Steam news and thumbnails, offline IP→country, priority and elevation, the app's own log, capped HTTP bodies, the error type | `reqwest`, `image`, `windows` |
 
 ## 3. Data flow
 
-1. Startup: read cache from SQLite → emit `servers:snapshot` → UI renders in < 100 ms.
+1. Startup: the browser calls `servers_cached` → UI renders in < 100 ms. (There is no `servers:snapshot` event; the emitted names are `servers:batch`, `servers:done`, `servers:verified`, `servers:verify-done`, `servers:mods*`, `steam:status` and `launch:*`.)
 2. Steam thread: `internet_server_list(221100)` streams `GameServerItem`s → batch every 100 ms → `servers:batch` event.
 3. A2S worker: INFO for every listed server (ping + live players/keywords) with concurrency 256, 2 s timeout, 1 retry; results coalesced to the UI every 100 ms.
 4. RULES on demand: selected row, favourites, filters that need mods, join.
@@ -37,7 +38,7 @@ One window, no tray icon by default, no background service. When the window is m
 ## 4. IPC rules
 
 - Commands are request/response; anything that streams uses events with **batched arrays**, never one event per server.
-- Server row payload: `{ id:"ip:qport", name, map, players, max, queue, ping, time, tags:[…], ver, pw, be, fpp, dlc }`. Mods only travel on demand.
+- Server row payload: the camelCase form of `browser::ServerRow` — `{ id:"ip:qport", ip, gamePort, queryPort, name, map, description, players, maxPlayers, password, serverVersion, version, pingMs, tags, verifiedPlayers?, steamEmpty?, verifiedAt?, verdict?, country? }`. Fields nothing renders are `skip_serializing` and absent options are omitted, which took a 19 000-row cold start from 15.05 MB to ~10.4 MB (D-164). Mods only travel on demand.
 - Never send more than ~200 KB in one event; the WebView2 IPC bridge serialises to string.
 
 ## 5. Frontend state (Svelte 5 runes)
@@ -83,24 +84,24 @@ Apply whenever a file of that type is created or patched; note deviations in [09
 ### CSS
 - Design tokens as CSS custom properties on `:root`; themes switch by `[data-theme]`.
 - System font stack (`"Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif`): no web fonts shipped.
-- `content-visibility: auto` on off-screen panels; `prefers-reduced-motion` respected; transitions ≤ 150 ms.
-- No CSS framework; **gzip is the binding budget: < 8 KB** (7.7 kB at v0.1.19). The raw figure is now a guide rather than a gate: 43.8 kB at v0.1.19 against the old 40 kB line (31.6 kB at v0.1.6, D-094; 30 kB before that). Raw growth comes from Svelte's per-component scoped styles across eleven views, which is the chosen architecture; deduplicating every identical rule block into globals was measured at 4.7 kB recovered (the largest single items: `:focus-visible` outlines 15×, the accent button 3×, `:disabled` 8×), so it is the lever to pull if the gzip budget is ever threatened, not a reason to refactor eleven components now (D-136).
+- `prefers-reduced-motion` respected; transitions ≤ 150 ms. `content-visibility: auto` is *not* used: the only long list is the virtualised table, which never puts off-screen rows in the DOM at all, and every other view is sized to fit without scrolling (D-094).
+- No CSS framework; **gzip budget: < 10 KB** (8.4 kB at v0.1.23, after the Diagnostics page became the much smaller Logs page, D-168), raised from 8 kB with the reason recorded here. v0.1.19 was 7.7 kB across five views; the app now has nine, a mod manager, a video player and a log panel. The dedup lever described at v0.1.19 was pulled in v0.1.23 — the shared button base moved to `app.css` — and it recovered 1.3 kB raw but only **0.07 kB gzip**, because gzip already folds repeated rule blocks. The conclusion is that per-component scoped CSS costs almost nothing over the wire and the raw figure (48.3 kB at v0.1.23) is not worth optimising; the gate that actually matters is cold start to first paint, which is 0.43 s against a 1.0 s budget (D-164).
 
 ### TypeScript / Vite
 - `build.target: "esnext"` (WebView2 is Chromium 153, no polyfills), `minify: "oxc"` (Vite 8 default; esbuild is not bundled, D-020), `sourcemap: false` in release.
 - No runtime dependencies beyond `@tauri-apps/api` and its plugin bindings; check with `npm ls --omit=dev`.
-- Route-level code splitting for Settings/Diagnostics.
+- No route-level code splitting: it was specified at M0 and measured as not worth it at v0.1.23, where the whole app is one 200 kB chunk that parses in a few ms against a 427 ms cold start. Revisit if the bundle passes ~400 kB.
 
 ### Tauri (`tauri.conf.json`, `capabilities/*.json`)
-- `app.withGlobalTauri: false`; strict CSP (`default-src 'self'`); only the plugins used, each with the narrowest permission set.
+- `app.withGlobalTauri: false`; CSP is `default-src 'self'` plus exactly three third-party allowances — `img-src https://i.ytimg.com` and `frame-src https://www.youtube-nocookie.com` for the home page's video previews and player (D-150), and `connect-src ipc:` for the bridge — with `base-uri`, `form-action` and `frame-ancestors` set explicitly because they do not inherit (D-163). Only the plugins used, each with the narrowest permission set.
 - `bundle.targets: ["nsis"]`, `windows.webviewInstallMode: { type: "downloadBootstrapper" }`, `nsis.installMode: "currentUser"`.
 - Updater with a signing key pair; the public key committed, the private key never.
 - Resources: `steam_api64.dll` only.
 
 ### Assets
-- SVG icons in one sprite, optimised with SVGO; raster only for map thumbnails (WebP, ≤ 40 KB each); app icon via `tauri icon`.
+- Icons are inline SVG in the component that uses them plus Unicode glyphs in the sidebar; the sprite specified at M0 was never built, and with nine views carrying a handful of icons each it would cost more indirection than bytes. The app icon is drawn and rasterised by `tools/make_icon.js` (D-156), not `tauri icon`. Raster assets: the flag sprite only.
 
 ## 8. Security and privacy
-- No telemetry, no accounts, no remote code. Outbound traffic: Steam (Steamworks), UDP A2S to game servers, optional DZSA/BattleMetrics/news HTTP that the user can switch off.
+- No telemetry and no accounts. Outbound traffic: Steam (Steamworks), UDP A2S to game servers, Steam's news feed and image CDN, GitHub for updates, the DZSA list when the user asks for it, and YouTube for the home page's preview images and its embedded player. **The player is third-party remote code**, sandboxed and created only while a video is open (D-150/D-163); it is the one exception to "no remote code", and there is no setting to switch the news page's network use off — if that matters, it is the next thing to add.
 - Update artifacts are signature-checked by the updater plugin.
-- Never write outside `%APPDATA%\<app>` except the `!Workshop` junctions in the game folder.
+- Never write outside the app's own folders except the `!Workshop` junctions in the game folder. Those folders are `%APPDATA%\<app>` (`settings.json`) and `%LOCALAPPDATA%\<app>` (`cache.db`, `logs/`, `news-thumbs/`, exported diagnostics).

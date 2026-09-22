@@ -50,19 +50,7 @@ pub fn app_info() -> AppInfo {
     }
 }
 
-/// The UI reports its first frame with server rows (D-078); only the first call counts.
-#[tauri::command]
-pub fn perf_first_paint() {
-    crate::perf::mark_first_paint();
-}
 
-/// Memory and CPU of the host and its WebView2 processes, plus start-up timing (D-078).
-#[tauri::command]
-pub async fn perf_sample() -> AppResult<crate::perf::PerfSample> {
-    tauri::async_runtime::spawn_blocking(crate::perf::sample)
-        .await
-        .map_err(|e| AppError::Internal(format!("perf task failed: {e}")))
-}
 
 /// Full Steam / DayZ / Workshop inventory (M1).
 #[tauri::command]
@@ -86,60 +74,6 @@ pub async fn diagnostics() -> AppResult<Diagnostics> {
     result
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DiagnosticsExport {
-    pub path: String,
-    pub bytes: usize,
-}
-
-/// Writes a support report (app info, Steam status, settings, full diagnostics)
-/// as JSON into the app's local data folder and returns its path.
-#[tauri::command]
-pub async fn diagnostics_export(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> AppResult<DiagnosticsExport> {
-    let dir = app
-        .path()
-        .app_local_data_dir()
-        .map_err(|e| AppError::Internal(format!("no local data dir: {e}")))?;
-    let steam = state.steam.status();
-    let settings = state.settings.get();
-    let (last_refresh, cache_stats) = {
-        let c = Arc::clone(&state.cache);
-        tauri::async_runtime::spawn_blocking(move || {
-            let c = c.lock().ok()?;
-            Some((c.get_meta("last_refresh").ok().flatten(), c.stats().ok()))
-        })
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or((None, None))
-    };
-    let diag = tauri::async_runtime::spawn_blocking(diagnostics::collect)
-        .await
-        .map_err(|e| AppError::Internal(format!("diagnostics task failed: {e}")))??;
-    let report = serde_json::json!({
-        "app": { "name": env!("CARGO_PKG_NAME"), "version": env!("CARGO_PKG_VERSION"), "tauri": tauri::VERSION, "os": std::env::consts::OS },
-        "generatedAt": ServerRow::now_unix(),
-        "steam": steam,
-        "settings": settings,
-        "lastRefresh": last_refresh,
-        "cache": cache_stats,
-        "perf": crate::perf::sample(),
-        "diagnostics": diag,
-    });
-    let json =
-        serde_json::to_vec_pretty(&report).map_err(|e| AppError::Internal(format!("json: {e}")))?;
-    let path = dir.join(format!("diagnostics-{}.json", ServerRow::now_unix()));
-    std::fs::create_dir_all(&dir).map_err(|e| AppError::io(&dir, e))?;
-    std::fs::write(&path, &json).map_err(|e| AppError::io(&path, e))?;
-    Ok(DiagnosticsExport {
-        path: path.to_string_lossy().into_owned(),
-        bytes: json.len(),
-    })
-}
 
 /// Installed DayZ version in A2S form (`1.29.163709`), for the "version = mine" filter.
 #[tauri::command]
@@ -171,6 +105,10 @@ pub fn settings_get(state: State<'_, AppState>) -> Settings {
 #[tauri::command]
 pub fn settings_set(state: State<'_, AppState>, settings: Settings) -> AppResult<()> {
     let idle = settings.steam_idle_timeout();
+    // Applied before the write, so turning logging off cannot be the last thing the
+    // log records (D-169).
+    crate::log::set_enabled(settings.logging);
+    crate::log::set_muted(settings.log_muted.clone());
     state
         .settings
         .set_launch(settings)
@@ -421,19 +359,20 @@ pub async fn run_verification(
         summary.offline,
         summary.elapsed_ms
     );
-    crate::log_info!(
-        "verify",
-        "{}: {} checked, {} verified, {} inflated, {} unverifiable, {} synthetic, {} offline in {} ms",
-        if announce { "pass" } else { "on demand" },
-        summary.total,
-        summary.verified,
-        summary.inflated,
-        summary.unverifiable,
-        summary.synthetic,
-        summary.offline,
-        summary.elapsed_ms
-    );
+    // Only the full pass: the on-demand check runs every time the visible rows
+    // change, which would put a line in the log for every scroll (D-168).
     if announce {
+        crate::log_info!(
+            "verify",
+            "pass: {} checked, {} verified, {} inflated, {} unverifiable, {} synthetic, {} offline in {} ms",
+            summary.total,
+            summary.verified,
+            summary.inflated,
+            summary.unverifiable,
+            summary.synthetic,
+            summary.offline,
+            summary.elapsed_ms
+        );
         let _ = app.emit("servers:verify-done", &summary);
     }
     summary
@@ -541,35 +480,13 @@ pub async fn run_mod_scan(
     let targets: Vec<(String, SocketAddr)> = {
         let c = Arc::clone(&cache);
         tauri::async_runtime::spawn_blocking(move || {
-            let c = c.lock().ok()?;
-            let scanned = c.mods_scanned().ok()?;
-            let rows = c.load_all().ok()?;
-            Some(
-                rows.iter()
-                    // Modded servers with real players: a verified head-count, or Steam's
-                    // own `hasplayers` partition when not verified yet. The fake servers
-                    // that only claim players in INFO (rule R0, ~20 000 rows) are skipped;
-                    // scanning them would be a 23 000-flow sweep for nothing (D-037).
-                    .filter(|r| {
-                        r.tags.modded
-                            && !r.inflated()
-                            && r.verified_players
-                                .map_or(r.steam_empty == Some(false) && r.players > 0, |v| v > 0)
-                    })
-                    .filter(|r| {
-                        force
-                            || scanned
-                                .get(&r.id)
-                                .is_none_or(|at| now - at > MOD_SCAN_MAX_AGE_SECS)
-                    })
-                    .filter_map(|r| {
-                        Some((
-                            r.id.clone(),
-                            format!("{}:{}", r.ip, r.query_port).parse().ok()?,
-                        ))
-                    })
-                    .collect::<Vec<_>>(),
-            )
+            // Modded servers with real players, not scanned recently. The fake ones
+            // that only claim players in INFO (rule R0, ~20 000 rows) are skipped;
+            // scanning them would be a 23 000-flow sweep for nothing (D-037).
+            c.lock()
+                .ok()?
+                .scan_targets(force, now, MOD_SCAN_MAX_AGE_SECS)
+                .ok()
         })
         .await
         .ok()
@@ -645,6 +562,15 @@ pub async fn run_mod_scan(
         .await;
     }
     summary.elapsed_ms = t0.elapsed().as_millis() as u64;
+    if summary.total > 0 {
+        crate::log_info!(
+            "mods",
+            "scan: {} server(s) read, {} failed, in {} ms",
+            summary.scanned,
+            summary.failed,
+            summary.elapsed_ms
+        );
+    }
     #[cfg(debug_assertions)]
     eprintln!(
         "[mods] scan done: total={} scanned={} failed={} in {} ms",
@@ -702,15 +628,33 @@ pub async fn mods_unsubscribe(
         .await
         .map_err(|e| AppError::Internal(format!("unsubscribe task failed: {e}")))?
         .map_err(AppError::Internal)?;
-    Ok(results
+    let out: Vec<UnsubscribeResult> = results
         .into_iter()
         .map(|(id, r)| UnsubscribeResult {
             id,
             ok: r.is_ok(),
             error: r.err(),
         })
-        .collect())
+        .collect();
+    let failed: Vec<String> = out
+        .iter()
+        .filter(|r| !r.ok)
+        .map(|r| format!("{} ({})", r.id, r.error.as_deref().unwrap_or("?")))
+        .collect();
+    crate::log_info!(
+        "mods",
+        "unsubscribed {} of {}{}",
+        out.iter().filter(|r| r.ok).count(),
+        out.len(),
+        if failed.is_empty() {
+            String::new()
+        } else {
+            format!("; failed: {}", failed.join(", "))
+        }
+    );
+    Ok(out)
 }
+
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -726,9 +670,9 @@ pub struct JunctionCleanup {
     pub failed: Vec<JunctionFailure>,
 }
 
-/// Removes `!Workshop` junctions whose target folder is gone (D-093). Only the
-/// confirmed button in Diagnostics calls this: junctions are shared with the official
-/// launcher and are never deleted on the launcher's own initiative.
+/// Removes `!Workshop` junctions whose target folder is gone (D-093, restored to the
+/// Mods page in D-170). Only the confirmed button calls this: junctions are shared
+/// with the official launcher and are never deleted on the launcher's own initiative.
 #[tauri::command]
 pub async fn junctions_remove_dangling() -> AppResult<JunctionCleanup> {
     tauri::async_runtime::spawn_blocking(|| {
@@ -757,12 +701,14 @@ pub async fn junctions_remove_dangling() -> AppResult<JunctionCleanup> {
                 Err(error) => out.failed.push(JunctionFailure { name, error }),
             }
         }
-        #[cfg(debug_assertions)]
-        eprintln!(
-            "[junctions] removed {} dangling, {} failed",
-            out.removed.len(),
-            out.failed.len()
-        );
+        if !out.removed.is_empty() || !out.failed.is_empty() {
+            crate::log_info!(
+                "junctions",
+                "removed {} dangling, {} failed",
+                out.removed.len(),
+                out.failed.len()
+            );
+        }
         Ok(out)
     })
     .await
@@ -852,18 +798,6 @@ pub async fn news_cached(state: State<'_, AppState>) -> AppResult<NewsCached> {
     .map_err(|e| AppError::Internal(format!("news task failed: {e}")))?
 }
 
-/// The signed-in user's Steam avatar for the welcome header (D-100); `None` until
-/// Steam has the image cached.
-#[tauri::command]
-pub async fn steam_avatar(
-    state: State<'_, AppState>,
-) -> AppResult<Option<crate::steam::sdk::Avatar>> {
-    let steam = state.steam.clone_handle();
-    tauri::async_runtime::spawn_blocking(move || steam.avatar())
-        .await
-        .map_err(|e| AppError::Internal(format!("avatar task failed: {e}")))?
-        .map_err(AppError::Internal)
-}
 
 /// A friend's 32×32 Steam avatar for the Friends tab (D-115); `None` until Steam has it.
 #[tauri::command]
@@ -901,7 +835,6 @@ pub fn log_ui(level: String, target: String, message: String) {
     let lvl = match level.as_str() {
         "error" => crate::log::Level::Error,
         "warn" => crate::log::Level::Warn,
-        "debug" => crate::log::Level::Debug,
         _ => crate::log::Level::Info,
     };
     // One entry is one line in launcher.log, so a message carrying newlines could
@@ -916,20 +849,6 @@ pub fn log_ui(level: String, target: String, message: String) {
     crate::log::write(lvl, &target, flatten(&message, 2000));
 }
 
-/// Row counts and file sizes of the cache database (D-115).
-#[tauri::command]
-pub async fn cache_stats(state: State<'_, AppState>) -> AppResult<crate::browser::CacheStats> {
-    let c = Arc::clone(&state.cache);
-    tauri::async_runtime::spawn_blocking(move || {
-        let c = c
-            .lock()
-            .map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
-        c.stats()
-            .map_err(|e| AppError::Internal(format!("cache: {e}")))
-    })
-    .await
-    .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?
-}
 
 /// Steam friends with presence and, for those in DayZ, their server (D-092).
 #[tauri::command]
@@ -1250,6 +1169,24 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
         settings.profile_name.clone()
     };
 
+    crate::log_info!(
+        "join",
+        "plan for {} ({id}): {} mod(s) required, {missing} missing, {updates} to update, {} to download, server {}{}{}",
+        row.name,
+        mods.len(),
+        format!("{:.1} MB", download_bytes as f64 / (1024.0 * 1024.0)),
+        row.version,
+        if version_mismatch {
+            format!(" against local {}", local_version.clone().unwrap_or_default())
+        } else {
+            String::new()
+        },
+        if warnings.is_empty() {
+            String::new()
+        } else {
+            format!("; {} warning(s): {}", warnings.len(), warnings.join(" | "))
+        }
+    );
     Ok(JoinPlan {
         id,
         name: row.name,
@@ -1280,6 +1217,15 @@ fn worker_persona(state: &State<'_, AppState>) -> Option<String> {
 /// completion via `mods:done` (both carry `job`).
 #[tauri::command]
 pub fn mods_sync(state: State<'_, AppState>, job: u64, ids: Vec<u64>) -> AppResult<()> {
+    crate::log_info!(
+        "mods",
+        "download requested for {} item(s): {}",
+        ids.len(),
+        ids.iter()
+            .map(u64::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     state.steam.sync(job, ids).map_err(AppError::Internal)
 }
 
@@ -1406,6 +1352,14 @@ pub async fn launch_game(
             return Err(e);
         }
     };
+    let created: Vec<&str> = links
+        .iter()
+        .filter(|l| l.created)
+        .map(|l| l.name.as_str())
+        .collect();
+    if !created.is_empty() {
+        crate::log_info!("mods", "created {} junction(s): {}", created.len(), created.join(", "));
+    }
     crate::log_info!(
         "launch",
         "started pid {} for {} with {} mod link(s), {} chars of arguments",
@@ -1761,6 +1715,7 @@ pub async fn direct_connect(
             .find(|ip| ip.is_ipv4())
             .ok_or_else(|| AppError::Internal(format!("{host} has no IPv4 address")))?,
     };
+    crate::log_info!("join", "direct connect to {address}");
     // The typed port may be the query port (answers INFO directly) or the game port
     // (then find the sibling query port whose reply advertises exactly that game port).
     let row = match probe_server(&state.a2s, ip, &[port], None).await {
@@ -1892,9 +1847,10 @@ pub async fn import_official_favourites(
         let stored = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
             let mut c = c.lock().map_err(|_| "the cache lock is poisoned".to_string())?;
             c.upsert(&rows).map_err(|e| e.to_string())?;
-            for r in &rows {
-                c.favourite_set(&r.id, true).map_err(|e| e.to_string())?;
-            }
+            // One transaction and one checkpoint for the whole import: per favourite
+            // it measured 111.8 ms for 50 against 6.7 ms this way (D-175).
+            let ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
+            c.favourites_set_many(&ids).map_err(|e| e.to_string())?;
             Ok(())
         })
         .await;

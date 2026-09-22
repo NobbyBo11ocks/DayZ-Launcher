@@ -386,7 +386,6 @@ pub fn prune_thumbnails(dir: &std::path::Path, keep: &std::collections::HashSet<
 /// pictures and video previews further down a post are found; the gzip reply for
 /// 60 posts is well under 100 KB.
 pub async fn fetch(count: u32) -> Result<Vec<NewsItem>, String> {
-    let started = std::time::Instant::now();
     let client = reqwest::Client::builder()
         .user_agent(USER_AGENT)
         .timeout(std::time::Duration::from_secs(20))
@@ -411,15 +410,6 @@ pub async fn fetch(count: u32) -> Result<Vec<NewsItem>, String> {
         serde_json::from_slice(&body).map_err(|e| format!("news reply unreadable: {e}"))?;
     let mut items: Vec<NewsItem> = doc.appnews.newsitems.into_iter().map(convert).collect();
     items.sort_by_key(|i| std::cmp::Reverse(i.date));
-    crate::log_info!(
-        "news",
-        "fetched {} post(s) in {} ms ({} with a picture, {} with a video, {} KB)",
-        items.len(),
-        started.elapsed().as_millis(),
-        items.iter().filter(|i| i.image.is_some()).count(),
-        items.iter().filter(|i| i.video.is_some()).count(),
-        body.len() / 1024
-    );
     Ok(items)
 }
 
@@ -516,12 +506,12 @@ mod tests {
         })
         .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
         .unwrap();
-        let jpeg = shrink(&png).unwrap();
+        let jpeg = shrink(&png, THUMB_MAX).unwrap();
         let back = image::load_from_memory(&jpeg).unwrap();
         assert_eq!((back.width(), back.height()), (640, 360));
         // Far below the 640×360×3 raw size, and nothing like the 33 MB a 4K decode costs.
         assert!(jpeg.len() < 640 * 360 * 3 / 4, "{} bytes", jpeg.len());
-        assert!(shrink(b"not a picture").is_err());
+        assert!(shrink(b"not a picture", THUMB_MAX).is_err());
     }
 
     #[test]

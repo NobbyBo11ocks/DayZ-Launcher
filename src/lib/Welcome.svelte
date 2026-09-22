@@ -43,7 +43,4 @@
   .small { font-size: 11.5px; }
   kbd { padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-row); font-size: 11px; }
   .btn { all: unset; cursor: pointer; padding: 7px 16px; border-radius: var(--radius); background: var(--accent); color: var(--accent-fg); font-weight: 600; }
-  .btn.secondary { background: var(--bg-row); color: var(--fg); border: 1px solid var(--border); font-weight: 500; }
-  .btn:disabled { opacity: 0.5; cursor: default; }
-  .btn:focus-visible { outline: 2px solid var(--fg); }
 </style>

@@ -4,6 +4,7 @@
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { uiPrefs } from "./uiprefs.svelte";
+import { describe, logError, logInfo, logWarn } from "../log";
 
 const LAST_CHECK_KEY = "dayz-launcher.update-check";
 const AUTO_CHECK_INTERVAL_MS = 24 * 3600 * 1000;
@@ -45,12 +46,14 @@ class Updates {
         this.version = u.version;
         this.notes = u.body ?? null;
         this.state = "available";
+        logInfo("update", `version ${u.version} is available`);
       } else {
         this.state = "none";
       }
     } catch (e) {
       this.error = silent ? null : String(e);
       this.state = silent ? "idle" : "error";
+      logWarn("update", `check failed: ${describe(e)}`);
     }
   }
 
@@ -58,6 +61,7 @@ class Updates {
     const u = this.#update;
     if (!u) return;
     this.state = "downloading";
+    logInfo("update", `installing ${u.version}`);
     let total = 0;
     let got = 0;
     try {

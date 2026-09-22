@@ -65,7 +65,6 @@ CREATE TABLE IF NOT EXISTS servers (
   verified_at INTEGER,
   verdict TEXT
 );
-CREATE INDEX IF NOT EXISTS servers_last_seen ON servers(last_seen);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS server_mods (
   server_id TEXT NOT NULL,
@@ -73,7 +72,10 @@ CREATE TABLE IF NOT EXISTS server_mods (
   name TEXT NOT NULL,
   PRIMARY KEY (server_id, mod_id)
 );
-CREATE INDEX IF NOT EXISTS server_mods_mod ON server_mods(mod_id);
+-- Covering: the catalogue query is `SELECT mod_id, MAX(name), COUNT(*) … GROUP BY
+-- mod_id`, so without `name` in the index every one of ~127 000 entries falls back
+-- to a table lookup — measured 247 ms against 17 ms (D-175).
+CREATE INDEX IF NOT EXISTS server_mods_mod ON server_mods(mod_id, name);
 CREATE TABLE IF NOT EXISTS server_mods_at (
   server_id TEXT PRIMARY KEY,
   scanned_at INTEGER NOT NULL,
@@ -83,6 +85,10 @@ CREATE TABLE IF NOT EXISTS server_mods_at (
 
 const SELECT_COLUMNS: &str = "id, ip, game_port, query_port, name, map, description, players, max_players, bots, password, secure,
                     server_version, ping_ms, keywords, steam_id, last_seen, verified_players, steam_empty, verified_at, verdict";
+
+/// Built once: `format!` per call measured a third of the whole lookup (D-175).
+static GET_SQL: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(|| format!("SELECT {SELECT_COLUMNS} FROM servers WHERE id = ?1"));
 
 pub struct Cache {
     conn: Connection,
@@ -124,19 +130,6 @@ pub struct HistoryEntry {
     pub mods: usize,
 }
 
-/// Row counts and file sizes of the cache (D-115).
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CacheStats {
-    pub servers: i64,
-    pub favourites: i64,
-    pub history: i64,
-    pub population: i64,
-    pub mod_lists: i64,
-    pub db_bytes: u64,
-    pub wal_bytes: u64,
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PopulationSample {
@@ -174,7 +167,13 @@ impl Cache {
             )
             .optional()?;
         if version.as_deref() != Some(SCHEMA_VERSION) {
-            conn.execute_batch("DROP TABLE IF EXISTS servers;")?;
+            // The mod tables key off server ids, so they go with it: nothing else
+            // sweeps orphans any more (D-175).
+            conn.execute_batch(
+                "DROP TABLE IF EXISTS servers;
+                 DROP TABLE IF EXISTS server_mods;
+                 DROP TABLE IF EXISTS server_mods_at;",
+            )?;
             conn.execute_batch(SCHEMA)?;
             conn.execute(
                 "INSERT INTO meta (key, value) VALUES ('schema_version', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -183,6 +182,14 @@ impl Cache {
         } else {
             conn.execute_batch(SCHEMA)?;
         }
+        // Index changes on a database that already exists (D-175): the old
+        // `server_mods_mod` did not cover `name`, and `servers_last_seen` cost ~20 ms
+        // per refresh to save 0.8 ms on the one query that used it.
+        conn.execute_batch(
+            "DROP INDEX IF EXISTS servers_last_seen;
+             DROP INDEX IF EXISTS server_mods_mod;
+             CREATE INDEX IF NOT EXISTS server_mods_mod ON server_mods(mod_id, name);",
+        )?;
         conn.execute_batch(USER_SCHEMA)?;
         // Additive migration of a user table (D-083): the alert flag on favourites.
         let has_alert = conn
@@ -227,6 +234,27 @@ impl Cache {
             Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? as u16, r.get(3)?))
         })?;
         rows.collect()
+    }
+
+    /// Marks many servers favourite in one transaction with one checkpoint. Per
+    /// favourite, `favourite_set` costs a transaction *and* a WAL checkpoint: 50 of
+    /// them measured 111.8 ms against 6.7 ms this way (D-175).
+    pub fn favourites_set_many(&mut self, ids: &[String]) -> rusqlite::Result<()> {
+        {
+            let tx = self.conn.transaction()?;
+            {
+                let mut stmt = tx.prepare_cached(
+                    "INSERT INTO favourites (id, added_at) VALUES (?1, ?2) ON CONFLICT(id) DO NOTHING",
+                )?;
+                let now = ServerRow::now_unix();
+                for id in ids {
+                    stmt.execute(params![id, now])?;
+                }
+            }
+            tx.commit()?;
+        }
+        self.checkpoint();
+        Ok(())
     }
 
     pub fn favourite_set(&self, id: &str, on: bool) -> rusqlite::Result<()> {
@@ -274,29 +302,6 @@ impl Cache {
         if let Err(e) = self.conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);") {
             crate::log_warn!("cache", "checkpoint failed: {e}");
         }
-    }
-
-    /// Row counts and file sizes for Diagnostics (D-115): a quick way to see whether
-    /// user data went missing (Q22) without opening the database by hand.
-    pub fn stats(&self) -> rusqlite::Result<CacheStats> {
-        let count = |sql: &str| self.conn.query_row(sql, [], |r| r.get::<_, i64>(0));
-        let path = self.conn.path().map(std::path::PathBuf::from);
-        let size = |suffix: &str| {
-            path.as_ref().map_or(0, |p| {
-                let mut s = p.as_os_str().to_os_string();
-                s.push(suffix);
-                std::fs::metadata(s).map(|m| m.len()).unwrap_or(0)
-            })
-        };
-        Ok(CacheStats {
-            servers: count("SELECT COUNT(*) FROM servers")?,
-            favourites: count("SELECT COUNT(*) FROM favourites")?,
-            history: count("SELECT COUNT(*) FROM history")?,
-            population: count("SELECT COUNT(*) FROM population")?,
-            mod_lists: count("SELECT COUNT(*) FROM server_mods_at")?,
-            db_bytes: size(""),
-            wal_bytes: size("-wal"),
-        })
     }
 
     pub fn history(&self, limit: usize) -> rusqlite::Result<Vec<HistoryEntry>> {
@@ -397,12 +402,64 @@ impl Cache {
         rows.collect()
     }
 
+    /// Addresses a mod scan should query. Building a full `ServerRow` for all ~19 000
+    /// cached servers to keep the 13 % that qualify measured 19 ms and ~7 MB of
+    /// strings that were thrown away immediately (D-175); this reads the eight
+    /// columns the rules actually use and joins the last scan time in one pass.
+    ///
+    /// The rules match the browser exactly: modded, not rule-R0 inflated, with real
+    /// players (a verified head-count, or Steam's own `hasplayers` answer when it has
+    /// not been verified yet), and not scanned inside `max_age_secs`.
+    pub fn scan_targets(
+        &self,
+        force: bool,
+        now: i64,
+        max_age_secs: i64,
+    ) -> rusqlite::Result<Vec<(String, std::net::SocketAddr)>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT s.id, s.ip, s.query_port, s.keywords, s.players, s.verified_players,
+                    s.steam_empty, a.scanned_at
+             FROM servers s LEFT JOIN server_mods_at a ON a.server_id = s.id",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, u16>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, i32>(4)?,
+                r.get::<_, Option<i32>>(5)?,
+                r.get::<_, Option<bool>>(6)?,
+                r.get::<_, Option<i64>>(7)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, ip, port, keywords, players, verified, steam_empty, scanned_at) = row?;
+            if !keywords.split(',').any(|t| t.trim() == "mod") {
+                continue;
+            }
+            if steam_empty == Some(true) && players > 0 {
+                continue; // rule R0: Steam says empty, INFO claims players
+            }
+            if !verified.map_or(steam_empty == Some(false) && players > 0, |v| v > 0) {
+                continue;
+            }
+            if !force && scanned_at.is_some_and(|at| now - at <= max_age_secs) {
+                continue;
+            }
+            let Ok(addr) = ip.parse::<std::net::IpAddr>() else {
+                continue;
+            };
+            out.push((id, std::net::SocketAddr::new(addr, port)));
+        }
+        Ok(out)
+    }
+
     pub fn get(&self, id: &str) -> rusqlite::Result<Option<ServerRow>> {
         // Called up to 120 times per on-demand verification, so the SQL is compiled
         // once rather than per row (D-160).
-        let mut stmt = self
-            .conn
-            .prepare_cached(&format!("SELECT {SELECT_COLUMNS} FROM servers WHERE id = ?1"))?;
+        let mut stmt = self.conn.prepare_cached(GET_SQL.as_str())?;
         stmt.query_row(params![id], Self::row_from).optional()
     }
 
@@ -503,12 +560,16 @@ impl Cache {
              WHERE last_seen < ?1 AND id NOT IN (SELECT id FROM favourites)",
             params![cutoff],
         )?;
-        self.conn.execute_batch(
-            "DELETE FROM server_mods WHERE server_id NOT IN (SELECT id FROM servers);
-             DELETE FROM server_mods_at WHERE server_id NOT IN (SELECT id FROM servers);",
-        )?;
-        // Row loss has been a mystery before (Q22), so every deletion is on the record.
+        // `prune` is the only DELETE on `servers`, so nothing can be orphaned unless
+        // it deleted something — and the sweep measured 23.6 ms over 127 000 mod rows
+        // every completed refresh (D-175). The one other way to orphan them is a
+        // schema bump, which drops `servers`; `migrate` clears the mod tables there.
         if n > 0 {
+            self.conn.execute_batch(
+                "DELETE FROM server_mods WHERE server_id NOT IN (SELECT id FROM servers);
+                 DELETE FROM server_mods_at WHERE server_id NOT IN (SELECT id FROM servers);",
+            )?;
+            // Row loss has been a mystery before (Q22), so every deletion is recorded.
             crate::log_info!("cache", "pruned {n} server(s) unseen since {cutoff}");
         }
         Ok(n)

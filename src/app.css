@@ -166,6 +166,7 @@ button {
   outline-offset: -2px;
 }
 
+
 .content {
   grid-area: main;
   min-height: 0;
@@ -242,6 +243,7 @@ h1 {
     display: none;
   }
 
+
   .rail-item .badge {
     margin-left: 0;
     font-size: 10px;
@@ -257,3 +259,32 @@ h1 {
     animation: none !important;
   }
 }
+
+/* A view caught by the error boundary in App.svelte (D-160). */
+.crashed { margin: auto; padding: 32px; max-width: 46ch; text-align: center; display: grid; gap: 10px; justify-items: center; }
+.crashed-why { color: var(--fg-muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.crashed-retry { cursor: pointer; padding: 6px 14px; border-radius: var(--radius); background: var(--bg-row); border: 1px solid var(--border); color: var(--fg); font: inherit; }
+.crashed-retry:hover { border-color: var(--accent); }
+
+/* Shared button base (D-160). Components override with their own scoped rules,
+   which are more specific because Svelte adds a scoping class to them. */
+.btn {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.btn:hover { filter: brightness(1.08); }
+.btn:disabled { opacity: 0.5; cursor: default; filter: none; }
+.btn:focus-visible { outline: 2px solid var(--fg); }
+.btn.secondary { background: var(--bg-row); color: var(--fg); border: 1px solid var(--border); font-weight: 500; }
+.btn.secondary:hover { border-color: var(--accent); filter: none; }
+.btn.ghost { background: transparent; color: var(--fg-muted); border: 1px solid var(--border); font-weight: 500; }
+.btn.ghost:hover { color: var(--fg); filter: none; }
+.btn.danger { border-color: var(--danger); color: var(--danger); }
+.btn.small { padding: 4px 10px; font-size: 12px; }

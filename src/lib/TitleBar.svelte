@@ -6,7 +6,12 @@
   // in DayZ; D-103, D-105, D-106) and an update notice when one is pending.
   import { getCurrentWindow } from "@tauri-apps/api/window";
 
-  let { servers = null, friends = null, notice = "" }: { servers?: number | null; friends?: number | null; notice?: string } = $props();
+  let {
+    servers = null,
+    friends = null,
+    notice = "",
+    greeting = "",
+  }: { servers?: number | null; friends?: number | null; notice?: string; greeting?: string } = $props();
   const win = getCurrentWindow();
   const fmt = new Intl.NumberFormat();
 </script>
@@ -26,6 +31,7 @@
   {/if}
   {#if notice}<span class="notice" data-tauri-drag-region>{notice}</span>{/if}
   <span class="spacer" data-tauri-drag-region></span>
+  {#if greeting}<span class="greeting" data-tauri-drag-region>{greeting}</span>{/if}
   <div class="controls">
     <button class="wbtn" aria-label="Minimise" onclick={() => win.minimize()}>
       <svg viewBox="0 0 10 10" width="10" height="10"><path d="M0 5h10" stroke="currentColor" stroke-width="1" /></svg>
@@ -49,6 +55,8 @@
   .stat + .stat { margin-left: 16px; }
   .icon { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; flex: none; }
   .notice { font-size: 12px; color: var(--accent); white-space: nowrap; }
+  /* The welcome line lives here now (D-173), in the accent like the counts beside it. */
+  .greeting { min-width: 0; margin-right: 12px; font-size: 12px; font-weight: 500; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .spacer { flex: 1; height: 100%; }
   .controls { display: flex; height: 100%; }
   .wbtn { all: unset; width: 40px; height: 100%; display: inline-flex; align-items: center; justify-content: center; color: var(--fg-muted); cursor: default; }

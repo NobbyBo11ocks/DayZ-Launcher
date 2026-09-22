@@ -296,6 +296,8 @@ export type UiPrefs = {
   lastUpdateCheckMs: number;
   /** Unix seconds of the newest news post the user has seen (D-099). */
   newsSeen: number;
+  /** Show the News page, and fetch the feed behind it, at all (D-174). */
+  news: boolean;
 };
 
 /** One DayZ news post from Steam's feed (D-099). */
@@ -319,9 +321,6 @@ export type NewsCached = { items: NewsItem[]; fetchedAt: number | null };
 /** A Steam avatar as raw RGBA (D-100, D-115); drawn on a canvas. */
 export type Avatar = { width: number; height: number; rgba: number[] };
 
-/** Row counts and file sizes of the cache database (D-115). */
-export type CacheStats = { servers: number; favourites: number; history: number; population: number; modLists: number; dbBytes: number; walBytes: number };
-
 /** A saved set of launch options (D-088). */
 export type LaunchProfile = {
   name: string;
@@ -342,6 +341,10 @@ export type Settings = {
   launchProfiles: LaunchProfile[];
   /** Minutes of inactivity after which the Steam session is released; 0 = never (D-077). */
   steamIdleMinutes: number;
+  /** Record what the launcher does to logs/launcher.log and the Logs page (D-169). */
+  logging: boolean;
+  /** Log areas switched off; entries are dropped at the source (D-172). */
+  logMuted: string[];
   /** Read-only for `settings_set`; written through `ui_prefs_set`. */
   ui: UiPrefs;
 };
@@ -362,22 +365,11 @@ export type ServerMods = { id: string; mods: number[] };
 export type ModsIndex = { catalog: ModCatalogEntry[]; index: ServerMods[] };
 export type ModScanSummary = { total: number; scanned: number; failed: number; elapsedMs: number };
 
-/** Self-measurement from the host (D-078); bytes are private (commit) sizes. */
-export type PerfSample = {
-  uptimeMs: number;
-  firstPaintMs: number | null;
-  hostPrivateBytes: number;
-  hostCpuMs: number;
-  webviewPrivateBytes: number;
-  webviewProcesses: number;
-  totalPrivateBytes: number;
-};
+/** Dangling `!Workshop` junctions removed on request from the Mods page (D-093, D-170). */
+export type JunctionCleanup = { removed: string[]; failed: { name: string; error: string }[] };
 
 /** One Workshop item unsubscribed through Steam (D-075). */
 export type UnsubscribeResult = { id: number; ok: boolean; error: string | null };
-
-/** Dangling `!Workshop` junctions removed on request from Diagnostics (D-093). */
-export type JunctionCleanup = { removed: string[]; failed: { name: string; error: string }[] };
 
 /** Where a friend is playing, as Steam reports it (D-092). */
 export type FriendServer = { ip: string; gamePort: number; queryPort: number };

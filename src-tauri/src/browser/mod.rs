@@ -6,6 +6,6 @@ pub mod model;
 pub mod verify;
 
 pub use cache::{
-    Cache, CacheStats, HistoryEntry, ModCatalogEntry, ModsIndex, PopulationSample, ServerMods,
+    Cache, HistoryEntry, ModCatalogEntry, ModsIndex, PopulationSample, ServerMods,
 };
 pub use model::ServerRow;

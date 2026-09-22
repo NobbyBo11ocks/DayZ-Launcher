@@ -5,7 +5,7 @@
   // created on click and destroyed on close (D-150), so an idle home page still has
   // no embedded player and the memory budget holds.
   // Every command through the logging wrapper: a failure is recorded with its
-  // command name before it is rethrown (D-158/D-160).
+  // command name before it is rethrown (D-158).
   import { invokeLogged as invoke } from "./log";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { SvelteSet } from "svelte/reactivity";
@@ -21,14 +21,6 @@
   $effect(() => {
     if (news.items.length) news.markSeen();
   });
-  $effect(() => {
-    void news.loadAvatar();
-  });
-  // Start-up timing for Diagnostics (D-078): the home page is the first frame now
-  // (D-101); the backend keeps only the first mark it receives.
-  $effect(() => {
-    requestAnimationFrame(() => void invoke("perf_first_paint").catch(() => {}));
-  });
 
   const VIEWS: { id: NewsView; label: string; title: string }[] = [
     { id: "updates", label: "Updates", title: "Game updates, hotfixes, experimental and stable releases" },
@@ -36,13 +28,8 @@
     { id: "press", label: "With press", title: "Also the press feeds Steam attaches to DayZ" },
   ];
 
-  const hour = new Date().getHours();
-  const greeting = hour < 5 ? "Still up" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
-  const name = $derived(servers.steam?.persona ?? "Survivor");
   const featured = $derived(news.list[0] ?? null);
   const rest = $derived(news.list.slice(1, 25));
-  /** Chips only when there is something to say; the counts live in the title bar (D-103). */
-  const showChips = $derived(servers.favourites.size > 0 || updates.state === "available");
 
   const day = (unix: number) => new Date(unix * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
   const isNew = (n: NewsItem) => n.official && n.date > news.visitSeen;
@@ -68,35 +55,9 @@
   function open(url: string) {
     void openUrl(url).catch((e) => (news.error = String(e)));
   }
-  function browse() {
-    servers.navigate = "servers";
-  }
 </script>
 
 <section class="home">
-  <header class="hero">
-    <div class="who">
-      {#if news.avatar}
-        <img class="avatar" src={news.avatar} alt="" width="56" height="56" />
-      {:else}
-        <div class="avatar placeholder" aria-hidden="true">{name.slice(0, 1).toUpperCase()}</div>
-      {/if}
-      <div class="text">
-        <h1>{greeting}, {name}</h1>
-        {#if showChips}
-          <p class="chips">
-            {#if servers.favourites.size}<span class="chip">{servers.favourites.size} favourite{servers.favourites.size === 1 ? "" : "s"}</span>{/if}
-            {#if updates.state === "available"}<span class="chip accent">Launcher {updates.version} available in Settings</span>{/if}
-          </p>
-        {/if}
-      </div>
-    </div>
-    <!-- No "Join again" here (D-157): the Recent page is where past joins live. -->
-    <div class="actions">
-      <button class="btn" onclick={browse}>Browse servers</button>
-    </div>
-  </header>
-
   <div class="bar">
     <h2>{news.view === "updates" ? "Latest updates" : "Latest from DayZ"}</h2>
     <div class="seg" role="tablist" aria-label="Which posts to show">
@@ -203,19 +164,8 @@
   .home { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
 
   /* Welcome band: accent glow from the top-left corner, persona and quick facts. */
-  .hero { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-radius: 14px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); background: radial-gradient(120% 180% at 0% 0%, color-mix(in srgb, var(--accent) 24%, var(--bg-elev)) 0%, var(--bg-elev) 60%); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25); }
-  .who { display: flex; align-items: center; gap: 14px; min-width: 0; }
-  .avatar { width: 56px; height: 56px; border-radius: 50%; border: 2px solid var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent); flex: none; }
-  .avatar.placeholder { display: grid; place-items: center; background: var(--bg-row); color: var(--accent); font-weight: 700; font-size: 22px; }
-  .text { min-width: 0; }
-  .text h1 { margin: 0; font-size: 23px; font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; }
-  .chip { padding: 2px 9px; border-radius: 999px; background: color-mix(in srgb, var(--fg) 7%, transparent); border: 1px solid var(--border); font-size: 11.5px; color: var(--fg-muted); white-space: nowrap; }
-  .chip.accent { color: var(--accent-fg); background: var(--accent); border-color: transparent; font-weight: 600; }
-  .actions { display: flex; gap: 8px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
 
   .btn { all: unset; cursor: pointer; padding: 8px 14px; border-radius: 10px; background: var(--accent); color: var(--accent-fg); font-weight: 600; white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
-  .btn.secondary { background: var(--bg-row); color: var(--fg); border: 1px solid var(--border); font-weight: 500; }
   .btn.small { padding: 4px 10px; font-size: 12px; border-radius: var(--radius); }
 
   /* Video player (D-150). */
@@ -224,8 +174,6 @@
   .player-bar { display: flex; align-items: center; gap: 8px; }
   .player-title { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .player iframe { width: 100%; aspect-ratio: 16 / 9; max-height: 74vh; border: 0; border-radius: 12px; background: #000; box-shadow: 0 24px 60px rgb(0 0 0 / 0.5); }
-  .btn:hover { filter: brightness(1.08); }
-  .btn.secondary:hover { border-color: var(--accent); filter: none; }
   .btn:disabled { opacity: 0.6; cursor: default; }
   .btn:focus-visible { outline: 2px solid var(--fg); }
 
@@ -285,7 +233,5 @@
   @media (max-width: 1100px) {
     .featured { grid-template-columns: 1fr; }
     .featured .media { aspect-ratio: 16 / 9; height: auto; min-height: 0; }
-    .hero { flex-direction: column; align-items: flex-start; }
-    .actions { justify-content: flex-start; }
   }
 </style>
