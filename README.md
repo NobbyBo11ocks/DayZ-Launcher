@@ -143,15 +143,19 @@ Bump `version` in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.co
 git tag v0.1.19 && git push origin main v0.1.19
 ```
 
-The [release workflow](.github/workflows/release.yml) builds the signed installer on a clean Windows runner, creates the release with generated notes, uploads the installer, its `.sig` and `latest.json`, smoke-installs the result, and verifies the published manifest. It needs two repository secrets, set once from the machine that holds the key:
+The [release workflow](.github/workflows/release.yml) builds the signed installer on a clean Windows runner, creates the release with generated notes, uploads the installer, its `.sig` and `latest.json`, smoke-installs the result, and verifies the published manifest. It needs **one** repository secret, set once from the machine that holds the key. In PowerShell:
+
+```powershell
+(Get-Content "$env:USERPROFILE\.tauri\dayz-launcher.key" -Raw).Trim() | gh secret set TAURI_SIGNING_PRIVATE_KEY
+```
+
+or from Git Bash:
 
 ```bash
 gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/dayz-launcher.key
 ```
 
-```bash
-gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --body ""
-```
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` is not needed: our key has no password and the workflow builds with `--ci`, so the CLI never prompts. PowerShell also cannot pass it, because it drops an empty `""` argument and has no `<` redirection.
 
 Run the workflow manually from the Actions tab for a build-only dry run.
 

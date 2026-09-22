@@ -1,9 +1,11 @@
 # Builds, signs and publishes a release when a `v<version>` tag is pushed (D-071).
 # Manual runs build only (dry run) unless `publish` is ticked.
 #
-# Required repository secrets:
+# Required repository secret:
 #   TAURI_SIGNING_PRIVATE_KEY          content of the minisign private key
-#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD the key's password (empty string for ours)
+# TAURI_SIGNING_PRIVATE_KEY_PASSWORD is optional and deliberately unset: our key has
+# no password and the build passes `--ci`, so the CLI never prompts. A missing secret
+# resolves to an empty string below, which is what the CLI expects (D-145).
 name: Release
 
 on:
