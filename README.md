@@ -201,6 +201,7 @@ tools/               Node scripts: A2S probe and capture, GeoIP and flag builder
 | Command | Purpose |
 |---|---|
 | `node tools/a2s_probe.js <ip> <query-port>` | Query one server: INFO, RULES (mods) and PLAYER |
+| `node tools/rules_failure_rate.js [sample] [concurrency]` | Sample live servers from the cache and report how many answer RULES |
 | `node tools/verify_update_sig.js` | Fetch the live update manifest and verify the installer signature |
 | `node tools/make_latest.js vX.Y.Z --notes notes.md` | Build `latest.json` from the uploaded release asset |
 | `node tools/nsis_template_check.js` | Diff our NSIS template against the installed Tauri CLI's |
