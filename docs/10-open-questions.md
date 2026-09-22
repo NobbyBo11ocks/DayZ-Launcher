@@ -5,14 +5,14 @@ Resolve each with a primary source or a local experiment, then move the answer t
 | ID | Question | Blocks | How to resolve |
 |---|---|---|---|
 | ~~Q1~~ | Resolved 2026-09-21 → D-010: official launcher log shows `DayZ_BE.exe` with `0 1 1 -exe DayZ_x64.exe "-mod=…"` | – | – |
-| Q2 | Does `-nolauncher` change what Steam's own "Play" does on Windows, and does running `DayZ_x64.exe` directly (without `DayZ_BE.exe`) still start BattlEye? | M5 | Read `installscript.vdf` and Steam's launch config for 221100 (`appinfo.vdf` via `steamworks Apps::launch_command_line`), try both spawns against a BE server |
+| ~~Q2~~ | Closed 2026-09-22 → D-140 as not applicable: the launcher always starts `DayZ_BE.exe` with the official argument form (D-010), which is what starts BattlEye, and that path has been verified live since M5. Whether `DayZ_x64.exe` alone would start BattlEye only matters for a path we deliberately do not take | – | – |
 | ~~Q3~~ | Resolved 2026-09-21 → D-034: one anonymous entry per player (empty name, score 0, real duration) | – | – |
 | ~~Q4~~ | Resolved 2026-09-21: the launcher's 221100 session coexists with the running game (M5 and D-074 launches happened with the session open, no errors); the visible side effect is Steam's "In-Game" status and playtime while connected, which D-077's idle release now limits | – | – |
 | ~~Q5~~ | Resolved 2026-09-21 → D-073: DB-IP IP-to-Country Lite (CC BY 4.0) compacted to a 1.8 MB table embedded in the exe; flags from flag-icons (MIT) as one sprite; no online lookups | – | – |
 | ~~Q6~~ | Resolved 2026-09-21 → D-018: `steamworks-sys` vendors `steam_api64.dll`/`.lib` under `lib/steam/redistributable_bin/win64`; bundle the DLL as a resource | – | – |
-| Q7 | Do relative `-mod=!Workshop\@CF` paths work on Windows? (only needed if the 32 KB limit is ever approached) | none | Optional experiment |
-| Q8 | Meaning of the per-mod u32 hash and the `overflow`/flag bytes | none | Not needed for matching; ignore unless Bohemia documents it (S-45) |
-| Q9 | Do live servers ever send `idLen` 1/2/8 instead of 4? | robustness | Log unexpected values from the fan-out; parser already handles 1–8 |
+| ~~Q7~~ | Closed 2026-09-22 → D-140: the heaviest mod list in the cache is 121 mods, which spells out to about 8 100 characters of `-mod=`, a quarter of the 32 767 limit. Relative paths are not needed | – | – |
+| ~~Q8~~ | Closed 2026-09-22 → D-140 as won't-fix: mods are matched by Workshop ID only (project rule), so the per-mod hash and flag bytes are never read. Revisit only if Bohemia documents them (S-45) | – | – |
+| ~~Q9~~ | Resolved 2026-09-22 → D-140: **yes, rarely.** Across 3 213 mod entries from 193 live servers the id-length byte was 4 in 3 209 and **1 in four entries**, so non-4 widths do occur and the parser's `width = idLen & 0x0F` (1–8) is required, not just defensive | – | – |
 | ~~Q10~~ | Resolved 2026-09-22 → D-137: 450 sampled populated servers, 447 answered INFO and **all 447 answered RULES** (no timeouts, no errors). Servers ignoring RULES are not a real failure mode at our pacing; the official launcher's message matches a host that is offline or filtered | – | – |
 | ~~Q12~~ | Resolved 2026-09-21 in M3: `rusqlite` 0.40.2 (bundled SQLite, WAL) behind one mutex, no JS surface; cache, favourites, history, population and mod lists all live in it | – | – |
 | ~~Q13~~ | Resolved 2026-09-21 → D-052: the persona comes from Steamworks (`friends().name()`), no VDF parsing | – | – |

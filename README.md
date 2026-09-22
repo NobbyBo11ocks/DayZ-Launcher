@@ -27,9 +27,9 @@ Key-free server list straight from Steam · player counts verified with every se
 - **One click from list to game.** Missing Workshop mods are subscribed and downloaded through Steam, the `!Workshop` junctions are created the way the official launcher does it, and DayZ starts through BattlEye with the official argument form.
 - **Nothing to sign up for.** No accounts, no API keys, no telemetry. It talks to Steam, to the game servers, and to GitHub for updates.
 
-| Installer | Cached list on screen | Populated-server refresh | Idle host CPU | Memory, whole app |
+| Installer | Cold start to first frame | Populated-server refresh | Idle CPU | Memory, whole app |
 |:-:|:-:|:-:|:-:|:-:|
-| 4.7 MB | ≈ 0.7 s | ≈ 38 s | 0.1 % | 235–305 MB |
+| 4.7 MB | 0.43 s | 36 s | 0.4 % of one core | ≈ 300 MB |
 
 <sub>Measured on the reference machine; budgets, method and history in [docs/05 §6](docs/05-architecture-and-optimisation.md).</sub>
 

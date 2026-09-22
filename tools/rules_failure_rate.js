@@ -34,6 +34,9 @@ console.log(`sampling ${rows.length} populated servers from the cache, ${CONCURR
 
 const out = { infoOk: 0, infoFail: 0, rulesOk: 0, rulesTimeout: 0, rulesError: 0, rttInfo: [], rttRules: [], mods: [] };
 const failures = [];
+// Widths seen in the mod id-length byte (Q9): the parser accepts 1–8, live servers
+// have only ever been seen sending 4.
+const idWidths = new Map();
 
 async function probe(r) {
   const port = Number(r.query_port);
@@ -52,6 +55,10 @@ async function probe(r) {
     out.rulesOk++;
     out.rttRules.push(rules.rtt);
     out.mods.push(parsed.mods?.length ?? 0);
+    for (const m of parsed.mods ?? []) {
+      const w = (m.idLenByte ?? 0) & 0x0f;
+      idWidths.set(w, (idWidths.get(w) ?? 0) + 1);
+    }
   } catch (e) {
     const msg = String(e.message ?? e);
     if (/timeout|timed out/i.test(msg)) out.rulesTimeout++;
@@ -76,7 +83,8 @@ INFO   answered ${out.infoOk}/${rows.length}, no reply ${out.infoFail} (offline 
 RULES  answered ${out.rulesOk}/${answered} = ${pct(out.rulesOk, answered)}% of servers that answered INFO
        timeout ${out.rulesTimeout} (${pct(out.rulesTimeout, answered)}%), other error ${out.rulesError}
 RTT    INFO median ${median(out.rttInfo)} ms, RULES median ${median(out.rttRules)} ms
-MODS   median ${median(out.mods)} per server, max ${out.mods.length ? Math.max(...out.mods) : 0}`);
+MODS   median ${median(out.mods)} per server, max ${out.mods.length ? Math.max(...out.mods) : 0}
+IDLEN  mod id widths seen: ${[...idWidths.entries()].sort((a, b) => a[0] - b[0]).map(([w, n]) => `${w} bytes ×${n}`).join(", ") || "none"}`);
 
 if (failures.length) {
   console.log("\nfailures:");
