@@ -116,9 +116,31 @@ jobs:
           Start-Sleep -Seconds 2
           $u = Start-Process -FilePath (Join-Path $dir 'uninstall.exe') -ArgumentList '/S' -PassThru -Wait
           if ($u.ExitCode -ne 0) { throw "uninstaller exit code $($u.ExitCode)" }
-          Start-Sleep -Seconds 2
-          if (Test-Path $dir) { throw "install folder still exists after uninstall" }
-          "uninstall clean"
+          # NSIS copies itself to %TEMP% and keeps deleting after the parent returns, so
+          # a fixed sleep is a race (it failed on v0.1.21 with the folder still present).
+          $deadline = (Get-Date).AddSeconds(45)
+          while ((Test-Path $dir) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 3 }
+          if (Test-Path $dir) {
+            $left = @(Get-ChildItem $dir -Recurse -File -ErrorAction SilentlyContinue)
+            $exe = $left | Where-Object { $_.Name -in 'dayz-launcher.exe', 'steam_api64.dll' }
+            if ($exe) { throw "uninstall left the app behind: $($exe.Name -join ', ')" }
+            "uninstall left $($left.Count) file(s) but no app binaries: $(($left | Select-Object -First 5).Name -join ', ')"
+          } else {
+            "uninstall clean"
+          }
+
+      # tauri-action writes an api.github.com asset URL into latest.json, which serves JSON
+      # metadata rather than the installer unless the caller sends an octet-stream Accept
+      # header; the signature check then fails (v0.1.21, D-147). Our own generator takes
+      # the browser download URL from the release listing, so rewrite the manifest with it.
+      - name: Rewrite latest.json with the browser download URL
+        if: env.PUBLISH == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node tools/make_latest.js '${{ github.ref_name }}'
+          gh release upload '${{ github.ref_name }}' 'src-tauri/target/release/bundle/nsis/latest.json' --clobber
 
       - name: Verify the published manifest and signature
         if: env.PUBLISH == 'true'
