@@ -19,6 +19,7 @@
     alerts,
     onAlert,
     friendsOn,
+    modsByServer,
   }: {
     rows: ServerRow[];
     selectedId: string | null;
@@ -36,6 +37,8 @@
     onAlert?: (id: string) => void;
     /** Friend names by server id (D-128): rows get a marker with the names in its tooltip. */
     friendsOn?: Map<string, string[]>;
+    /** Scanned mod lists by server id (D-146): the Mods column counts them. */
+    modsByServer?: Map<string, number[]>;
   } = $props();
 
   const ROW = 36;
@@ -134,6 +137,7 @@
   const columns: { key: SortKey; label: string; cls: string }[] = [
     { key: "name", label: "Server", cls: "c-name" },
     { key: "map", label: "Map", cls: "c-map" },
+    { key: "mods", label: "Mods", cls: "c-num" },
     { key: "players", label: "Players", cls: "c-num" },
     { key: "ping", label: "Ping", cls: "c-num" },
     { key: "time", label: "Time", cls: "c-time" },
@@ -160,6 +164,7 @@
         {#each slice as r (r.id)}
           {@const pop = trustedPlayers(r)}
           {@const untrusted = isUntrusted(r)}
+          {@const mods = modsByServer?.get(r.id)?.length}
           <div
             class="row"
             class:selected={r.id === selectedId}
@@ -224,6 +229,11 @@
               <span class="name">{r.name}</span>
             </div>
             <div class="cell c-map">{r.map}</div>
+            <!-- Mod count from the last scan (D-146); a dash means this server has not
+                 been scanned yet, which is not the same as "no mods". -->
+            <div class="cell c-num mods" class:muted={mods === undefined} title={mods === undefined ? "Mod list not scanned yet" : mods === 0 ? "Vanilla" : `${mods} mods`}>
+              {mods ?? "–"}
+            </div>
             <div
               class="cell c-num players"
               title={isInflated(r)
@@ -263,7 +273,7 @@
 <style>
   .table { display: flex; flex-direction: column; min-height: 0; height: 100%; font-size: 12.5px; outline: none; }
   .table:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
-  .head, .row { display: grid; grid-template-columns: minmax(200px, 1fr) 130px 96px 56px 64px 92px; align-items: center; }
+  .head, .row { display: grid; grid-template-columns: minmax(200px, 1fr) 130px 52px 96px 56px 64px 92px; align-items: center; }
   .head { border-bottom: 1px solid var(--border); background: var(--bg); }
   .th { all: unset; cursor: pointer; padding: 0 8px; height: 30px; display: flex; align-items: center; color: var(--fg-muted); font-weight: 500; white-space: nowrap; }
   .th:hover { color: var(--fg); }

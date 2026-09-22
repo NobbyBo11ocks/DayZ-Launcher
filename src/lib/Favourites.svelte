@@ -53,6 +53,7 @@
         alerts={servers.favouriteAlerts}
         onAlert={(id) => servers.toggleAlert(id)}
         friendsOn={servers.friendsOn}
+        modsByServer={servers.modsByServer}
       />
       {#if selected}
         <DetailsPane row={selected} localVersion={servers.localVersion} />

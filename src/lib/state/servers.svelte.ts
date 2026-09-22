@@ -26,7 +26,7 @@ import {
   type VerifySummary,
 } from "../types";
 
-export type SortKey = "name" | "map" | "players" | "ping" | "time" | "version";
+export type SortKey = "name" | "map" | "mods" | "players" | "ping" | "time" | "version";
 export type Perspective = "any" | "1pp" | "3pp";
 export type ModFilter = "any" | "modded" | "vanilla";
 
@@ -245,6 +245,12 @@ class ServersStore {
           return a.name.localeCompare(b.name) || byId(a, b);
         case "map":
           return a.map.localeCompare(b.map) || trustedPlayers(b) - trustedPlayers(a) || byId(a, b);
+        case "mods": {
+          // Unscanned servers sort below every scanned one, in both directions.
+          const ma = this.modsByServer.get(a.id)?.length ?? -1;
+          const mb = this.modsByServer.get(b.id)?.length ?? -1;
+          return ma - mb || trustedPlayers(b) - trustedPlayers(a) || byId(a, b);
+        }
         case "players":
           return trustedPlayers(a) - trustedPlayers(b) || pingBucket(b) - pingBucket(a) || byId(a, b);
         case "ping":
@@ -617,7 +623,7 @@ class ServersStore {
 
   setSort(key: SortKey) {
     if (this.sort.key === key) this.sort = { key, dir: this.sort.dir === 1 ? -1 : 1 };
-    else this.sort = { key, dir: key === "players" ? -1 : 1 };
+    else this.sort = { key, dir: key === "players" || key === "mods" ? -1 : 1 };
   }
 
   select(id: string | null) {
