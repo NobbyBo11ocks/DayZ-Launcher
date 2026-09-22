@@ -135,9 +135,16 @@
     updateJob = Date.now();
     notice = null;
     error = null;
+    // Optimistic, so the buttons disable at once instead of waiting for the first
+    // progress event (D-151); `mods:done` clears it.
+    updating = { job: updateJob, items: [], installed: 0, total: ids.length, elapsedMs: 0 };
     try {
       await invoke("mods_sync", { job: updateJob, ids });
     } catch (e) {
+      // The backend rejects synchronously when Steam is not connected, and then no
+      // `mods:done` ever arrives — without this the toolbar stayed disabled reading
+      // "Updating… 0/N" until the view was left and reopened (D-159).
+      updating = null;
       error = String(e);
     }
   }

@@ -2,6 +2,7 @@
   // Steam / DayZ / Workshop inventory plus the Performance section (D-078), laid out
   // in two columns so the view fits the viewport without page scrolling (D-094).
   import { invoke } from "@tauri-apps/api/core";
+  import { revealItemInDir } from "@tauri-apps/plugin-opener";
   import type { CacheStats, Diagnostics, JunctionCleanup, PerfSample } from "./types";
 
   // Cache row counts (D-115): a glance tells whether favourites, history or the
@@ -12,6 +13,41 @@
       cache = await invoke<CacheStats>("cache_stats");
     } catch {
       cache = null;
+    }
+  }
+
+  // The diagnostic log (D-158): the last entries from both halves of the app, newest
+  // first here, with the file behind a "Show the file" button.
+  type LogEntry = { at: number; level: "debug" | "info" | "warn" | "error"; target: string; message: string };
+  let logs = $state<LogEntry[]>([]);
+  let logPath = $state<string | null>(null);
+  let logLevel = $state<"all" | "warn">("all");
+  async function loadLogs() {
+    try {
+      const [entries, path] = await Promise.all([invoke<LogEntry[]>("logs_recent", { limit: 200 }), invoke<string | null>("logs_path")]);
+      logs = entries.reverse();
+      logPath = path;
+    } catch (e) {
+      error = String(e);
+    }
+  }
+  const shownLogs = $derived(logLevel === "all" ? logs : logs.filter((l) => l.level === "warn" || l.level === "error"));
+  const logTime = (ms: number) => new Date(ms).toLocaleTimeString();
+  async function revealLog() {
+    if (!logPath) return;
+    try {
+      await revealItemInDir(logPath);
+    } catch (e) {
+      error = String(e);
+    }
+  }
+  async function copyLog() {
+    try {
+      await navigator.clipboard.writeText(logs.map((l) => `${logTime(l.at)} ${l.level.toUpperCase()} ${l.target} ${l.message}`).join("\n"));
+      copied = true;
+      setTimeout(() => (copied = false), 1500);
+    } catch (e) {
+      error = String(e);
     }
   }
 
@@ -97,6 +133,7 @@
     void load();
     void samplePerf();
     void loadCache();
+    void loadLogs();
   });
 
   const fmtBytes = (n: number) =>
@@ -114,9 +151,10 @@
     {#if exported}<span class="muted mono">{exported}</span>{/if}
   </header>
 
-  {#if error}
-    <p class="error">{error}</p>
-  {:else if !data}
+  <!-- The error sits beside the report, not instead of it (D-151): a failed clipboard
+       copy or perf sample used to replace the whole view until the next rescan. -->
+  {#if error}<p class="error">{error}</p>{/if}
+  {#if !data}
     <p class="muted">Scanning Steam…</p>
   {:else}
     {#if data.warnings.length}
@@ -154,6 +192,30 @@
           </dl>
         {:else}
           <p class="muted">Counting…</p>
+        {/if}
+
+        <!-- Diagnostic log (D-158): what the app has been doing, both halves in one list. -->
+        <h2>
+          Log
+          <button class="btn small" onclick={loadLogs}>Refresh</button>
+          <button class="btn small" class:on={logLevel === "warn"} onclick={() => (logLevel = logLevel === "all" ? "warn" : "all")} title="Show only warnings and errors">
+            {logLevel === "warn" ? "Problems only" : "Everything"}
+          </button>
+          <button class="btn small" onclick={copyLog} disabled={!logs.length}>Copy</button>
+          <button class="btn small" onclick={revealLog} disabled={!logPath} title={logPath ?? ""}>Show the file</button>
+        </h2>
+        {#if shownLogs.length}
+          <div class="logs">
+            {#each shownLogs as l, i (`${l.at}#${i}`)}
+              <div class="logline {l.level}">
+                <span class="logtime">{logTime(l.at)}</span>
+                <span class="logtarget">{l.target}</span>
+                <span class="logmsg">{l.message}</span>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <p class="muted">{logs.length ? "No warnings or errors." : "Nothing logged yet."}</p>
         {/if}
 
         <h2>Steam</h2>
@@ -296,5 +358,17 @@
   .btn:disabled { opacity: 0.6; cursor: default; }
   .btn:focus-visible { outline: 2px solid var(--accent); }
   .btn.small { font-size: 11px; padding: 2px 8px; text-transform: none; letter-spacing: 0; font-weight: 500; }
+  .btn.small.on { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); color: var(--fg); }
+
+  /* Log (D-158): monospace, newest first, its own scroll so the page still fits. */
+  .logs { max-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); padding: 4px 0; }
+  .logline { display: grid; grid-template-columns: 74px 92px minmax(0, 1fr); gap: 8px; padding: 2px 8px; font-family: Consolas, "Cascadia Mono", monospace; font-size: 11.5px; line-height: 1.45; }
+  .logline:hover { background: var(--bg-row); }
+  .logtime { color: var(--fg-muted); }
+  .logtarget { color: var(--accent); overflow: hidden; text-overflow: ellipsis; }
+  .logmsg { color: var(--fg); overflow-wrap: anywhere; }
+  .logline.warn .logmsg { color: var(--warn); }
+  .logline.error .logmsg { color: var(--danger); }
+  .logline.debug .logmsg { color: var(--fg-muted); }
   .btn.danger { border-color: var(--danger); color: var(--danger); }
 </style>

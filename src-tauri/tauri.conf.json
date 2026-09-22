@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "DayZ Launcher",
-  "version": "0.1.21",
+  "productName": "DZSA CrayZ Launcher",
+  "version": "0.1.22",
   "identifier": "com.dayzlauncher.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -15,7 +15,7 @@
       {
         "label": "main",
         "create": false,
-        "title": "DayZ Launcher",
+        "title": "DZSA CrayZ Launcher",
         "width": 1280,
         "height": 800,
         "minWidth": 960,
@@ -27,25 +27,50 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com; font-src 'self'; connect-src ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com; font-src 'self'; frame-src https://www.youtube-nocookie.com; connect-src ipc: http://ipc.localhost"
     }
   },
   "plugins": {
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRERTVGNjA1QjVENDA5QjgKUldTNENkUzFCZmJsVFJaYUVMTkFxZnpWRC9rUG1UQUU5NHJTdmJ6YWNrVG03YUljZzQrdElhcVYK",
-      "endpoints": ["https://github.com/NobbyBo11ocks/dayz-launcher/releases/latest/download/latest.json"],
-      "windows": { "installMode": "passive" }
+      "endpoints": [
+        "https://github.com/NobbyBo11ocks/dayz-launcher/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "createUpdaterArtifacts": true,
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
-    "resources": { "resources/steam_api64.dll": "steam_api64.dll" },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "resources/steam_api64.dll": "steam_api64.dll"
+    },
     "windows": {
-      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
-      "nsis": { "installMode": "currentUser", "languages": ["English"], "template": "nsis/installer.nsi" }
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "English"
+        ],
+        "template": "nsis/installer.nsi",
+        "headerImage": "nsis/header.bmp",
+        "sidebarImage": "nsis/sidebar.bmp",
+        "installerIcon": "icons/icon.ico"
+      }
     }
   }
 }

@@ -2,7 +2,7 @@
 
 <img src="src-tauri/icons/128x128@2x.png" width="96" alt="">
 
-# DayZ Launcher
+# DZSA CrayZ Launcher
 
 **A fast, honest server browser and one-click launcher for DayZ Standalone on Windows.**
 
@@ -12,7 +12,7 @@ Key-free server list straight from Steam · player counts verified with every se
 [![CI](https://img.shields.io/github/actions/workflow/status/NobbyBo11ocks/dayz-launcher/ci.yml?branch=main&label=CI)](https://github.com/NobbyBo11ocks/dayz-launcher/actions/workflows/ci.yml)
 [![Downloads](https://img.shields.io/github/downloads/NobbyBo11ocks/dayz-launcher/total?color=2ea44f)](https://github.com/NobbyBo11ocks/dayz-launcher/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078d4)](#install)
-[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![License](https://img.shields.io/badge/license-all%20rights%20reserved-lightgrey)](LICENSE)
 
 [**Download the latest release**](https://github.com/NobbyBo11ocks/dayz-launcher/releases/latest) · [Highlights](#highlights) · [How it works](#how-it-works) · [Install](#install) · [Build](#build-from-source) · [Docs](docs/00-README.md)
 
@@ -68,7 +68,7 @@ Every protocol and launch fact is tied to a source in [docs/08](docs/08-sources.
 
 ## Install
 
-1. Download `DayZ Launcher_<version>_x64-setup.exe` from the [latest release](https://github.com/NobbyBo11ocks/dayz-launcher/releases/latest).
+1. Download `DZSA CrayZ Launcher_<version>_x64-setup.exe` from the [latest release](https://github.com/NobbyBo11ocks/dayz-launcher/releases/latest).
 2. Run it. It installs per user to `%LOCALAPPDATA%\Programs\DayZ Launcher` and adds a Start menu entry. WebView2 is installed silently if Windows does not have it.
 3. Start Steam, then the launcher. Updates are automatic: each release is signed with a minisign key and the app verifies the signature before installing.
 
@@ -119,7 +119,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 npm run tauri build
 ```
 
-Output: `src-tauri/target/release/bundle/nsis/` (`DayZ Launcher_<version>_x64-setup.exe` plus a `.sig` for the updater).
+Output: `src-tauri/target/release/bundle/nsis/` (`DZSA CrayZ Launcher_<version>_x64-setup.exe` plus a `.sig` for the updater).
 
 The per-user installer defaults to `%LOCALAPPDATA%\Programs\DayZ Launcher`. Tauri's stock default, `%LOCALAPPDATA%\DayZ Launcher`, is the official DayZ Launcher's data folder, so `src-tauri/nsis/installer.nsi` is a copy of the stock template with that one line changed. After upgrading `@tauri-apps/cli`, run `node tools/nsis_template_check.js` (add `--write` to refresh the copy from the new tag).
 
@@ -223,4 +223,4 @@ DayZ is a trademark of Bohemia Interactive. This project is not affiliated with 
 
 ## License
 
-[MIT](LICENSE).
+**All rights reserved** ([LICENSE](LICENSE)). The source is public so you can read it, audit it and build it for your own use. Selling it, rebranding it, or redistributing it in any form needs written permission. Third-party components keep their own licences.

@@ -18,13 +18,23 @@
   import { servers } from "./lib/state/servers.svelte";
   import { uiPrefs } from "./lib/state/uiprefs.svelte";
   import { updates } from "./lib/state/updates.svelte";
+  import { installErrorHooks, logInfo } from "./lib/log";
 
   // The server store lives for the whole session: its listeners must not depend on
   // which section is open (D-084).
+  // Uncaught errors and rejected promises reach the log before anything else runs (D-158).
+  installErrorHooks();
+
   $effect(() => {
     void servers.start();
     void updates.autoCheck();
     void news.start();
+  });
+
+  // One line per view the user opens: enough to see which pages are actually used and
+  // what was on screen before a problem, without logging anything per frame.
+  $effect(() => {
+    logInfo("view", `opened ${active}`);
   });
 
   // The welcome overlay shows until the settings file says onboarded (D-070). A flag
@@ -137,7 +147,12 @@
 </div>
 
 {#if servers.joiningId}
-  <JoinDialog serverId={servers.joiningId} onClose={() => (servers.joiningId = null)} />
+  <!-- Keyed on the server (D-159): the dialog plans once, after an await, so without
+       this a new joiningId left the old plan, password and mod list on screen while
+       the buttons acted on the new server. Now it is rebuilt from scratch. -->
+  {#key servers.joiningId}
+    <JoinDialog serverId={servers.joiningId} onClose={() => (servers.joiningId = null)} />
+  {/key}
 {/if}
 <Toasts />
 {#if showWelcome}

@@ -262,13 +262,18 @@ impl Cache {
     /// removed and checkpoints so the deletion is as durable as the inserts.
     pub fn history_clear(&self) -> rusqlite::Result<usize> {
         let n = self.conn.execute("DELETE FROM history", [])?;
+        crate::log_info!("cache", "history cleared by the user: {n} row(s)");
         self.checkpoint();
         Ok(n)
     }
 
     /// Folds the write-ahead log into the database file without blocking readers.
+    /// A PASSIVE checkpoint is a no-op while any reader holds the log, and that is
+    /// exactly the case Q22 needs evidence for, so a failure is recorded.
     pub fn checkpoint(&self) {
-        let _ = self.conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);");
+        if let Err(e) = self.conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);") {
+            crate::log_warn!("cache", "checkpoint failed: {e}");
+        }
     }
 
     /// Row counts and file sizes for Diagnostics (D-115): a quick way to see whether
@@ -481,13 +486,23 @@ impl Cache {
     /// Drops rows not confirmed for `max_age_secs` (and their mod lists); returns how many were removed.
     pub fn prune(&self, max_age_secs: i64) -> rusqlite::Result<usize> {
         let cutoff = ServerRow::now_unix() - max_age_secs;
-        let n = self
-            .conn
-            .execute("DELETE FROM servers WHERE last_seen < ?1", params![cutoff])?;
+        // Never prune a favourite (D-159): `favourites_watched` joins `servers`, so
+        // dropping the row silently stopped the alert watcher and emptied the
+        // Favourites view for any server that was offline, or simply absent from the
+        // populated partition, for 30 days.
+        let n = self.conn.execute(
+            "DELETE FROM servers
+             WHERE last_seen < ?1 AND id NOT IN (SELECT id FROM favourites)",
+            params![cutoff],
+        )?;
         self.conn.execute_batch(
             "DELETE FROM server_mods WHERE server_id NOT IN (SELECT id FROM servers);
              DELETE FROM server_mods_at WHERE server_id NOT IN (SELECT id FROM servers);",
         )?;
+        // Row loss has been a mystery before (Q22), so every deletion is on the record.
+        if n > 0 {
+            crate::log_info!("cache", "pruned {n} server(s) unseen since {cutoff}");
+        }
         Ok(n)
     }
 
@@ -689,6 +704,26 @@ mod tests {
             "everything is older than 'now + 1 s'"
         );
         assert_eq!(c.count().unwrap(), 0);
+    }
+
+    /// A favourite must survive the 30-day prune (D-159): the alert watcher joins
+    /// `servers`, so losing the row stops the watch and empties the Favourites view.
+    #[test]
+    fn prune_keeps_favourites() {
+        let mut c = Cache::open_in_memory().unwrap();
+        let keep = row(27017, 0);
+        let drop_me = row(27019, 0);
+        c.upsert(&[keep.clone(), drop_me.clone()]).unwrap();
+        c.favourite_set(&keep.id, true).unwrap();
+
+        assert_eq!(c.prune(-1).unwrap(), 1, "only the unfavourited row goes");
+        assert_eq!(c.count().unwrap(), 1);
+        assert_eq!(c.favourites().unwrap().len(), 1);
+        assert_eq!(
+            c.favourites_watched().unwrap().len(),
+            0,
+            "not watched unless the alert flag is set, but the row is still there"
+        );
     }
 
     #[test]

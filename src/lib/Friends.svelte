@@ -69,7 +69,12 @@
   $effect(() => {
     if (!steamOk) return;
     untrack(() => void load());
-    const t = setInterval(() => void load(), REFRESH_MS);
+    // Skip the poll while the Steam session is idle-released (D-159): asking for
+    // friends re-opens it, which puts the user back to "Playing DayZ" in Steam and
+    // restarts playtime — exactly what the idle release (D-077) exists to stop.
+    const t = setInterval(() => {
+      if (!servers.steam?.idle) void load();
+    }, REFRESH_MS);
     return () => clearInterval(t);
   });
 

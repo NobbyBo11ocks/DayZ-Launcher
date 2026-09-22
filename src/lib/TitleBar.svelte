@@ -40,7 +40,10 @@
 </header>
 
 <style>
-  .titlebar { grid-area: top; display: flex; align-items: center; gap: 16px; height: 30px; padding: 0 0 0 14px; background: var(--bg-elev); border-bottom: 1px solid var(--border); user-select: none; }
+  /* Above every overlay (D-151): modal backdrops are fixed and used to paint over the
+     bar, which left minimise, maximise, close and the drag region dead while a dialog
+     was open — with no native frame to fall back on. */
+  .titlebar { grid-area: top; position: relative; z-index: 80; display: flex; align-items: center; gap: 16px; height: 30px; padding: 0 0 0 14px; background: var(--bg-elev); border-bottom: 1px solid var(--border); user-select: none; }
   /* Accent-coloured so the counts read as part of the theme (user request, D-103). */
   .stat { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--accent); white-space: nowrap; }
   .stat + .stat { margin-left: 16px; }

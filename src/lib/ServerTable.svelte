@@ -165,6 +165,10 @@
           {@const pop = trustedPlayers(r)}
           {@const untrusted = isUntrusted(r)}
           {@const mods = modsByServer?.get(r.id)?.length}
+          <!-- Keyboard handling belongs to the grid container, not each row: one handler
+               there sees every key, while a second on the row made Svelte's delegated
+               keydown fire twice (arrows skipped rows, F cancelled itself out, D-151). -->
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
           <div
             class="row"
             class:selected={r.id === selectedId}
@@ -183,7 +187,6 @@
               onSelect(r.id);
               onActivate(r.id);
             }}
-            onkeydown={onKey}
           >
             <div class="cell c-name" title={r.description || r.name}>
               <button
@@ -278,7 +281,12 @@
   .th { all: unset; cursor: pointer; padding: 0 8px; height: 30px; display: flex; align-items: center; color: var(--fg-muted); font-weight: 500; white-space: nowrap; }
   .th:hover { color: var(--fg); }
   .th:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-  .body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; contain: strict; }
+  /* The header is a separate grid from the body, so the body always reserves the
+     scrollbar and the header matches it with padding. `scrollbar-gutter` on the header
+     did nothing — it only applies to scroll containers — which left every column from
+     Map rightwards 10 px out in both states (D-151, corrected in D-159). */
+  .body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; contain: strict; }
+  .head { padding-right: 10px; }
   .row { outline: none; }
   .spacer { position: relative; width: 100%; }
   /* No will-change: the compositor layer cost more GPU memory than the transform saved (Q17, D-056). */

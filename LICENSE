@@ -1,21 +1,47 @@
-MIT License
+DayZ Launcher — All rights reserved
 
-Copyright (c) 2026 DayZ Launcher contributors
+Copyright (c) 2026 NobbyBo11ocks. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+The source code in this repository is published so that anyone can read it,
+audit it and build it for their own personal use. It is not open source, and no
+other rights are granted.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+You MAY:
+
+  1. View and study this source code.
+  2. Build it and run the result on computers you own or control, for your own
+     personal, non-commercial use.
+  3. Keep a private copy or fork for that purpose, and propose changes back to
+     this repository.
+
+You MAY NOT, without prior written permission from the copyright holder:
+
+  1. Sell, licence, rent, or otherwise charge for this software, any build of
+     it, or access to it, whether on its own or as part of a larger offering.
+  2. Redistribute or publish this software or any build of it, in source or
+     binary form, on any site, store, mirror, launcher, mod pack or other
+     channel.
+  3. Rebrand it: publish a copy or a derived work under a different name, logo
+     or identity, or remove or alter its name, branding, credits or this
+     notice.
+  4. Publish a modified version, or create a derived work that is distributed
+     to anyone else.
+  5. Use its name or branding to promote a different product.
+
+Third-party components keep their own licences, and nothing above overrides
+them. In particular this project includes IP geolocation data by DB-IP
+(CC BY 4.0) and flag artwork from flag-icons (MIT); see the README for the
+full credits. Its dependencies are licensed by their respective authors.
+
+DayZ is a trademark of Bohemia Interactive a.s. This project is not affiliated
+with, endorsed by, or sponsored by Bohemia Interactive or Valve Corporation.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+AUTHOR OR COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+For permission beyond this licence, open an issue on the repository.

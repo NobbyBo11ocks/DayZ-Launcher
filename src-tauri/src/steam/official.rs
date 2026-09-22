@@ -89,20 +89,25 @@ fn parse_attrs(s: &str) -> HashMap<String, String> {
     let mut out = HashMap::new();
     let bytes = s.as_bytes();
     let mut i = 0;
+    // ASCII tests only (D-151): `(byte as char).is_whitespace()` is true for 0xA0, which
+    // is a UTF-8 continuation byte, so a name containing e.g. "ą" or a non-breaking space
+    // could stop the scan mid-character and panic when slicing. Every delimiter here is
+    // ASCII, and a continuation byte is never equal to one, so byte indices stay on
+    // character boundaries.
     while i < bytes.len() {
-        while i < bytes.len() && (bytes[i] as char).is_whitespace() {
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
             i += 1;
         }
         let key_start = i;
         while i < bytes.len()
             && bytes[i] != b'='
-            && !(bytes[i] as char).is_whitespace()
+            && !bytes[i].is_ascii_whitespace()
             && bytes[i] != b'/'
         {
             i += 1;
         }
         let key = &s[key_start..i];
-        while i < bytes.len() && (bytes[i] as char).is_whitespace() {
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
             i += 1;
         }
         if i >= bytes.len() || bytes[i] != b'=' {
@@ -112,7 +117,7 @@ fn parse_attrs(s: &str) -> HashMap<String, String> {
             continue;
         }
         i += 1;
-        while i < bytes.len() && (bytes[i] as char).is_whitespace() {
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
             i += 1;
         }
         if i >= bytes.len() {
@@ -182,5 +187,22 @@ mod tests {
         assert_eq!(f[0].name, "A & B \"x\"");
         assert!(f[0].password);
         assert_eq!((f[1].query_port, f[1].game_port), (2303, 2302));
+    }
+
+    /// A name with non-ASCII bytes used to stop the attribute scan mid-character and
+    /// panic when slicing, which aborted the whole process (D-151).
+    #[test]
+    fn non_ascii_names_do_not_panic() {
+        let xml = concat!(
+            r#"<FavoriteServers>"#,
+            "<Server Name=\"Polski\u{a0}serwer ą ę €\" QueryEndPoint=\"1.2.3.4:27016\" ConnectionEndPoint=\"1.2.3.4:2302\"/>",
+            "<Server\u{a0}Name=\"ĄĘÓŁ\" QueryEndPoint=\"5.6.7.8:27017\"/>",
+            r#"</FavoriteServers>"#,
+        );
+        let f = parse_favourites(xml);
+        assert_eq!(f.len(), 2, "both servers parse");
+        assert_eq!(f[0].name, "Polski\u{a0}serwer ą ę €");
+        assert_eq!(f[0].query_port, 27016);
+        assert_eq!(f[1].query_port, 27017);
     }
 }

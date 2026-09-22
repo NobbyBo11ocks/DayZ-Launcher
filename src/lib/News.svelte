@@ -1,8 +1,9 @@
 <script lang="ts">
   // Landing page (D-099, D-100): a welcome band with the Steam persona and avatar,
   // the newest post featured with its picture, then the latest posts as cards.
-  // Pictures and video previews are thumbnails that open the post or the video in
-  // the browser: no embedded players, so the memory budget holds.
+  // Pictures are host-made thumbnails (D-111). A video plays in a player that is
+  // created on click and destroyed on close (D-150), so an idle home page still has
+  // no embedded player and the memory budget holds.
   import { invoke } from "@tauri-apps/api/core";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { SvelteSet } from "svelte/reactivity";
@@ -20,7 +21,6 @@
   });
   $effect(() => {
     void news.loadAvatar();
-    void servers.loadHistory();
   });
   // Start-up timing for Diagnostics (D-078): the home page is the first frame now
   // (D-101); the backend keeps only the first mark it receives.
@@ -37,7 +37,6 @@
   const hour = new Date().getHours();
   const greeting = hour < 5 ? "Still up" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   const name = $derived(servers.steam?.persona ?? "Survivor");
-  const lastJoin = $derived(servers.history[0] ?? null);
   const featured = $derived(news.list[0] ?? null);
   const rest = $derived(news.list.slice(1, 25));
   /** Chips only when there is something to say; the counts live in the title bar (D-103). */
@@ -50,21 +49,25 @@
   const thumb = (n: NewsItem, big = false) => (broken.has(n.gid) ? null : news.thumbUrl(n, big));
   const watch = (n: NewsItem) => `https://www.youtube.com/watch?v=${n.video}`;
 
+  // The video open in the player, or null. `-nocookie` is YouTube's no-tracking host and
+  // the only frame source the CSP allows (D-150).
+  let playing = $state<{ id: string; title: string } | null>(null);
+  const embed = (id: string) => `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&modestbranding=1`;
+  function play(n: NewsItem) {
+    if (n.video) playing = { id: n.video, title: n.title };
+  }
+  function onPlayerKey(e: KeyboardEvent) {
+    if (e.key === "Escape" && playing) {
+      e.stopPropagation();
+      playing = null;
+    }
+  }
+
   function open(url: string) {
     void openUrl(url).catch((e) => (news.error = String(e)));
   }
   function browse() {
     servers.navigate = "servers";
-  }
-  async function joinAgain() {
-    if (!lastJoin) return;
-    if (servers.rows.has(lastJoin.id)) {
-      servers.select(lastJoin.id);
-      servers.joiningId = lastJoin.id;
-      return;
-    }
-    const row = await servers.directConnect(`${lastJoin.ip}:${lastJoin.gamePort}`);
-    if (row) servers.joiningId = row.id;
   }
 </script>
 
@@ -86,10 +89,8 @@
         {/if}
       </div>
     </div>
+    <!-- No "Join again" here (D-157): the Recent page is where past joins live. -->
     <div class="actions">
-      {#if lastJoin}
-        <button class="btn" onclick={joinAgain} title="{lastJoin.name} ({lastJoin.ip}:{lastJoin.gamePort})">Join again</button>
-      {/if}
       <button class="btn" onclick={browse}>Browse servers</button>
     </div>
   </header>
@@ -108,7 +109,7 @@
     {#if featured}
       <article class="featured" class:update={featured.update}>
         {#if thumb(featured, true)}
-          <button class="media" onclick={() => open(featured.video ? watch(featured) : featured.url)} aria-label={featured.video ? "Watch the video" : "Open the post"}>
+          <button class="media" onclick={() => (featured.video ? play(featured) : open(featured.url))} aria-label={featured.video ? "Play the video" : "Open the post"}>
             <img src={thumb(featured, true)} alt="" onerror={() => broken.add(featured.gid)} />
             {#if featured.video}<span class="play" aria-hidden="true"></span>{/if}
           </button>
@@ -125,7 +126,10 @@
           {#if featured.summary}<p class="summary clamp feat">{featured.summary}</p>{/if}
           <div class="links">
             <button class="btn small" onclick={() => open(featured.url)}>Read the full post</button>
-            {#if featured.video}<button class="btn small secondary" onclick={() => open(watch(featured))}>Watch on YouTube</button>{/if}
+            {#if featured.video}
+              <button class="btn small secondary" onclick={() => play(featured)}>Play video</button>
+              <button class="btn small secondary" onclick={() => open(watch(featured))} title="Open it in your browser instead">On YouTube</button>
+            {/if}
           </div>
         </div>
       </article>
@@ -133,7 +137,7 @@
         {#each rest as n (n.gid)}
           <article class="card" class:update={n.update}>
             {#if thumb(n)}
-              <button class="media" onclick={() => open(n.video ? watch(n) : n.url)} aria-label={n.video ? "Watch the video" : "Open the post"}>
+              <button class="media" onclick={() => (n.video ? play(n) : open(n.url))} aria-label={n.video ? "Play the video" : "Open the post"}>
                 <img src={thumb(n)} alt="" loading="lazy" onerror={() => broken.add(n.gid)} />
                 {#if n.video}<span class="play small" aria-hidden="true"></span>{/if}
               </button>
@@ -158,6 +162,37 @@
   </div>
 </section>
 
+<!-- Player (D-150): the iframe exists only while a video is open, so an idle home page
+     still carries no embedded player. Escape or the backdrop closes it. -->
+{#if playing}
+  <div
+    class="player-backdrop"
+    role="button"
+    tabindex="-1"
+    aria-label="Close the video"
+    onclick={() => (playing = null)}
+    onkeydown={(e) => (e.key === "Enter" || e.key === " " ? (playing = null) : undefined)}
+  >
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <div class="player" onclick={(e) => e.stopPropagation()}>
+      <div class="player-bar">
+        <span class="player-title" title={playing.title}>{playing.title}</span>
+        <button class="btn small secondary" onclick={() => open(`https://www.youtube.com/watch?v=${playing?.id}`)}>On YouTube</button>
+        <button class="btn small secondary" onclick={() => (playing = null)} aria-label="Close the video">Close</button>
+      </div>
+      <iframe
+        src={embed(playing.id)}
+        title={playing.title}
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+        allowfullscreen
+        referrerpolicy="strict-origin-when-cross-origin"
+      ></iframe>
+    </div>
+  </div>
+{/if}
+
+<svelte:window onkeydown={onPlayerKey} />
+
 <style>
   .home { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
 
@@ -176,6 +211,13 @@
   .btn { all: unset; cursor: pointer; padding: 8px 14px; border-radius: 10px; background: var(--accent); color: var(--accent-fg); font-weight: 600; white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
   .btn.secondary { background: var(--bg-row); color: var(--fg); border: 1px solid var(--border); font-weight: 500; }
   .btn.small { padding: 4px 10px; font-size: 12px; border-radius: var(--radius); }
+
+  /* Video player (D-150). */
+  .player-backdrop { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 24px; background: rgb(0 0 0 / 0.72); }
+  .player { width: min(1000px, 100%); display: flex; flex-direction: column; gap: 8px; }
+  .player-bar { display: flex; align-items: center; gap: 8px; }
+  .player-title { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .player iframe { width: 100%; aspect-ratio: 16 / 9; max-height: 74vh; border: 0; border-radius: 12px; background: #000; box-shadow: 0 24px 60px rgb(0 0 0 / 0.5); }
   .btn:hover { filter: brightness(1.08); }
   .btn.secondary:hover { border-color: var(--accent); filter: none; }
   .btn:disabled { opacity: 0.6; cursor: default; }

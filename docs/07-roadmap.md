@@ -40,6 +40,7 @@ Out of scope for v1: Linux, server-owner listing/boosts, accounts, telemetry. (T
 | v0.1.19 | "Clear list" on the Recent view (confirmed), twelve accent colours picked as dots with an `--accent-fg` token so light-theme accents stay readable, lime as the new default accent with a one-time move off amber, news summaries no longer opening with a picture address, README rewritten with fresh screenshots, MIT licence file | D-130–D-135 |
 | v0.1.20 | One Refresh button on the Servers page (it continues into the empty servers), Mods view reworked into a mod manager (search, filters, multi-select, bulk update and unsubscribe, reveal folder), readable mod names, centred Recent empty state, capped news hero | D-141–D-143 |
 | v0.1.21 | Mods count column in the server browser, sortable, with unscanned servers marked apart from vanilla ones | D-146 |
+| v0.1.22 | Audit round: DayZ no longer inherits below-normal priority, importing non-ASCII official favourites cannot abort the app, modals no longer kill the window controls, a mod download can be closed, table keys stop firing twice, plus news videos that play in the app and a debounced search | D-150–D-153 |
 | infra | GitHub Actions CI and tag-driven release workflow, release tools (`make_latest.js`, `verify_update_sig.js`, `nsis_template_check.js`) | D-063, D-071 |
 
 Candidates, not scheduled: code signing (Q11), a "friends on this server" marker in the browser once Q21 shows how DayZ reports servers to Steam.

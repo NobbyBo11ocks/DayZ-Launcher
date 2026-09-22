@@ -107,6 +107,8 @@ function loadFilters(): Filters {
 const STALE_SECS = 120;
 /** Title-bar friend count poll (D-103); Steam answers from its local cache. */
 const FRIENDS_POLL_MS = 60_000;
+/** One collator for the whole session: `localeCompare` builds one per call (D-152). */
+const COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 /** Private (RFC 1918), loopback and link-local IPv4: what Steam's LAN discovery returns (D-087). */
 export function isLanIp(ip: string): boolean {
@@ -239,16 +241,20 @@ class ServersStore {
     // fresh rows to verification in a loop that grew CPU and memory).
     const pingBucket = (r: ServerRow) => Math.round(r.pingMs / 20);
     const byId = (a: ServerRow, b: ServerRow) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    // Mod counts once per sort rather than once per comparison (D-152): the map is
+    // reactive, so a lookup inside the comparator was ~n log n signal reads.
+    const modCounts =
+      key === "mods" ? new Map(out.map((r) => [r.id, this.modsByServer.get(r.id)?.length ?? -1])) : null;
     const cmp = (a: ServerRow, b: ServerRow): number => {
       switch (key) {
         case "name":
-          return a.name.localeCompare(b.name) || byId(a, b);
+          return COLLATOR.compare(a.name, b.name) || byId(a, b);
         case "map":
-          return a.map.localeCompare(b.map) || trustedPlayers(b) - trustedPlayers(a) || byId(a, b);
+          return COLLATOR.compare(a.map, b.map) || trustedPlayers(b) - trustedPlayers(a) || byId(a, b);
         case "mods": {
           // Unscanned servers sort below every scanned one, in both directions.
-          const ma = this.modsByServer.get(a.id)?.length ?? -1;
-          const mb = this.modsByServer.get(b.id)?.length ?? -1;
+          const ma = modCounts?.get(a.id) ?? -1;
+          const mb = modCounts?.get(b.id) ?? -1;
           return ma - mb || trustedPlayers(b) - trustedPlayers(a) || byId(a, b);
         }
         case "players":

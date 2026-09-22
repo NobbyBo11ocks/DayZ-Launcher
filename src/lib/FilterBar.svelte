@@ -14,6 +14,36 @@
     searchEl?.select();
   }
 
+  // Debounced search (D-152). `typed` follows the keyboard; the store follows `typed`
+  // after a pause, or at once when the field is cleared.
+  const SEARCH_DELAY_MS = 180;
+  let typed = $state(servers.filters.search);
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
+  function setSearch(value: string, now = false) {
+    typed = value;
+    clearTimeout(searchTimer);
+    if (now || value === "") {
+      servers.filters.search = value;
+      servers.saveFilters();
+      return;
+    }
+    searchTimer = setTimeout(() => {
+      servers.filters.search = value;
+      servers.saveFilters();
+    }, SEARCH_DELAY_MS);
+  }
+  // A reset elsewhere (the Reset chip) must show up in the field AND cancel a pending
+  // write: without the cancel, a timer armed moments earlier wrote the old term back
+  // into the freshly reset filters, leaving the list filtered by an invisible term
+  // (D-159).
+  $effect(() => {
+    if (servers.filters.search === "" && typed !== "") {
+      clearTimeout(searchTimer);
+      typed = "";
+    }
+  });
+  $effect(() => () => clearTimeout(searchTimer));
+
   const f = $derived(servers.filters);
   const fmt = new Intl.NumberFormat();
   const toggle = (key: "notFull" | "notEmpty" | "hasQueue" | "noPassword" | "battleyeOnly" | "dayOnly" | "versionMine" | "hideUntrusted" | "friendsOnly") => {
@@ -47,17 +77,21 @@
   <div class="filters" role="toolbar" aria-label="Filters">
     <label class="searchwrap">
       <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="M10.5 10.5L14 14" /></svg>
+      <!-- Typed value is local and the store is written on a short delay (D-152): every
+           write re-filters and re-sorts up to 20 000 rows, so binding straight to the
+           store made each keystroke pay for a full pass. -->
       <input
         class="search"
         type="search"
         placeholder="Search name, map or IP"
-        bind:value={servers.filters.search}
+        value={typed}
         bind:this={searchEl}
         aria-label="Search servers (press / to focus)"
         spellcheck="false"
+        oninput={(e) => setSearch((e.currentTarget as HTMLInputElement).value)}
         onkeydown={(e) => {
           if (e.key === "Escape") {
-            servers.filters.search = "";
+            setSearch("", true);
             (e.target as HTMLInputElement).blur();
           }
         }}

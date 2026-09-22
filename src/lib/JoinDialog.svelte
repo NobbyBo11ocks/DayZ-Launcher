@@ -45,7 +45,11 @@
   const canSync = $derived(!!plan && plan.steamRunning && toSync.length > 0);
   const downloadedBytes = $derived([...progress.values()].reduce((a, p) => a + (p.state === "installed" ? p.total : p.downloaded), 0));
   const totalBytes = $derived([...progress.values()].reduce((a, p) => a + p.total, 0));
-  const busy = $derived(phase === "syncing" || phase === "launching");
+  // Only the launch itself is uninterruptible (D-151). A Workshop download used to lock
+  // the dialog — and with it the window — until Steam finished or the backend's 45-minute
+  // timeout fired. Closing now just stops watching: Steam keeps downloading and the Mods
+  // page shows the progress.
+  const busy = $derived(phase === "launching");
 
   async function refreshSlots(): Promise<ServerSlots | null> {
     try {
@@ -293,7 +297,9 @@
         <button class="btn secondary" onclick={cancelWaiting}>Stop waiting</button>
         <button class="btn" onclick={() => { stopWaiting(); void launch(); }} disabled={!canLaunch}>Join now anyway</button>
       {:else}
-        <button class="btn secondary" onclick={close} disabled={busy}>{phase === "running" || phase === "exited" ? "Close" : "Cancel"}</button>
+        <button class="btn secondary" onclick={close} disabled={busy} title={phase === "syncing" ? "Steam keeps downloading in the background; watch it on the Mods page" : undefined}>
+          {phase === "running" || phase === "exited" ? "Close" : phase === "syncing" ? "Close (keeps downloading)" : "Cancel"}
+        </button>
         {#if phase === "ready" || phase === "error" || phase === "exited"}
           {#if toSync.length}
             <button class="btn" onclick={() => sync(true)} disabled={!canSync || (plan?.passwordRequired && !password)}>Download {toSync.length} mod{toSync.length === 1 ? "" : "s"} and join</button>

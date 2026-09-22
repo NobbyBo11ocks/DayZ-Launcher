@@ -209,7 +209,25 @@ impl SettingsStore {
             std::fs::create_dir_all(dir)?;
         }
         let json = serde_json::to_vec_pretty(s).map_err(invalid)?;
-        std::fs::write(&self.path, json)
+        // Write beside the file and rename over it (D-159). A plain write truncates
+        // first, so a crash mid-write left a short file that `load` silently replaced
+        // with the defaults — losing the launch profiles, theme, accent and filters.
+        // The settings are written on every preference change, so the window is real.
+        let tmp = self.path.with_extension("json.tmp");
+        {
+            use std::io::Write;
+            let mut f = std::fs::File::create(&tmp)?;
+            f.write_all(&json)?;
+            f.sync_all()?;
+        }
+        match std::fs::rename(&tmp, &self.path) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                let _ = std::fs::remove_file(&tmp);
+                crate::log_error!("settings", "could not replace {}: {e}", self.path.display());
+                Err(e)
+            }
+        }
     }
 }
 

@@ -1,95 +1,114 @@
-// Generates the app icon source (1024×1024 RGBA PNG) without any image library:
-// a dark rounded tile with an amber "Z" built from two bars and a diagonal band.
-// Usage: node tools/make_icon.js [out.png]   (default src-tauri/icons/source.png)
-// Then:  npx tauri icon src-tauri/icons/source.png
+// Generates the app icon (D-156): a dark tile with a lime chevron mark that reads as a
+// "Z" at 256 px and as a forward arrow at 16 px, over a faint crosshair ring for the
+// server-browser idea. Drawn as SVG and rasterised with sharp, then written as a
+// multi-size .ico plus the PNG sizes Tauri bundles.
+//
+// Usage: node tools/make_icon.js            (writes src-tauri/icons/*)
+//        node tools/make_icon.js --preview  (also writes icon-preview.png at 256)
 import { writeFileSync } from "node:fs";
-import { deflateSync } from "node:zlib";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 
-const SIZE = 1024;
-const out = process.argv[2] ?? "src-tauri/icons/source.png";
-
-const BG = [0x16, 0x1b, 0x22, 255];
-const EDGE = [0x26, 0x2d, 0x37, 255];
-const ACCENT = [0xf0, 0xb4, 0x29, 255];
-
-const px = new Uint8Array(SIZE * SIZE * 4); // transparent by default
-
-function put(x, y, c) {
-  const i = (y * SIZE + x) * 4;
-  px[i] = c[0];
-  px[i + 1] = c[1];
-  px[i + 2] = c[2];
-  px[i + 3] = c[3];
+const require = createRequire(import.meta.url);
+let sharp;
+try {
+  sharp = require("sharp");
+} catch {
+  console.error("make_icon: needs sharp. Run it from a directory where `npm i sharp` has been done, e.g.\n  npm i --no-save sharp && node tools/make_icon.js");
+  process.exit(2);
 }
 
-// Rounded square with a subtle edge.
-const R = 200;
-const inTile = (x, y, inset) => {
-  const lo = inset;
-  const hi = SIZE - 1 - inset;
-  const r = R - inset;
-  const cx = x < lo + r ? lo + r : x > hi - r ? hi - r : x;
-  const cy = y < lo + r ? lo + r : y > hi - r ? hi - r : y;
-  return (x - cx) ** 2 + (y - cy) ** 2 <= r * r;
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const ICONS = path.join(ROOT, "src-tauri", "icons");
+
+const BG_TOP = "#1d2530";
+const BG_BOTTOM = "#0f1216";
+const EDGE = "#2f3947";
+const ACCENT = "#a3e635";
+const ACCENT_DIM = "#6f9e1f";
+
+/** One square mark at any size; `r` is the corner radius as a fraction. */
+const svg = (size) => {
+  const s = size;
+  const u = (n) => (n * s) / 1024; // authored at 1024
+  return `<svg width="${s}" height="${s}" viewBox="0 0 ${s} ${s}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0%" stop-color="${BG_TOP}"/>
+      <stop offset="100%" stop-color="${BG_BOTTOM}"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="${ACCENT}"/>
+      <stop offset="100%" stop-color="${ACCENT_DIM}"/>
+    </linearGradient>
+  </defs>
+  <rect x="${u(8)}" y="${u(8)}" width="${u(1008)}" height="${u(1008)}" rx="${u(208)}" fill="url(#tile)" stroke="${EDGE}" stroke-width="${u(16)}"/>
+  <circle cx="${u(512)}" cy="${u(512)}" r="${u(330)}" fill="none" stroke="${ACCENT}" stroke-width="${u(14)}" opacity="0.16"/>
+  <path d="M ${u(300)} ${u(300)} H ${u(724)} L ${u(300)} ${u(724)} H ${u(724)}"
+        fill="none" stroke="url(#mark)" stroke-width="${u(118)}"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="${u(300)}" y="${u(790)}" width="${u(424)}" height="${u(26)}" rx="${u(13)}" fill="${ACCENT}" opacity="0.5"/>
+</svg>`;
 };
-for (let y = 0; y < SIZE; y++) {
-  for (let x = 0; x < SIZE; x++) {
-    if (inTile(x, y, 0)) put(x, y, inTile(x, y, 10) ? BG : EDGE);
+
+const png = (size) => sharp(Buffer.from(svg(size))).png({ compressionLevel: 9 }).toBuffer();
+
+/** Minimal ICO container: header, one directory entry per image, PNG payloads. */
+function ico(images) {
+  const header = Buffer.alloc(6);
+  header.writeUInt16LE(0, 0);
+  header.writeUInt16LE(1, 2); // type: icon
+  header.writeUInt16LE(images.length, 4);
+  const dir = Buffer.alloc(16 * images.length);
+  let offset = header.length + dir.length;
+  images.forEach((img, i) => {
+    const o = i * 16;
+    dir[o] = img.size >= 256 ? 0 : img.size;
+    dir[o + 1] = img.size >= 256 ? 0 : img.size;
+    dir[o + 2] = 0; // palette
+    dir[o + 3] = 0;
+    dir.writeUInt16LE(1, o + 4); // colour planes
+    dir.writeUInt16LE(32, o + 6); // bits per pixel
+    dir.writeUInt32LE(img.data.length, o + 8);
+    dir.writeUInt32LE(offset, o + 12);
+    offset += img.data.length;
+  });
+  return Buffer.concat([header, dir, ...images.map((i) => i.data)]);
+}
+
+(async () => {
+  const icoSizes = [16, 24, 32, 48, 64, 128, 256];
+  const images = [];
+  for (const size of icoSizes) images.push({ size, data: await png(size) });
+  writeFileSync(path.join(ICONS, "icon.ico"), ico(images));
+
+  // The PNGs the Tauri bundle and the Windows Store assets refer to.
+  const pngTargets = {
+    "32x32.png": 32,
+    "64x64.png": 64,
+    "128x128.png": 128,
+    "128x128@2x.png": 256,
+    "icon.png": 512,
+    "source.png": 1024,
+    "StoreLogo.png": 50,
+    "Square30x30Logo.png": 30,
+    "Square44x44Logo.png": 44,
+    "Square71x71Logo.png": 71,
+    "Square89x89Logo.png": 89,
+    "Square107x107Logo.png": 107,
+    "Square142x142Logo.png": 142,
+    "Square150x150Logo.png": 150,
+    "Square284x284Logo.png": 284,
+    "Square310x310Logo.png": 310,
+  };
+  for (const [name, size] of Object.entries(pngTargets)) {
+    writeFileSync(path.join(ICONS, name), await png(size));
   }
-}
 
-// "Z": top bar, bottom bar, diagonal band (top-right → bottom-left).
-const barH = 84;
-const left = 268;
-const right = 756;
-const top = 292;
-const bottom = 732;
-const diagW = 96;
-for (let y = top; y < bottom; y++) {
-  const t = (y - top) / (bottom - top);
-  const cx = right - diagW / 2 - t * (right - left - diagW); // band centre at this row
-  for (let x = left; x < right; x++) {
-    const inTop = y < top + barH;
-    const inBottom = y >= bottom - barH;
-    const inDiag = Math.abs(x - cx) <= diagW / 2;
-    if (inTop || inBottom || inDiag) put(x, y, ACCENT);
+  if (process.argv.includes("--preview")) {
+    writeFileSync(path.join(ROOT, "icon-preview.png"), await png(256));
+    console.log("wrote icon-preview.png");
   }
-}
-
-// --- PNG encoding ---------------------------------------------------------
-const crcTable = new Uint32Array(256).map((_, n) => {
-  let c = n;
-  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-  return c >>> 0;
-});
-const crc32 = (buf) => {
-  let c = 0xffffffff;
-  for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8);
-  return (c ^ 0xffffffff) >>> 0;
-};
-const chunk = (type, data) => {
-  const len = Buffer.alloc(4);
-  len.writeUInt32BE(data.length);
-  const td = Buffer.concat([Buffer.from(type, "ascii"), data]);
-  const crc = Buffer.alloc(4);
-  crc.writeUInt32BE(crc32(td));
-  return Buffer.concat([len, td, crc]);
-};
-const ihdr = Buffer.alloc(13);
-ihdr.writeUInt32BE(SIZE, 0);
-ihdr.writeUInt32BE(SIZE, 4);
-ihdr[8] = 8; // bit depth
-ihdr[9] = 6; // RGBA
-const raw = Buffer.alloc((SIZE * 4 + 1) * SIZE);
-for (let y = 0; y < SIZE; y++) {
-  raw[y * (SIZE * 4 + 1)] = 0; // filter: none
-  Buffer.from(px.buffer, y * SIZE * 4, SIZE * 4).copy(raw, y * (SIZE * 4 + 1) + 1);
-}
-const png = Buffer.concat([
-  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-  chunk("IHDR", ihdr),
-  chunk("IDAT", deflateSync(raw, { level: 9 })),
-  chunk("IEND", Buffer.alloc(0)),
-]);
-writeFileSync(out, png);
-console.log(`wrote ${out} (${png.length} bytes)`);
+  console.log(`wrote icon.ico (${icoSizes.join(", ")}) and ${Object.keys(pngTargets).length} PNG sizes to src-tauri/icons`);
+})();

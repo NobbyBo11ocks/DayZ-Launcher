@@ -1,4 +1,4 @@
-//! DayZ Launcher core. Module layout follows docs/05-architecture-and-optimisation.md §2.
+//! DZSA CrayZ Launcher core. Module layout follows docs/05-architecture-and-optimisation.md §2.
 //! Windows-only desktop target; no mobile entry point.
 
 pub mod a2s;
@@ -7,6 +7,7 @@ mod commands;
 pub mod error;
 pub mod geoip;
 pub mod launch;
+pub mod log;
 pub mod news;
 pub mod perf;
 pub mod proc;
@@ -84,8 +85,29 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
-            let db_path = app.path().app_local_data_dir()?.join("cache.db");
-            let cache = Arc::new(Mutex::new(Cache::open(&db_path)?));
+            let data_dir = app.path().app_local_data_dir()?;
+            // Before anything else that can fail, so a failure is in the log (D-158).
+            log::init(&data_dir);
+            log_info!(
+                "app",
+                "start v{} · elevation {:?}",
+                env!("CARGO_PKG_VERSION"),
+                elevation()
+            );
+            let db_path = data_dir.join("cache.db");
+            let cache = Arc::new(Mutex::new(match Cache::open(&db_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    log_error!("cache", "open failed at {}: {e}", db_path.display());
+                    return Err(e.into());
+                }
+            }));
+            log_info!(
+                "cache",
+                "open {} rows at {}",
+                cache.lock().map(|c| c.count().unwrap_or(0)).unwrap_or(0),
+                db_path.display()
+            );
             #[cfg(debug_assertions)]
             eprintln!("[setup] cache at {} ({} rows)", db_path.display(), cache.lock().map(|c| c.count().unwrap_or(0)).unwrap_or(0));
             let settings = SettingsStore::load(&app.path().app_config_dir()?.join("settings.json"));
@@ -120,6 +142,19 @@ pub fn run() {
                 while let Some(ev) = rx.recv().await {
                     match ev {
                         SteamEvent::Status(s) => {
+                            // Status changes are rare and always interesting (D-158).
+                            if let Some(err) = &s.error {
+                                log_warn!("steam", "status: initialized={} refreshing={} error={err}", s.initialized, s.refreshing);
+                            } else {
+                                log_info!(
+                                    "steam",
+                                    "status: initialized={} refreshing={} persona={:?} at {} ms",
+                                    s.initialized,
+                                    s.refreshing,
+                                    s.persona,
+                                    uptime_ms()
+                                );
+                            }
                             #[cfg(debug_assertions)]
                             eprintln!(
                                 "[steam] status: initialized={} refreshing={} error={:?} at {} ms",
@@ -162,6 +197,32 @@ pub fn run() {
                                     ))
                                     .collect::<Vec<_>>()
                             );
+                            log_info!(
+                                "steam",
+                                "refresh done ({}): {} listed, {} answered, {} failed, {} inflated, capped={} early={} in {} ms across {} partition(s)",
+                                d.source,
+                                d.total,
+                                d.responded,
+                                d.failed,
+                                d.inflated,
+                                d.capped,
+                                d.stopped_early,
+                                d.elapsed_ms,
+                                d.partitions.len()
+                            );
+                            for p in &d.partitions {
+                                log_debug!(
+                                    "steam",
+                                    "  partition {:?}: {} total, {} ok, {} failed, {} inflated, {} ms, {}",
+                                    p.filters,
+                                    p.total,
+                                    p.responded,
+                                    p.failed,
+                                    p.inflated,
+                                    p.elapsed_ms,
+                                    p.response
+                                );
+                            }
                             let _ = handle.emit("servers:done", &d);
                             // A LAN scan is not a list refresh: it must not push the
                             // automatic refresh's throttle or age out cached rows.
@@ -195,6 +256,17 @@ pub fn run() {
                                     .await;
                                     commands::run_mod_scan(h, c, client, false).await;
                                 });
+                            } else if full_list {
+                                // Nothing to verify still has to close the pass (D-151):
+                                // the UI sets "verifying" when a refresh starts and only
+                                // this event clears it. Only for a Steam list refresh
+                                // though (D-159): a LAN scan never sets the flag, and an
+                                // empty summary there replaced a good one on screen with
+                                // "0 verified · 0 fake · 0 offline".
+                                let _ = handle.emit(
+                                    "servers:verify-done",
+                                    &commands::VerifySummary::default(),
+                                );
                             }
                         }
                         SteamEvent::SyncProgress(p) => {
@@ -259,6 +331,9 @@ pub fn run() {
             commands::news_thumb,
             commands::friend_avatar,
             commands::cache_stats,
+            commands::logs_recent,
+            commands::logs_path,
+            commands::log_ui,
             commands::steam_avatar,
             commands::launch_game,
             commands::favourites_list,

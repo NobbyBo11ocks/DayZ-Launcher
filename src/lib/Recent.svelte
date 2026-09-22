@@ -60,7 +60,9 @@
       <table>
         <thead><tr><th>When</th><th>Server</th><th>Address</th><th class="num">Mods</th><th></th></tr></thead>
         <tbody>
-          {#each servers.history as h (h.id + h.joinedAt)}
+          <!-- Index in the key: two joins to the same server in the same second are
+               otherwise duplicate keys and Svelte throws (D-151). -->
+          {#each servers.history as h, i (`${h.id}@${h.joinedAt}#${i}`)}
             {@const live = servers.rows.get(h.id)}
             <tr>
               <td class="muted">{when(h.joinedAt)}</td>

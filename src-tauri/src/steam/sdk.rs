@@ -740,7 +740,28 @@ fn reject(cmd: Cmd, events: &UnboundedSender<SteamEvent>, e: String) {
                 elapsed_ms: 0,
             }));
         }
-        Cmd::Refresh(_) | Cmd::Shutdown => {}
+        // A refresh must be answered, not dropped (D-159). The caller already told the
+        // UI a refresh had started, and only a `Done` clears that, so silently ignoring
+        // this left "refreshing…" and "verifying player counts…" on screen for ever.
+        Cmd::Refresh(partitions) => {
+            crate::log_warn!("steam", "refresh rejected, no session: {e}");
+            let _ = events.send(SteamEvent::Done(RefreshDone {
+                total: 0,
+                responded: 0,
+                failed: 0,
+                inflated: 0,
+                elapsed_ms: 0,
+                partitions: Vec::new(),
+                capped: false,
+                stopped_early: true,
+                source: if partitions.iter().any(|p| p.contains_key("lan")) {
+                    "lan"
+                } else {
+                    "steam"
+                },
+            }));
+        }
+        Cmd::Shutdown => {}
     }
 }
 

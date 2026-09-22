@@ -415,6 +415,18 @@ pub async fn run_verification(
         summary.offline,
         summary.elapsed_ms
     );
+    crate::log_info!(
+        "verify",
+        "{}: {} checked, {} verified, {} inflated, {} unverifiable, {} synthetic, {} offline in {} ms",
+        if announce { "pass" } else { "on demand" },
+        summary.total,
+        summary.verified,
+        summary.inflated,
+        summary.unverifiable,
+        summary.synthetic,
+        summary.offline,
+        summary.elapsed_ms
+    );
     if announce {
         let _ = app.emit("servers:verify-done", &summary);
     }
@@ -843,6 +855,33 @@ pub async fn friend_avatar(
         .map_err(AppError::Internal)
 }
 
+/// The most recent diagnostic entries, newest last (D-158).
+#[tauri::command]
+pub fn logs_recent(limit: Option<usize>) -> Vec<crate::log::Entry> {
+    crate::log::recent(limit.unwrap_or(200).min(400))
+}
+
+/// Where the log file lives, for "show me the folder".
+#[tauri::command]
+pub fn logs_path() -> Option<String> {
+    crate::log::path().map(|p| p.to_string_lossy().into_owned())
+}
+
+/// The WebView's own diagnostics: unhandled errors, failed commands, view timings.
+/// Frontend levels are clamped to the same four, and the target is prefixed so the
+/// origin is never ambiguous in the file.
+#[tauri::command]
+pub fn log_ui(level: String, target: String, message: String) {
+    let lvl = match level.as_str() {
+        "error" => crate::log::Level::Error,
+        "warn" => crate::log::Level::Warn,
+        "debug" => crate::log::Level::Debug,
+        _ => crate::log::Level::Info,
+    };
+    let target = format!("ui:{}", target.chars().take(24).collect::<String>());
+    crate::log::write(lvl, &target, message.chars().take(2000).collect::<String>());
+}
+
 /// Row counts and file sizes of the cache database (D-115).
 #[tauri::command]
 pub async fn cache_stats(state: State<'_, AppState>) -> AppResult<crate::browser::CacheStats> {
@@ -1124,7 +1163,25 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
     if !diag.steam.running {
         warnings.push("Steam is not running; DayZ cannot start without it.".into());
     }
-    match crate::elevation() {
+    // Re-checked here, not taken from start-up (D-159): the launcher often starts before
+    // Steam, and a missing Steam pid reads as "matched", so the start-up answer was
+    // usually the wrong one by the time anybody pressed Join. `diag` already has the
+    // live pid from this call.
+    let elevation = if diag.steam.pid == 0 {
+        crate::elevation()
+    } else {
+        crate::proc::elevation_state(diag.steam.pid)
+    };
+    if elevation != crate::elevation() {
+        crate::log_info!(
+            "launch",
+            "elevation re-checked against live Steam pid {}: {:?} (start-up said {:?})",
+            diag.steam.pid,
+            elevation,
+            crate::elevation()
+        );
+    }
+    match elevation {
         crate::proc::ElevationState::LauncherHigher => warnings.push(
             "The launcher runs as administrator but Steam does not; DayZ started from here cannot reach Steam. Start the launcher normally, or Steam as administrator.".into(),
         ),
@@ -1275,15 +1332,25 @@ pub async fn launch_game(
     .map_err(|e| AppError::Internal(format!("launch task failed: {e}")))??;
 
     let args = launch::build_args(&spec);
-    // While the game runs the launcher steps aside (D-119); the exit watcher restores it.
-    crate::proc::set_priority(crate::proc::Priority::BelowNormal);
+    // Spawn FIRST, then step aside (D-119, corrected in D-151): a child started by a
+    // BELOW_NORMAL parent inherits that class, so lowering the launcher before the spawn
+    // handed DayZ itself a below-normal priority — the opposite of the intent.
     let (mut child, launched) = match launch::spawn(&game_dir, &args) {
         Ok(v) => v,
         Err(e) => {
-            crate::proc::set_priority(crate::proc::Priority::High);
+            crate::log_error!("launch", "spawn failed for {id}: {e}");
             return Err(e);
         }
     };
+    crate::log_info!(
+        "launch",
+        "started pid {} for {} with {} mod link(s), {} chars of arguments",
+        launched.pid,
+        id,
+        links.len(),
+        launched.command_line.len()
+    );
+    crate::proc::set_priority(crate::proc::Priority::BelowNormal);
     {
         let c = Arc::clone(&state.cache);
         let row_for_history = row.clone();
@@ -1310,6 +1377,7 @@ pub async fn launch_game(
         #[cfg(debug_assertions)]
         eprintln!("[launch] pid {pid} exited with {code:?}");
         crate::proc::set_priority(crate::proc::Priority::High);
+        crate::log_info!("launch", "pid {pid} exited with code {code:?}");
         let _ = app.emit("launch:exited", &LaunchExited { pid, code });
     });
     Ok(launched)

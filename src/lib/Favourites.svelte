@@ -22,7 +22,7 @@
     <div class="bar">
       <input class="search" type="search" placeholder="Search favourites…" bind:value={servers.filters.search} aria-label="Search favourites" />
       <button class="btn secondary" onclick={importOfficial} disabled={importing} title="Reads %LOCALAPPDATA%\DayZ Launcher\FavouriteServers.xml">
-        {importing ? "Importing…" : "Import from DayZ Launcher"}
+        {importing ? "Importing…" : "Import from the official launcher"}
       </button>
       <span class="muted">
         {servers.favouriteRows.length} favourite{servers.favouriteRows.length === 1 ? "" : "s"}
