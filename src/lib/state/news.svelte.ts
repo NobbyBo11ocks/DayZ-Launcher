@@ -50,6 +50,7 @@ class NewsStore {
   #thumbPending = new Set<string>();
   #thumbFailed = new Set<string>();
   #started = false;
+  #timer: ReturnType<typeof setInterval> | undefined;
   #visiting = false;
 
   list = $derived(this.items.filter((n) => (this.view === "press" ? true : n.official && (this.view === "official" || n.update))));
@@ -68,12 +69,27 @@ class NewsStore {
     }
     const u = await uiPrefs.ready;
     this.seen = u.newsSeen ?? 0;
+    // A switch-off between here and now must not be overtaken by this first fetch.
+    if (!this.#started) return;
     await this.refresh();
-    setInterval(() => void this.refresh(), REFRESH_MS);
+    this.#timer = setInterval(() => void this.refresh(), REFRESH_MS);
+  }
+
+  /** Stops fetching for the rest of the session; `start()` arms it again. */
+  stop() {
+    this.#started = false;
+    if (this.#timer !== undefined) {
+      clearInterval(this.#timer);
+      this.#timer = undefined;
+    }
+    // Nothing should be left pointing at a page that is no longer in the sidebar.
+    this.alerts = [];
   }
 
   async refresh() {
-    if (this.loading) return;
+    // The switch is checked here as well as at the call sites: this is the one place
+    // every fetch passes through, so it is the honest place to enforce the promise.
+    if (!this.#started || this.loading) return;
     this.loading = true;
     const before = this.seen;
     const known = new Set(this.items.map((n) => n.gid));

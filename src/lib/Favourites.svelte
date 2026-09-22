@@ -51,7 +51,9 @@
         onFavourite={(id) => servers.toggleFavourite(id)}
         friendsOn={servers.friendsOn}
         modsByServer={servers.modsByServer}
-        empty="These favourites are not in the list yet. They appear after the next refresh, or once Steam answers."
+        empty={servers.filters.search.trim()
+          ? `No favourite matches "${servers.filters.search.trim()}". The search box is shared with the Servers page.`
+          : "These favourites are not in the list yet. They appear after the next refresh, or once Steam answers."}
       />
       {#if selected}
         <DetailsPane row={selected} localVersion={servers.localVersion} />

@@ -218,8 +218,22 @@ pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResu
         let for_db = batch.clone();
         let _ = tauri::async_runtime::spawn_blocking(move || {
             if let Ok(mut c) = c.lock() {
-                let _ = c.upsert(&for_db);
-                let _ = c.replace_server_mods_many(&mods, now);
+                // Both were discarded, so a failed write still returned Ok(n) and
+                // the mod rows could be written for servers the upsert never stored
+                // — the same class of bug fixed for the favourites import (D-186).
+                if let Err(e) = c.upsert(&for_db) {
+                    crate::log_error!(
+                        "cache",
+                        "DZSA upsert of {} row(s) failed: {e}",
+                        for_db.len()
+                    );
+                } else if let Err(e) = c.replace_server_mods_many(&mods, now) {
+                    crate::log_error!(
+                        "cache",
+                        "DZSA mod lists for {} row(s) failed: {e}",
+                        mods.len()
+                    );
+                }
             }
         })
         .await;

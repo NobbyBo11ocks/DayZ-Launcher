@@ -26,6 +26,8 @@
   let busyIds = $state<Set<number>>(new Set());
   let updating = $state<SyncProgress | null>(null);
   let updateJob = 0;
+  /** The download in flight was started elsewhere (the join dialog), not by this page. */
+  let fromJoin = $state(false);
   let search = $state("");
   /** "one" confirms a single unsubscribe, "bulk" the selection. */
   let confirming = $state<{ kind: "one"; id: number; name: string } | { kind: "bulk" } | null>(null);
@@ -72,14 +74,17 @@
     const unlisteners: UnlistenFn[] = [];
     (async () => {
       unlisteners.push(
+        // Any job, not just this page's: a download started from the join dialog is
+        // the one the user is most likely to come here to watch (D-184).
         await listen<SyncProgress>("mods:progress", (ev) => {
-          if (ev.payload.job === updateJob) updating = ev.payload;
+          updating = ev.payload;
+          fromJoin = ev.payload.job !== updateJob;
         }),
         await listen<SyncDone>("mods:done", (ev) => {
-          if (ev.payload.job !== updateJob) return;
           updating = null;
-          notice = ev.payload.ok ? `Updated ${ev.payload.items.length} mod${ev.payload.items.length === 1 ? "" : "s"}.` : null;
-          error = ev.payload.ok ? null : (ev.payload.error ?? "Update failed");
+          fromJoin = false;
+          notice = ev.payload.ok ? `Downloaded ${ev.payload.items.length} mod${ev.payload.items.length === 1 ? "" : "s"}.` : null;
+          error = ev.payload.ok ? null : (ev.payload.error ?? "Download failed");
           void load();
         }),
       );
@@ -226,9 +231,12 @@
         </button>
       {/if}
     {/if}
+    {#if updating && fromJoin}
+      <span class="muted">Downloading for a join… {updating.installed}/{updating.total}</span>
+    {/if}
     {#if stale.length}
       <button class="btn accent" onclick={() => update(stale.map((i) => i.id))} disabled={!!updating}>
-        {updating ? `Updating… ${updating.installed}/${updating.total}` : `Update all ${stale.length}`}
+        {updating && !fromJoin ? `Updating… ${updating.installed}/${updating.total}` : `Update all ${stale.length}`}
       </button>
     {/if}
     <button class="btn" onclick={load} disabled={!!updating}>Rescan</button>
@@ -333,7 +341,7 @@
   {/if}
 
   <p class="muted small">
-    Steam downloads mods when you join a server that needs them. Junctions in <code>!Workshop</code> are shared with the official launcher and never deleted here on their own; dangling ones can be removed from Diagnostics.
+    Steam downloads mods when you join a server that needs them. Junctions in <code>!Workshop</code> are shared with the official launcher and never deleted here on their own; dangling ones can be cleaned up with the button above.
   </p>
 </section>
 

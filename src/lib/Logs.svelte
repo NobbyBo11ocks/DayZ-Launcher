@@ -193,7 +193,7 @@
   .acts { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
 
   .chip { all: unset; box-sizing: border-box; cursor: pointer; display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 999px; background: var(--bg-row); border: 1px solid var(--border); font-size: 11.5px; white-space: nowrap; }
-  .chip:hover { border-color: var(--accent); }
+  .chip:hover { border-color: var(--accent-ink); }
   .chip:disabled { opacity: 0.5; cursor: default; }
   .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .chip.on { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); color: var(--fg); }
@@ -211,7 +211,7 @@
   .line:hover { background: var(--bg-row); }
   .t { color: var(--fg-muted); }
   .lvl { color: var(--fg-muted); text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em; align-self: center; }
-  .tgt { color: var(--accent); overflow: hidden; text-overflow: ellipsis; }
+  .tgt { color: var(--accent-ink); overflow: hidden; text-overflow: ellipsis; }
   .msg { color: var(--fg); overflow-wrap: anywhere; }
   .line.warn .lvl, .line.warn .msg { color: var(--warn); }
   .line.error .lvl, .line.error .msg { color: var(--danger); }

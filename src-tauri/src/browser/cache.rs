@@ -185,11 +185,24 @@ impl Cache {
         // Index changes on a database that already exists (D-175): the old
         // `server_mods_mod` did not cover `name`, and `servers_last_seen` cost ~20 ms
         // per refresh to save 0.8 ms on the one query that used it.
-        conn.execute_batch(
-            "DROP INDEX IF EXISTS servers_last_seen;
-             DROP INDEX IF EXISTS server_mods_mod;
-             CREATE INDEX IF NOT EXISTS server_mods_mod ON server_mods(mod_id, name);",
-        )?;
+        let mods_index_sql: Option<String> = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'server_mods_mod'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let needs_rebuild = !mods_index_sql
+            .as_deref()
+            .is_some_and(|sql| sql.contains("mod_id, name"));
+        if needs_rebuild {
+            conn.execute_batch(
+                "DROP INDEX IF EXISTS server_mods_mod;
+                 CREATE INDEX server_mods_mod ON server_mods(mod_id, name);",
+            )?;
+        }
+        // Cheap whether or not it is there, and it is gone after the first run.
+        conn.execute_batch("DROP INDEX IF EXISTS servers_last_seen;")?;
         conn.execute_batch(USER_SCHEMA)?;
         Ok(Self { conn })
     }
@@ -595,15 +608,6 @@ impl Cache {
             }
         }
         tx.commit()
-    }
-
-    /// Unix seconds of each server's last mod scan.
-    pub fn mods_scanned(&self) -> rusqlite::Result<HashMap<String, i64>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT server_id, scanned_at FROM server_mods_at")?;
-        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
-        rows.collect()
     }
 
     /// Everything the browser needs for the mod filter: names with server counts, and

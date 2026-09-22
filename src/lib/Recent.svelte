@@ -8,14 +8,27 @@
     void servers.loadHistory();
   });
 
+  /**
+   * A server that has dropped out of the list is found by probing its ports, which
+   * takes up to ~15 s for one that is gone. Without a pending state the button looked
+   * untouched and invited repeat clicks, each starting another probe (D-184).
+   */
+  let joining = $state<string | null>(null);
   async function joinAgain(h: HistoryEntry) {
+    if (joining) return;
     if (servers.rowsTick >= 0 && servers.rows.has(h.id)) {
       servers.select(h.id);
       servers.joiningId = h.id;
       return;
     }
-    const row = await servers.directConnect(`${h.ip}:${h.gamePort}`);
-    if (row) servers.joiningId = row.id;
+    joining = h.id;
+    try {
+      const row = await servers.directConnect(`${h.ip}:${h.gamePort}`);
+      if (row) servers.joiningId = row.id;
+      else servers.error = `${h.name} did not answer on ${h.ip}:${h.gamePort}; it may be offline or have moved.`;
+    } finally {
+      joining = null;
+    }
   }
 
   const when = (unix: number) => new Date(unix * 1000).toLocaleString();
@@ -69,7 +82,7 @@
               <td>{live?.name ?? h.name}{#if servers.favourites.has(h.id)} <span class="star" title="Favourite">★</span>{/if}</td>
               <td class="mono">{h.ip}:{h.gamePort}</td>
               <td class="num">{h.mods}</td>
-              <td class="act"><button class="btn" onclick={() => joinAgain(h)}>Join again</button></td>
+              <td class="act"><button class="btn" onclick={() => joinAgain(h)} disabled={joining !== null}>{joining === h.id ? "Looking…" : "Join again"}</button></td>
             </tr>
           {/each}
         </tbody>
@@ -89,7 +102,7 @@
   .num { text-align: right; }
   .act { text-align: right; }
   .mono { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
-  .star { color: var(--accent); }
+  .star { color: var(--accent-ink); }
   .spacer { flex: 1; }
   .empty { margin: auto; text-align: center; max-width: 440px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
   .empty p { margin: 0; }

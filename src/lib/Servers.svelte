@@ -41,6 +41,8 @@
 
 
   function onKey(e: KeyboardEvent) {
+    // The join dialog is modal; the page behind it must not act on keys (D-184).
+    if (servers.joiningId) return;
     const target = e.target as HTMLElement | null;
     const typing = target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA");
     if (e.key === "/" && !typing) {
@@ -52,6 +54,23 @@
   }
 
   const busy = $derived(!servers.steam?.initialized || servers.steam?.refreshing === true);
+
+  /**
+   * What an empty grid should say. The three cases are genuinely different: a filter
+   * that matches nothing, a list that is on its way, and a list that cannot arrive.
+   * Before D-184 the first frame claimed Steam had not answered — `steam` is simply
+   * null until the first status event — and then told the user to press a Refresh
+   * button that is disabled precisely because the refresh is already running.
+   */
+  const emptyText = $derived.by(() => {
+    void servers.rowsTick;
+    if (servers.rows.size > 0) return "No server matches these filters. Clear the search, or widen the filters above.";
+    const s = servers.steam;
+    if (s?.refreshing || servers.dzsaLoading) return "Fetching the list…";
+    if (s == null) return "Starting up…";
+    if (!s.initialized) return "Steam has not answered, so there is no list yet. Start Steam, or load the DZSA list above.";
+    return "No servers yet. Press Refresh to ask Steam for the list; it takes about forty seconds.";
+  });
 
   const status = $derived.by(() => {
     const s = servers.steam;
@@ -137,11 +156,7 @@
       onFavourite={(id) => servers.toggleFavourite(id)}
       friendsOn={servers.friendsOn}
       modsByServer={servers.modsByServer}
-      empty={servers.rowsTick >= 0 && servers.rows.size === 0
-        ? servers.steam?.initialized
-          ? "No servers yet. Refresh asks Steam for the list; it takes about forty seconds."
-          : "No servers yet, and Steam has not answered. Start Steam, or load the DZSA list above."
-        : "No server matches these filters. Clear the search, or widen the filters above."}
+      empty={emptyText}
     />
     {#if servers.selected}
       <DetailsPane row={servers.selected} localVersion={servers.localVersion} />
@@ -150,8 +165,6 @@
 </div>
 
 <style>
-  .link { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; }
-  .link:hover { filter: brightness(1.15); }
   .servers { display: flex; flex-direction: column; height: 100%; min-height: 0; }
   .top { display: flex; flex-direction: column; gap: 6px; padding: 8px 16px 6px; border-bottom: 1px solid var(--border); background: var(--bg-elev); }
   /* The filter block wraps inside itself; the buttons at the right stay on the first line. */
@@ -163,7 +176,7 @@
 
   .iconbtn { all: unset; cursor: pointer; box-sizing: border-box; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg-muted); }
   .iconbtn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; }
-  .iconbtn:hover, .iconbtn.on { color: var(--fg); border-color: var(--accent); }
+  .iconbtn:hover, .iconbtn.on { color: var(--fg); border-color: var(--accent-ink); }
   .iconbtn:focus-visible { outline: 2px solid var(--accent); }
 
   .connect { position: relative; }
@@ -174,9 +187,10 @@
 
   .statusline { display: flex; align-items: center; gap: 10px; min-height: 16px; font-size: 11px; color: var(--fg-muted); }
   .status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
-  .link { all: unset; cursor: pointer; color: var(--accent); }
-  .link:hover { text-decoration: underline; }
-  .link:disabled { opacity: 0.6; cursor: default; }
+  .link { all: unset; cursor: pointer; color: var(--accent-ink); text-decoration: underline; }
+  .link:hover { filter: brightness(1.15); }
+  .link:disabled { opacity: 0.6; cursor: default; text-decoration: none; }
+  .link:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 
   /* The details pane only exists while a row is selected; the table takes the full width otherwise. */
   .main { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr; }

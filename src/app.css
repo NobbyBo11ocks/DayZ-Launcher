@@ -7,6 +7,9 @@
   --fg-muted: #8b949e;
   --accent: #f0b429;
   --accent-fg: #111; /* text on an accent background */
+  /* The accent used as text. Same colour as the fill unless the fill is too light
+     to read at 4.5:1, which is a light-theme problem only (D-186). */
+  --accent-ink: var(--accent);
   --ok: #3fb950;
   --warn: #d29922;
   --danger: #f85149;
@@ -69,6 +72,17 @@
 :root[data-theme="light"] [data-accent="green"] { --accent: #15803d; }
 :root[data-theme="light"][data-accent="lime"],
 :root[data-theme="light"] [data-accent="lime"] { --accent: #65a30d; --accent-fg: #111; }
+
+/* Ink overrides: these four fills are too light to read as text on a light surface.
+   Worst-case ratios after the change: lime 5.22, amber 5.75, red 5.71, green 6.29. */
+:root[data-theme="light"][data-accent="lime"],
+:root[data-theme="light"] [data-accent="lime"] { --accent-ink: #476f10; }
+:root[data-theme="light"][data-accent="amber"],
+:root[data-theme="light"] [data-accent="amber"] { --accent-ink: #845309; }
+:root[data-theme="light"][data-accent="red"],
+:root[data-theme="light"] [data-accent="red"] { --accent-ink: #b91c1c; }
+:root[data-theme="light"][data-accent="green"],
+:root[data-theme="light"] [data-accent="green"] { --accent-ink: #166534; }
 
 *,
 *::before,
@@ -281,7 +295,12 @@ h1 {
 }
 .btn:hover { filter: brightness(1.08); }
 .btn:disabled { opacity: 0.5; cursor: default; filter: none; }
-.btn:focus-visible { outline: 2px solid var(--fg); }
+/* Deliberately more specific than a component's scoped `.btn.svelte-hash` (0,2,0):
+   every component block starts with `all: unset`, which resets `outline`, and on a
+   specificity tie the component wins on source order — so roughly forty buttons had
+   no focus ring at all, including every control in the join dialog (D-186). */
+button.btn:focus-visible,
+a.btn:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 .btn.secondary { background: var(--bg-row); color: var(--fg); border: 1px solid var(--border); font-weight: 500; }
 .btn.secondary:hover { border-color: var(--accent); filter: none; }
 .btn.ghost { background: transparent; color: var(--fg-muted); border: 1px solid var(--border); font-weight: 500; }

@@ -51,12 +51,12 @@
      was open — with no native frame to fall back on. */
   .titlebar { grid-area: top; position: relative; z-index: 80; display: flex; align-items: center; gap: 16px; height: 30px; padding: 0 0 0 14px; background: var(--bg-elev); border-bottom: 1px solid var(--border); user-select: none; }
   /* Accent-coloured so the counts read as part of the theme (user request, D-103). */
-  .stat { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--accent); white-space: nowrap; }
+  .stat { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--accent-ink); white-space: nowrap; }
   .stat + .stat { margin-left: 16px; }
   .icon { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; flex: none; }
-  .notice { font-size: 12px; color: var(--accent); white-space: nowrap; }
+  .notice { font-size: 12px; color: var(--accent-ink); white-space: nowrap; }
   /* The welcome line lives here now (D-173), in the accent like the counts beside it. */
-  .greeting { min-width: 0; margin-right: 12px; font-size: 12px; font-weight: 500; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .greeting { min-width: 0; margin-right: 12px; font-size: 12px; font-weight: 500; color: var(--accent-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .spacer { flex: 1; height: 100%; }
   .controls { display: flex; height: 100%; }
   .wbtn { all: unset; width: 40px; height: 100%; display: inline-flex; align-items: center; justify-content: center; color: var(--fg-muted); cursor: default; }

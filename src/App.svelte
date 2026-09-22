@@ -28,8 +28,10 @@
   $effect(() => {
     void servers.start();
     void updates.autoCheck();
-    // Nothing is fetched when the page is off (D-174).
+    // Nothing is fetched when the page is off, and switching it off mid-session
+    // stops the 30-minute refresh rather than leaving it armed (D-174, D-185).
     if (prefs.news) void news.start();
+    else news.stop();
   });
 
   // The welcome overlay shows until the settings file says onboarded (D-070). A flag

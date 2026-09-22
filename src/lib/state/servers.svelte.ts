@@ -6,10 +6,9 @@
 // command name before it is rethrown (D-158).
 import { invokeLogged as invoke } from "../log";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { uiPrefs } from "./uiprefs.svelte";
-import { describe, logInfo, logWarn } from "../log";
+import { describe, logWarn } from "../log";
 import {
   isUntrusted,
   trustedPlayers,
@@ -182,7 +181,7 @@ class ServersStore {
   #verifyingSince = 0;
   #scanningSince = 0;
   favourites = new SvelteSet<string>();
-  /** Favourites the backend watches for a free slot or a return online (D-083). */
+  /** Servers joined before, newest first (D-076). */
   history = $state<HistoryEntry[]>([]);
   /** Server the join dialog is open for. */
   joiningId = $state<string | null>(null);

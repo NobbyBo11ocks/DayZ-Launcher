@@ -275,7 +275,7 @@
   .head, .row { display: grid; grid-template-columns: minmax(200px, 1fr) 130px 52px 96px 56px 64px 92px; align-items: center; }
   .head { border-bottom: 1px solid var(--border); background: var(--bg); }
   /* Accent, like the title-bar counts (user request, D-177). */
-  .th { all: unset; cursor: pointer; padding: 0 8px; height: 30px; display: flex; align-items: center; color: var(--accent); font-weight: 500; white-space: nowrap; }
+  .th { all: unset; cursor: pointer; padding: 0 8px; height: 30px; display: flex; align-items: center; color: var(--accent-ink); font-weight: 500; white-space: nowrap; }
   .th:hover { filter: brightness(1.15); }
   .th:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   /* The header is a separate grid from the body, so the body always reserves the
@@ -289,18 +289,18 @@
   /* No will-change: the compositor layer cost more GPU memory than the transform saved (Q17, D-056). */
   .window { position: absolute; left: 0; right: 0; top: 0; }
   .row { height: 36px; border-bottom: 1px solid var(--border); cursor: default; }
-  .no-rows { margin: 28px auto 0; max-width: 46ch; text-align: center; color: var(--muted); font-size: 13px; line-height: 1.5; }
+  .no-rows { margin: 28px auto 0; max-width: 46ch; text-align: center; color: var(--fg-muted); font-size: 13px; line-height: 1.5; }
   .row:hover { background: var(--bg-row); }
   .row.selected { background: color-mix(in srgb, var(--accent) 18%, var(--bg-row)); box-shadow: inset 3px 0 0 var(--accent); }
   .row.untrusted { color: var(--fg-muted); }
   .cell { padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .c-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .star { all: unset; cursor: pointer; flex: none; width: 18px; text-align: center; color: var(--fg-muted); opacity: 0.55; font-size: 13px; }
-  .star:hover, .star.on { opacity: 1; color: var(--accent); }
+  .star:hover, .star.on { opacity: 1; color: var(--accent-ink); }
   .flags { display: inline-flex; gap: 4px; flex: none; }
   .flag { font-size: 11px; }
   .pill { font-size: 10px; line-height: 14px; padding: 0 5px; border-radius: 4px; background: var(--bg-row); color: var(--fg-muted); border: 1px solid var(--border); }
-  .pill.friends { display: inline-flex; align-items: center; gap: 3px; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); background: color-mix(in srgb, var(--accent) 14%, var(--bg-row)); font-weight: 600; }
+  .pill.friends { display: inline-flex; align-items: center; gap: 3px; color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); background: var(--bg-row); font-weight: 600; }
   .pill.friends svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .name { overflow: hidden; text-overflow: ellipsis; }
   .c-num { text-align: right; }

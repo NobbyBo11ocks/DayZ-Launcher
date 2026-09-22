@@ -295,7 +295,7 @@
   .chip.bad { color: var(--warn); border-color: var(--warn); }
   .addr { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--fg-muted); }
   .addr code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; color: var(--fg); }
-  .link { all: unset; cursor: pointer; color: var(--accent); font-size: 11.5px; }
+  .link { all: unset; cursor: pointer; color: var(--accent-ink); font-size: 11.5px; }
   .link:hover { text-decoration: underline; }
   .link:focus-visible { outline: 2px solid var(--accent); border-radius: 3px; }
   .actions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
@@ -303,7 +303,7 @@
   .join:hover { filter: brightness(1.08); }
   .join:focus-visible { outline: 2px solid var(--fg); }
   .star { all: unset; cursor: pointer; flex: none; width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); border: 1px solid var(--border); font-size: 17px; color: var(--fg-muted); }
-  .star.on, .star:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
+  .star.on, .star:hover { color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
   .star:focus-visible { outline: 2px solid var(--accent); }
 
   .trust { padding: 8px 10px; border-radius: var(--radius); border: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; font-size: 12px; }

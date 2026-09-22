@@ -213,10 +213,12 @@
   .meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11.5px; color: var(--fg-muted); }
   .dot { opacity: 0.6; }
   .pill { padding: 1px 7px; border-radius: 9px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em; }
-  .pill.up { background: color-mix(in srgb, var(--accent) 22%, var(--bg-row)); color: var(--accent); }
+  /* Accent ink needs a surface it can be read on: the 22% tint measured as low as
+     2.22:1 in light theme (D-186), so the pill takes the plain row background. */
+  .pill.up { background: var(--bg-row); color: var(--accent-ink); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); }
   .pill.new { background: var(--accent); color: var(--accent-fg); }
   .link { all: unset; cursor: pointer; color: var(--fg); }
-  .link:hover { color: var(--accent); }
+  .link:hover { color: var(--accent-ink); }
   .link:focus-visible { outline: 2px solid var(--accent); border-radius: 4px; }
   .summary { margin: 0; font-size: 13px; color: var(--fg-muted); line-height: 1.5; overflow-wrap: anywhere; }
   .summary.clamp { display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }

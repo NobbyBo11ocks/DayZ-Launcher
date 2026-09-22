@@ -191,6 +191,36 @@
     onClose();
   }
 
+  /** The dialog element, focused on open so the page behind it stops seeing keys. */
+  let dialogEl = $state<HTMLElement | null>(null);
+  $effect(() => {
+    // The first focusable control, or the dialog itself: either way the grid behind
+    // no longer has focus, and Tab starts inside the dialog.
+    const first = dialogEl?.querySelector<HTMLElement>(
+      'input:not([disabled]), select:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+    );
+    (first ?? dialogEl)?.focus();
+  });
+
+  /** Keeps Tab inside the dialog while it is open. */
+  function trap(e: KeyboardEvent) {
+    if (e.key !== "Tab" || !dialogEl) return;
+    const items = [...dialogEl.querySelectorAll<HTMLElement>('input:not([disabled]), select:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')].filter(
+      (el) => el.offsetParent !== null,
+    );
+    if (items.length === 0) return;
+    const first = items[0]!;
+    const last = items[items.length - 1]!;
+    const active = document.activeElement as HTMLElement | null;
+    if (e.shiftKey && (active === first || active === dialogEl)) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+
   function onKey(e: KeyboardEvent) {
     if (e.key === "Escape" && !busy) close();
   }
@@ -199,7 +229,8 @@
 <svelte:window onkeydown={onKey} />
 
 <div class="backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && !busy && close()}>
-  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="join-title">
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="join-title" tabindex="-1" bind:this={dialogEl} onkeydown={trap}>
     <header>
       <h2 id="join-title">{plan?.name ?? "Join server"}</h2>
       <span class="muted">

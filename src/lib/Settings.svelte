@@ -240,7 +240,7 @@
               {/if}
               {#if updates.state === "downloading"}<span class="muted">Downloading… {updates.progress}%</span>{/if}
               {#if updates.state === "ready"}<span class="ok">Installed, restarting…</span>{/if}
-              {#if updates.state === "error"}<span class="error">Update check failed: {updates.error}</span>{/if}
+              {#if updates.error}<span class="error">{updates.error}</span>{/if}
             </span>
           </div>
           <p class="note">Signed: the launcher installs a package only when its signature matches the key built into this build.</p>

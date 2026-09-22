@@ -75,8 +75,13 @@ class Updates {
       this.state = "ready";
       await relaunch();
     } catch (e) {
-      this.error = String(e);
-      this.state = "error";
+      // Back to "available", not "error" (D-184): the update is still there and still
+      // installable, and the error card offered only "Check for updates", which is
+      // not what failed. The message says which step it was.
+      this.error = `Could not install ${u.version}: ${describe(e)}`;
+      this.state = "available";
+      this.progress = 0;
+      logWarn("update", `install of ${u.version} failed: ${describe(e)}`);
     }
   }
 }

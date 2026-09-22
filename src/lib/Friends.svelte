@@ -182,7 +182,7 @@
   .top { padding: 8px 16px; border-bottom: 1px solid var(--border); }
   .bar { display: flex; align-items: center; gap: 12px; font-size: 12px; }
   .check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
-  .check input { accent-color: var(--accent); }
+  .check input { accent-color: var(--accent-ink); }
   .empty { margin: auto; text-align: center; max-width: 480px; }
   .empty p { margin: 4px 0; }
   .scroll { flex: 1; min-height: 0; overflow: auto; padding: 0 16px; }
@@ -192,7 +192,7 @@
   .act { text-align: right; }
   .act .btn { padding: 4px 10px; font-size: 12px; }
   .mono { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
-  .accent { color: var(--accent); }
+  .accent { color: var(--accent-ink); }
   .dim td { color: var(--fg-muted); }
   .who { display: flex; align-items: center; gap: 8px; }
   .avatar { width: 24px; height: 24px; border-radius: 50%; flex: none; }
