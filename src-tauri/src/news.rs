@@ -17,6 +17,12 @@ const USER_AGENT: &str = concat!(
 const SUMMARY_CHARS: usize = 320;
 /// Steam expands `{STEAM_CLAN_IMAGE}` in announcement bodies to this base (S-69).
 const CLAN_IMAGE_BASE: &str = "https://clan.akamai.steamstatic.com/images";
+/// Hosts a post picture may be fetched from for a thumbnail: Steam's clan-image CDN only.
+const IMAGE_HOSTS: [&str; 2] = ["clan.akamai.steamstatic.com", "clan.fastly.steamstatic.com"];
+/// Longest side of a cached thumbnail; a card is at most about 640 px wide.
+const THUMB_MAX: u32 = 640;
+/// A source picture above this size is refused (the CDN serves 4–5 MB JPEGs, S-72).
+const IMAGE_MAX_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Deserialize)]
 struct Document {
@@ -251,6 +257,91 @@ fn convert(raw: RawItem) -> NewsItem {
     }
 }
 
+/// Only `https://` URLs on Steam's clan-image hosts qualify for a thumbnail.
+pub fn image_allowed(url: &str) -> bool {
+    url.strip_prefix("https://").is_some_and(|rest| {
+        IMAGE_HOSTS.iter().any(|h| {
+            rest.strip_prefix(h)
+                .is_some_and(|tail| tail.starts_with('/'))
+        })
+    })
+}
+
+/// Decodes a picture and re-encodes it as a JPEG of at most [`THUMB_MAX`] px on
+/// the long side (aspect kept). CPU-bound: call from a blocking task.
+pub fn shrink(data: &[u8]) -> Result<Vec<u8>, String> {
+    let img = image::load_from_memory(data).map_err(|e| format!("picture unreadable: {e}"))?;
+    let small = img.thumbnail(THUMB_MAX, THUMB_MAX).to_rgb8();
+    let mut out = Vec::with_capacity(64 * 1024);
+    let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 82);
+    small
+        .write_with_encoder(enc)
+        .map_err(|e| format!("thumbnail encoding failed: {e}"))?;
+    Ok(out)
+}
+
+/// A JPEG thumbnail of a post's picture, cached as `dir/<key>.jpg` (D-111). The
+/// source is typically 3840×2160 and 4.6 MB (S-72); the WebView would decode that
+/// to 33 MB per card, so it is shrunk once here and the small file is served after.
+pub async fn thumbnail(
+    url: String,
+    dir: std::path::PathBuf,
+    key: String,
+) -> Result<Vec<u8>, String> {
+    if !image_allowed(&url) {
+        return Err("picture host not allowed".into());
+    }
+    let safe: String = key.chars().filter(char::is_ascii_alphanumeric).collect();
+    if safe.is_empty() {
+        return Err("bad thumbnail key".into());
+    }
+    let path = dir.join(format!("{safe}.jpg"));
+    if let Ok(bytes) = std::fs::read(&path) {
+        return Ok(bytes);
+    }
+    let client = reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let body = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("picture request failed: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("picture request failed: {e}"))?
+        .bytes()
+        .await
+        .map_err(|e| format!("picture unreadable: {e}"))?;
+    if body.len() > IMAGE_MAX_BYTES {
+        return Err("picture too large".into());
+    }
+    tokio::task::spawn_blocking(move || {
+        let bytes = shrink(&body)?;
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(&path, &bytes);
+        Ok(bytes)
+    })
+    .await
+    .map_err(|e| format!("thumbnail task failed: {e}"))?
+}
+
+/// Drops cached thumbnails whose post is no longer in the list.
+pub fn prune_thumbnails(dir: &std::path::Path, keep: &std::collections::HashSet<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let stem = name.to_string_lossy();
+        let stem = stem.strip_suffix(".jpg").unwrap_or(&stem);
+        if !keep.contains(stem) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// Latest `count` posts, newest first, with full bodies (`maxlength=0`) so the
 /// pictures and video previews further down a post are found; the gzip reply for
 /// 60 posts is well under 100 KB.
@@ -341,6 +432,37 @@ mod tests {
         );
         assert_eq!(first_video("[previewyoutube=\"\"]"), None);
         assert_eq!(first_video("text"), None);
+    }
+
+    #[test]
+    fn thumbnails_shrink_and_hosts_are_checked() {
+        assert!(image_allowed(
+            "https://clan.akamai.steamstatic.com/images/4458811/a.jpg"
+        ));
+        assert!(image_allowed(
+            "https://clan.fastly.steamstatic.com/images/x.png"
+        ));
+        assert!(!image_allowed(
+            "https://clan.akamai.steamstatic.com.evil.com/x.jpg"
+        ));
+        assert!(!image_allowed(
+            "http://clan.akamai.steamstatic.com/images/x.jpg"
+        ));
+        assert!(!image_allowed("https://i.ytimg.com/vi/x/mqdefault.jpg"));
+
+        // A 1920×1080 PNG becomes a JPEG no wider than 640 px with the aspect kept.
+        let mut png = Vec::new();
+        image::RgbImage::from_fn(1920, 1080, |x, y| {
+            image::Rgb([(x % 256) as u8, (y % 256) as u8, 90])
+        })
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+        let jpeg = shrink(&png).unwrap();
+        let back = image::load_from_memory(&jpeg).unwrap();
+        assert_eq!((back.width(), back.height()), (640, 360));
+        // Far below the 640×360×3 raw size, and nothing like the 33 MB a 4K decode costs.
+        assert!(jpeg.len() < 640 * 360 * 3 / 4, "{} bytes", jpeg.len());
+        assert!(shrink(b"not a picture").is_err());
     }
 
     #[test]

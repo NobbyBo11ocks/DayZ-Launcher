@@ -47,8 +47,7 @@
   const isNew = (n: NewsItem) => n.official && n.date > news.visitSeen;
   /** Posts whose picture failed to load: the card falls back to text (a broken image is worse than none). */
   const broken = new SvelteSet<string>();
-  const thumb = (n: NewsItem, big = false) =>
-    broken.has(n.gid) ? null : (n.image ?? (n.video ? `https://i.ytimg.com/vi/${n.video}/${big ? "hqdefault" : "mqdefault"}.jpg` : null));
+  const thumb = (n: NewsItem, big = false) => (broken.has(n.gid) ? null : news.thumbUrl(n, big));
   const watch = (n: NewsItem) => `https://www.youtube.com/watch?v=${n.video}`;
 
   function open(url: string) {

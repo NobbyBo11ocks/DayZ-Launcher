@@ -195,6 +195,19 @@ pub fn run() {
                     }
                 }
             });
+            // The main window is created here, after the state exists: Tauri builds
+            // the windows of tauri.conf.json before this hook (app.rs 2525 vs 2531,
+            // S-73), and on a slow start the page's first IPC call raced ahead of
+            // `manage` and read default settings (D-112). `create: false` in the config.
+            let main = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|w| w.label == "main")
+                .cloned()
+                .ok_or("tauri.conf.json has no window labelled main")?;
+            tauri::WebviewWindowBuilder::from_config(app.handle(), &main)?.build()?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -223,6 +236,7 @@ pub fn run() {
             commands::friends_list,
             commands::news_fetch,
             commands::news_cached,
+            commands::news_thumb,
             commands::steam_avatar,
             commands::launch_game,
             commands::favourites_list,

@@ -739,26 +739,53 @@ pub struct NewsCached {
     pub fetched_at: Option<i64>,
 }
 
+fn news_thumb_dir(app: &AppHandle) -> AppResult<PathBuf> {
+    Ok(app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| AppError::Internal(format!("no local data dir: {e}")))?
+        .join("news-thumbs"))
+}
+
 /// Latest DayZ news from Steam (D-099); the result is kept in the cache's meta table
-/// so the next start paints it before the network answers.
+/// so the next start paints it before the network answers. Thumbnails of posts that
+/// dropped off the list are removed (D-111).
 #[tauri::command]
-pub async fn news_fetch(state: State<'_, AppState>) -> AppResult<NewsCached> {
+pub async fn news_fetch(app: AppHandle, state: State<'_, AppState>) -> AppResult<NewsCached> {
     let items = crate::news::fetch(60).await.map_err(AppError::Internal)?;
     let now = ServerRow::now_unix();
     let json =
         serde_json::to_string(&items).map_err(|e| AppError::Internal(format!("news: {e}")))?;
+    let keep: std::collections::HashSet<String> = items.iter().map(|n| n.gid.clone()).collect();
+    let dir = news_thumb_dir(&app)?;
     let c = Arc::clone(&state.cache);
     let _ = tauri::async_runtime::spawn_blocking(move || {
         if let Ok(c) = c.lock() {
             let _ = c.set_meta("news", &json);
             let _ = c.set_meta("news_at", &now.to_string());
         }
+        crate::news::prune_thumbnails(&dir, &keep);
     })
     .await;
     Ok(NewsCached {
         items,
         fetched_at: Some(now),
     })
+}
+
+/// A downscaled JPEG of a post's picture (D-111), cached on disk; the bytes travel
+/// as a raw IPC response, not JSON.
+#[tauri::command]
+pub async fn news_thumb(
+    app: AppHandle,
+    gid: String,
+    url: String,
+) -> AppResult<tauri::ipc::Response> {
+    let dir = news_thumb_dir(&app)?;
+    let bytes = crate::news::thumbnail(url, dir, gid)
+        .await
+        .map_err(AppError::Internal)?;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 /// The last fetched news list, if any.

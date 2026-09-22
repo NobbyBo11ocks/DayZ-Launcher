@@ -16,19 +16,43 @@ export const defaultUiPrefs = (): UiPrefs => ({
   newsSeen: 0,
 });
 
+/** Attempts to read the settings before giving up on the backend (D-112). */
+const READ_TRIES = 8;
+const READ_RETRY_MS = 250;
+
 class UiPrefsStore {
   /** Last state confirmed by the backend, or the defaults if it could not be read. */
   current: UiPrefs | null = null;
+  /** True once the backend answered; false means `current` is the defaults, not the file. */
+  readOk = false;
   /** Resolves once the file has been read; stores reconcile their caches against it. */
   readonly ready: Promise<UiPrefs>;
   #pending: Partial<UiPrefs> = {};
   #timer: ReturnType<typeof setTimeout> | undefined;
 
   constructor() {
-    this.ready = invoke<Settings>("settings_get")
-      .then((s) => (this.current = s.ui ?? defaultUiPrefs()))
-      .catch(() => (this.current = defaultUiPrefs()));
+    this.ready = this.read();
     window.addEventListener("beforeunload", () => void this.flush());
+  }
+
+  /**
+   * The first IPC call of the page. The window can exist before the backend has
+   * finished its setup on a slow start (D-112), so a failure is retried briefly
+   * instead of being mistaken for "no settings yet".
+   */
+  private async read(): Promise<UiPrefs> {
+    for (let i = 0; i < READ_TRIES; i++) {
+      try {
+        const s = await invoke<Settings>("settings_get");
+        this.readOk = true;
+        this.current = s.ui ?? defaultUiPrefs();
+        return this.current;
+      } catch {
+        await new Promise((r) => setTimeout(r, READ_RETRY_MS));
+      }
+    }
+    this.current = defaultUiPrefs();
+    return this.current;
   }
 
   /** Merges a partial update; no-op keys are dropped, the rest is written shortly. */

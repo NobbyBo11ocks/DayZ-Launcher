@@ -33,7 +33,9 @@
   let showWelcome = $state(false);
   $effect(() => {
     void uiPrefs.ready.then((u) => {
-      if (u.onboarded) return;
+      // Only a settings file that was actually read and says "not onboarded" opens
+      // the overlay; an unreadable backend must not look like a first run (D-112).
+      if (u.onboarded || !uiPrefs.readOk) return;
       let legacy = false;
       try {
         legacy = localStorage.getItem(ONBOARDED_KEY) != null;

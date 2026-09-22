@@ -29,7 +29,8 @@ Out of scope for v1: Linux, server-owner listing/boosts, accounts, telemetry. (T
 | v0.1.8 | Home page (welcome band with Steam name and avatar, latest DayZ updates with pictures, unread badge, update alerts), window size and position remembered, external links through the opener plugin | D-098–D-102 |
 | v0.1.9 | Server and friend counts in the title bar, tidier news bar, presence reads no longer block the idle release | D-103 |
 | v0.1.10 | Title-bar server count instant from the cache and live during refresh, globe and person icons | D-105, D-106 |
-| v0.1.11 | Servers page header: primary row, fold-away quick filters, slim status line, one control style | D-108 |
+| v0.1.11 | Servers page header: two compact rows, direct-connect popover, one control style; checkpoints after joins and favourites | D-108, D-110 |
+| v0.1.12 | News pictures as host-made 640 px thumbnails (memory and bandwidth) | D-111 |
 | infra | GitHub Actions CI and tag-driven release workflow, release tools (`make_latest.js`, `verify_update_sig.js`, `nsis_template_check.js`) | D-063, D-071 |
 
 Candidates, not scheduled: code signing (Q11), a "friends on this server" marker in the browser once Q21 shows how DayZ reports servers to Steam.

@@ -6,6 +6,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
+import { SvelteMap } from "svelte/reactivity";
 import { uiPrefs } from "./uiprefs.svelte";
 import type { Avatar, NewsCached, NewsItem } from "../types";
 
@@ -44,6 +45,10 @@ class NewsStore {
   alerts = $state<NewsAlert[]>([]);
   /** PNG data URL of the signed-in user's Steam avatar, once Steam has it. */
   avatar = $state<string | null>(null);
+  /** Object URLs of downscaled post pictures by gid (D-111); the backend caches the files. */
+  thumbs = new SvelteMap<string, string>();
+  #thumbPending = new Set<string>();
+  #thumbFailed = new Set<string>();
   #started = false;
   #visiting = false;
   #avatarTries = 0;
@@ -132,6 +137,29 @@ class NewsStore {
       this.seen = newest;
       uiPrefs.patch({ newsSeen: newest });
     }
+  }
+
+  /**
+   * What to show as a post's picture (D-111). A card prefers the small YouTube
+   * preview when the post has a video (one small fetch, no thumbnail work); the
+   * featured post and video-less posts use the backend's 640 px thumbnail, which
+   * arrives asynchronously (null until then). Steam's originals are 3840×2160.
+   */
+  thumbUrl(n: NewsItem, featured = false): string | null {
+    const yt = n.video ? `https://i.ytimg.com/vi/${n.video}/${featured ? "hqdefault" : "mqdefault"}.jpg` : null;
+    if (!featured && yt) return yt;
+    if (!n.image) return yt;
+    const have = this.thumbs.get(n.gid);
+    if (have) return have;
+    if (this.#thumbFailed.has(n.gid)) return yt;
+    if (!this.#thumbPending.has(n.gid)) {
+      this.#thumbPending.add(n.gid);
+      void invoke<ArrayBuffer>("news_thumb", { gid: n.gid, url: n.image })
+        .then((buf) => this.thumbs.set(n.gid, URL.createObjectURL(new Blob([buf], { type: "image/jpeg" }))))
+        .catch(() => this.#thumbFailed.add(n.gid))
+        .finally(() => this.#thumbPending.delete(n.gid));
+    }
+    return null;
   }
 
   /** Steam's 64×64 avatar as raw RGBA, drawn to a canvas once; retried while Steam starts. */

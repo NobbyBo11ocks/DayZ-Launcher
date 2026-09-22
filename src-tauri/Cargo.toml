@@ -1,6 +1,6 @@
 [package]
 name = "dayz-launcher"
-version = "0.1.11"
+version = "0.1.12"
 description = "Windows DayZ Standalone launcher: server browser, mod sync, direct launch"
 authors = ["DayZ Launcher contributors"]
 edition = "2021"
@@ -42,6 +42,8 @@ tauri-plugin-single-instance = "2.4.5"
 tauri-plugin-notification = "2.4.0"
 tauri-plugin-window-state = "2.4.1"
 tauri-plugin-opener = "2.5.5"
+# News thumbnails (D-111): Steam's clan-image CDN serves 3840×2160 pictures and ignores resize parameters.
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 
 # docs/05-architecture-and-optimisation.md §7 (Rust)
 [profile.release]
