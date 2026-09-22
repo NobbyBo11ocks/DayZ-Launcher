@@ -106,16 +106,16 @@ pub async fn diagnostics_export(
         .map_err(|e| AppError::Internal(format!("no local data dir: {e}")))?;
     let steam = state.steam.status();
     let settings = state.settings.get();
-    let last_refresh = {
+    let (last_refresh, cache_stats) = {
         let c = Arc::clone(&state.cache);
         tauri::async_runtime::spawn_blocking(move || {
-            c.lock()
-                .ok()
-                .and_then(|c| c.get_meta("last_refresh").ok().flatten())
+            let c = c.lock().ok()?;
+            Some((c.get_meta("last_refresh").ok().flatten(), c.stats().ok()))
         })
         .await
         .ok()
         .flatten()
+        .unwrap_or((None, None))
     };
     let diag = tauri::async_runtime::spawn_blocking(diagnostics::collect)
         .await
@@ -126,6 +126,7 @@ pub async fn diagnostics_export(
         "steam": steam,
         "settings": settings,
         "lastRefresh": last_refresh,
+        "cache": cache_stats,
         "perf": crate::perf::sample(),
         "diagnostics": diag,
     });
@@ -824,6 +825,37 @@ pub async fn steam_avatar(
         .await
         .map_err(|e| AppError::Internal(format!("avatar task failed: {e}")))?
         .map_err(AppError::Internal)
+}
+
+/// A friend's 32×32 Steam avatar for the Friends tab (D-115); `None` until Steam has it.
+#[tauri::command]
+pub async fn friend_avatar(
+    state: State<'_, AppState>,
+    steam_id: String,
+) -> AppResult<Option<crate::steam::sdk::Avatar>> {
+    let id: u64 = steam_id
+        .parse()
+        .map_err(|_| AppError::Internal(format!("bad steam id {steam_id}")))?;
+    let steam = state.steam.clone_handle();
+    tauri::async_runtime::spawn_blocking(move || steam.friend_avatar(id))
+        .await
+        .map_err(|e| AppError::Internal(format!("avatar task failed: {e}")))?
+        .map_err(AppError::Internal)
+}
+
+/// Row counts and file sizes of the cache database (D-115).
+#[tauri::command]
+pub async fn cache_stats(state: State<'_, AppState>) -> AppResult<crate::browser::CacheStats> {
+    let c = Arc::clone(&state.cache);
+    tauri::async_runtime::spawn_blocking(move || {
+        let c = c
+            .lock()
+            .map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
+        c.stats()
+            .map_err(|e| AppError::Internal(format!("cache: {e}")))
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?
 }
 
 /// Steam friends with presence and, for those in DayZ, their server (D-092).

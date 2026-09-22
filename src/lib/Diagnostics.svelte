@@ -2,7 +2,18 @@
   // Steam / DayZ / Workshop inventory plus the Performance section (D-078), laid out
   // in two columns so the view fits the viewport without page scrolling (D-094).
   import { invoke } from "@tauri-apps/api/core";
-  import type { Diagnostics, JunctionCleanup, PerfSample } from "./types";
+  import type { CacheStats, Diagnostics, JunctionCleanup, PerfSample } from "./types";
+
+  // Cache row counts (D-115): a glance tells whether favourites, history or the
+  // server list went missing (Q22).
+  let cache = $state<CacheStats | null>(null);
+  async function loadCache() {
+    try {
+      cache = await invoke<CacheStats>("cache_stats");
+    } catch {
+      cache = null;
+    }
+  }
 
   // Release budgets from docs/05 §6 (D-078).
   const BUDGET = { startMs: 1000, hostBytes: 90 * 1024 * 1024, totalBytes: 330 * 1024 * 1024 };
@@ -85,6 +96,7 @@
   $effect(() => {
     void load();
     void samplePerf();
+    void loadCache();
   });
 
   const fmtBytes = (n: number) =>
@@ -131,6 +143,17 @@
           </dl>
         {:else}
           <p class="muted">Sampling…</p>
+        {/if}
+
+        <h2>Cache <button class="btn small" onclick={loadCache}>Recount</button></h2>
+        {#if cache}
+          <dl class="kv">
+            <dt>Servers</dt><dd>{cache.servers.toLocaleString()} rows <span class="muted">· {cache.modLists.toLocaleString()} mod lists</span></dd>
+            <dt>Yours</dt><dd>{cache.favourites} favourite{cache.favourites === 1 ? "" : "s"} · {cache.history} join{cache.history === 1 ? "" : "s"} in history · {cache.population.toLocaleString()} population samples</dd>
+            <dt>Database</dt><dd>{fmtBytes(cache.dbBytes)} <span class="muted">+ {fmtBytes(cache.walBytes)} write-ahead log</span></dd>
+          </dl>
+        {:else}
+          <p class="muted">Counting…</p>
         {/if}
 
         <h2>Steam</h2>

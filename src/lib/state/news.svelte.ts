@@ -7,6 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { SvelteMap } from "svelte/reactivity";
+import { avatarDataUrl } from "../avatar";
 import { uiPrefs } from "./uiprefs.svelte";
 import type { Avatar, NewsCached, NewsItem } from "../types";
 
@@ -176,13 +177,7 @@ class NewsStore {
       if (this.#avatarTries < AVATAR_TRIES) setTimeout(() => void this.loadAvatar(), 3000);
       return;
     }
-    const canvas = document.createElement("canvas");
-    canvas.width = a.width;
-    canvas.height = a.height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.putImageData(new ImageData(new Uint8ClampedArray(a.rgba), a.width, a.height), 0, 0);
-    this.avatar = canvas.toDataURL("image/png");
+    this.avatar = avatarDataUrl(a);
   }
 }
 

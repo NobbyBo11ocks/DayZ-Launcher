@@ -115,7 +115,13 @@
   </header>
   {#if error}<p class="error">{error}</p>{/if}
   {#if notice}<p class="ok small">{notice}</p>{/if}
-  {#if data && !data.workshop}<p class="muted">No Workshop items installed for DayZ.</p>{/if}
+  {#if data && (!data.workshop || items.length === 0)}
+    <div class="empty">
+      <p>No Workshop mods installed.</p>
+      <p class="muted">Join a modded server and the launcher subscribes to and downloads what it needs, then lists it here.</p>
+      <button class="btn accent" onclick={() => (servers.navigate = "servers")}>Browse servers</button>
+    </div>
+  {/if}
   {#if items.length}
     <div class="scroll">
     <table>
@@ -189,6 +195,9 @@
   .ok { color: var(--ok); }
   .stale td { color: var(--warn); }
   .small { font-size: 12px; margin: 0; }
+  .empty { margin: auto; text-align: center; max-width: 440px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .empty p { margin: 0; }
+  .empty .btn { margin-top: 6px; }
   .error { color: var(--danger); margin: 0; }
   code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 11.5px; }
 </style>

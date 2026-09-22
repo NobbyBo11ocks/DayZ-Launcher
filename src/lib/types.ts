@@ -306,8 +306,11 @@ export type NewsItem = {
 };
 export type NewsCached = { items: NewsItem[]; fetchedAt: number | null };
 
-/** The signed-in user's Steam avatar as raw RGBA (D-100); drawn on a canvas. */
+/** A Steam avatar as raw RGBA (D-100, D-115); drawn on a canvas. */
 export type Avatar = { width: number; height: number; rgba: number[] };
+
+/** Row counts and file sizes of the cache database (D-115). */
+export type CacheStats = { servers: number; favourites: number; history: number; population: number; modLists: number; dbBytes: number; walBytes: number };
 
 /** A saved set of launch options (D-088). */
 export type LaunchProfile = {

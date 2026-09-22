@@ -270,6 +270,10 @@ enum Cmd {
     Avatar {
         reply: mpsc::Sender<Option<Avatar>>,
     },
+    FriendAvatar {
+        steam_id: u64,
+        reply: mpsc::Sender<Option<Avatar>>,
+    },
     Shutdown,
 }
 
@@ -460,6 +464,20 @@ impl SteamWorker {
         let (reply, rx) = mpsc::channel();
         self.cmd
             .send(Cmd::Avatar { reply })
+            .map_err(|_| "steamworks thread has stopped".to_string())?;
+        rx.recv_timeout(Duration::from_secs(5))
+            .map_err(|_| "Steam did not answer the avatar query in 5 s".to_string())
+    }
+
+    /// A friend's small (32×32) avatar, if Steam has it cached (D-115). Blocking.
+    pub fn friend_avatar(&self, steam_id: u64) -> Result<Option<Avatar>, String> {
+        let s = self.status();
+        if !s.initialized {
+            return Err(s.error.unwrap_or_else(|| "Steam is not initialised".into()));
+        }
+        let (reply, rx) = mpsc::channel();
+        self.cmd
+            .send(Cmd::FriendAvatar { steam_id, reply })
             .map_err(|_| "steamworks thread has stopped".to_string())?;
         rx.recv_timeout(Duration::from_secs(5))
             .map_err(|_| "Steam did not answer the avatar query in 5 s".to_string())
@@ -739,7 +757,10 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
             // Presence reads (friends list, avatar) come from Steam's local cache and
             // must not keep an otherwise idle session alive (D-077, D-103); every
             // other command, and a session re-opened for any command, counts.
-            if !matches!(cmd, Cmd::Friends { .. } | Cmd::Avatar { .. }) {
+            if !matches!(
+                cmd,
+                Cmd::Friends { .. } | Cmd::Avatar { .. } | Cmd::FriendAvatar { .. }
+            ) {
                 last_activity = Instant::now();
             }
             if session.is_none() && !matches!(cmd, Cmd::Shutdown) {
@@ -764,7 +785,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                             Cmd::Friends { reply } => {
                                 let _ = reply.send(Err(e));
                             }
-                            Cmd::Avatar { reply } => {
+                            Cmd::Avatar { reply } | Cmd::FriendAvatar { reply, .. } => {
                                 let _ = reply.send(None);
                             }
                             Cmd::Sync { job, .. } => {
@@ -818,6 +839,20 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                         .map(|rgba| Avatar {
                             width: 64,
                             height: 64,
+                            rgba,
+                        });
+                    let _ = reply.send(avatar);
+                }
+                Cmd::FriendAvatar { steam_id, reply } => {
+                    let avatar = s
+                        .client
+                        .friends()
+                        .get_friend(steamworks::SteamId::from_raw(steam_id))
+                        .small_avatar()
+                        .filter(|rgba| rgba.len() == 32 * 32 * 4)
+                        .map(|rgba| Avatar {
+                            width: 32,
+                            height: 32,
                             rgba,
                         });
                     let _ = reply.send(avatar);

@@ -4,8 +4,30 @@
   // while the tab is open; Steam answers from its local cache.
   import { invoke } from "@tauri-apps/api/core";
   import { untrack } from "svelte";
+  import { SvelteMap } from "svelte/reactivity";
+  import { avatarDataUrl } from "./avatar";
   import { servers } from "./state/servers.svelte";
-  import { trustedPlayers, type FriendInfo, type FriendState } from "./types";
+  import { trustedPlayers, type Avatar, type FriendInfo, type FriendState } from "./types";
+
+  // Avatars (D-115): 32 px, requested once per friend when the row renders; Steam
+  // answers from its cache, so a miss is retried once a few seconds later.
+  const avatars = new SvelteMap<string, string>();
+  const avatarTries = new Map<string, number>();
+  function avatarFor(f: FriendInfo): string | null {
+    const have = avatars.get(f.steamId);
+    if (have) return have;
+    const tries = avatarTries.get(f.steamId) ?? 0;
+    if (tries >= 2) return null;
+    avatarTries.set(f.steamId, tries + 1);
+    void invoke<Avatar | null>("friend_avatar", { steamId: f.steamId })
+      .then((a) => {
+        const url = a ? avatarDataUrl(a) : null;
+        if (url) avatars.set(f.steamId, url);
+        else if (tries === 0) setTimeout(() => avatarTries.set(f.steamId, 1), 4000);
+      })
+      .catch(() => {});
+    return null;
+  }
 
   const LABEL: Record<FriendState, string> = {
     offline: "Offline",
@@ -103,7 +125,14 @@
           {#each visible as f (f.steamId)}
             {@const row = serverOf(f)}
             <tr class:dim={f.state === "offline" && !f.inDayz}>
-              <td><span class="dot {f.inDayz ? 'dayz' : f.state}" aria-hidden="true"></span>{f.name}</td>
+              <td class="who">
+                {#if avatarFor(f)}
+                  <img class="avatar" src={avatarFor(f)} alt="" width="24" height="24" />
+                {:else}
+                  <span class="avatar placeholder" aria-hidden="true">{f.name.slice(0, 1).toUpperCase()}</span>
+                {/if}
+                <span class="dot {f.inDayz ? 'dayz' : f.state}" aria-hidden="true"></span>{f.name}
+              </td>
               <td class={f.inDayz ? "accent" : "muted"}>{f.inDayz ? "In DayZ" : LABEL[f.state]}</td>
               <td>
                 {#if row}
@@ -142,14 +171,17 @@
   .empty p { margin: 4px 0; }
   .scroll { flex: 1; min-height: 0; overflow: auto; padding: 0 16px; }
   table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
-  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
   th { position: sticky; top: 0; background: var(--bg); color: var(--fg-muted); font-weight: 500; }
   .act { text-align: right; }
   .act .btn { padding: 4px 10px; font-size: 12px; }
   .mono { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
   .accent { color: var(--accent); }
   .dim td { color: var(--fg-muted); }
-  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; background: var(--fg-muted); opacity: 0.5; vertical-align: 1px; }
+  .who { display: flex; align-items: center; gap: 8px; }
+  .avatar { width: 24px; height: 24px; border-radius: 50%; flex: none; }
+  .avatar.placeholder { display: inline-grid; place-items: center; background: var(--bg-row); border: 1px solid var(--border); color: var(--fg-muted); font-size: 11px; font-weight: 600; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0; background: var(--fg-muted); opacity: 0.5; vertical-align: 1px; flex: none; }
   .dot.online, .dot.looking_to_play, .dot.looking_to_trade { background: var(--ok); opacity: 1; }
   .dot.away, .dot.snooze, .dot.busy { background: var(--warn); opacity: 1; }
   .dot.dayz { background: var(--accent); opacity: 1; }

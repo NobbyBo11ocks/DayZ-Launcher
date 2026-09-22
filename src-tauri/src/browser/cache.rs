@@ -124,6 +124,19 @@ pub struct HistoryEntry {
     pub mods: usize,
 }
 
+/// Row counts and file sizes of the cache (D-115).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheStats {
+    pub servers: i64,
+    pub favourites: i64,
+    pub history: i64,
+    pub population: i64,
+    pub mod_lists: i64,
+    pub db_bytes: u64,
+    pub wal_bytes: u64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PopulationSample {
@@ -247,6 +260,29 @@ impl Cache {
     /// Folds the write-ahead log into the database file without blocking readers.
     pub fn checkpoint(&self) {
         let _ = self.conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);");
+    }
+
+    /// Row counts and file sizes for Diagnostics (D-115): a quick way to see whether
+    /// user data went missing (Q22) without opening the database by hand.
+    pub fn stats(&self) -> rusqlite::Result<CacheStats> {
+        let count = |sql: &str| self.conn.query_row(sql, [], |r| r.get::<_, i64>(0));
+        let path = self.conn.path().map(std::path::PathBuf::from);
+        let size = |suffix: &str| {
+            path.as_ref().map_or(0, |p| {
+                let mut s = p.as_os_str().to_os_string();
+                s.push(suffix);
+                std::fs::metadata(s).map(|m| m.len()).unwrap_or(0)
+            })
+        };
+        Ok(CacheStats {
+            servers: count("SELECT COUNT(*) FROM servers")?,
+            favourites: count("SELECT COUNT(*) FROM favourites")?,
+            history: count("SELECT COUNT(*) FROM history")?,
+            population: count("SELECT COUNT(*) FROM population")?,
+            mod_lists: count("SELECT COUNT(*) FROM server_mods_at")?,
+            db_bytes: size(""),
+            wal_bytes: size("-wal"),
+        })
     }
 
     pub fn history(&self, limit: usize) -> rusqlite::Result<Vec<HistoryEntry>> {

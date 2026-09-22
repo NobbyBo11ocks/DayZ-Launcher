@@ -237,6 +237,8 @@ pub fn run() {
             commands::news_fetch,
             commands::news_cached,
             commands::news_thumb,
+            commands::friend_avatar,
+            commands::cache_stats,
             commands::steam_avatar,
             commands::launch_game,
             commands::favourites_list,
