@@ -100,29 +100,54 @@ pub fn run() {
             let cache = Arc::new(Mutex::new(match Cache::open(&db_path) {
                 Ok(c) => c,
                 Err(e) => {
-                    // A cache is only a cache: losing it costs one refresh, so a corrupt
-                    // or locked file must not stop the app starting with no window and no
-                    // message (D-160). Move it aside, keep it for diagnosis, try once more.
+                    // D-160 moved a database aside when it would not open, so a corrupt
+                    // file could not stop the app starting with no window and no message.
+                    // It then deleted the -wal and -shm unconditionally, and that is a way
+                    // to destroy data rather than recover it (D-187): when the file is
+                    // *locked* rather than corrupt — an antivirus scan, a backup, a sync
+                    // client — the rename fails while deleting the unlocked -wal succeeds,
+                    // so the retry reopens the original database with every uncheckpointed
+                    // commit gone. Favourites, join history and population live only here,
+                    // and that is exactly the Q22 symptom.
+                    //
+                    // So: the three files move together or nothing moves. A write-ahead log
+                    // is part of the database, never rubbish to sweep up.
                     log_error!("cache", "open failed at {}: {e}", db_path.display());
-                    let aside = db_path
-                        .with_extension(format!("db.broken-{}", browser::ServerRow::now_unix()));
-                    let moved = std::fs::rename(&db_path, &aside).is_ok();
-                    // A stale WAL/shm pair would be adopted by the fresh database.
-                    for ext in ["db-wal", "db-shm"] {
-                        let _ = std::fs::remove_file(db_path.with_extension(ext));
-                    }
-                    match Cache::open(&db_path) {
-                        Ok(c) => {
-                            log_warn!(
-                                "cache",
-                                "started on a new cache; old file kept: {moved} ({})",
-                                aside.display()
-                            );
-                            c
+                    let stamp = browser::ServerRow::now_unix();
+                    let aside = db_path.with_extension(format!("db.broken-{stamp}"));
+                    match std::fs::rename(&db_path, &aside) {
+                        Ok(()) => {
+                            // The database moved, so its log and shared-memory file belong
+                            // with it; a leftover -wal would be adopted by the new file.
+                            for ext in ["db-wal", "db-shm"] {
+                                let from = db_path.with_extension(ext);
+                                let to = aside.with_extension(format!("{ext}-{stamp}"));
+                                let _ = std::fs::rename(&from, &to);
+                            }
+                            match Cache::open(&db_path) {
+                                Ok(c) => {
+                                    log_warn!(
+                                        "cache",
+                                        "unreadable, moved to {} with its log; started on an empty cache. Favourites, history and population are in the moved file",
+                                        aside.display()
+                                    );
+                                    c
+                                }
+                                Err(e2) => {
+                                    log_error!("cache", "second open failed as well: {e2}");
+                                    return Err(e2.into());
+                                }
+                            }
                         }
-                        Err(e2) => {
-                            log_error!("cache", "second open failed as well: {e2}");
-                            return Err(e2.into());
+                        Err(move_err) => {
+                            // Almost always a lock, and a locked database is intact: the
+                            // right answer is to leave every byte alone and say so.
+                            log_error!(
+                                "cache",
+                                "could not open or move {} ({move_err}); the file is most likely held by another program, such as antivirus or a backup. Nothing was changed",
+                                db_path.display()
+                            );
+                            return Err(e.into());
                         }
                     }
                 }

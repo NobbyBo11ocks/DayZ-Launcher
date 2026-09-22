@@ -278,11 +278,33 @@ impl Cache {
     }
 
     /// Folds the write-ahead log into the database file without blocking readers.
-    /// A PASSIVE checkpoint is a no-op while any reader holds the log, and that is
-    /// exactly the case Q22 needs evidence for, so a failure is recorded.
+    ///
+    /// A PASSIVE checkpoint does nothing while any reader holds the log, and it says
+    /// so in its result row rather than by failing — `(busy, log_pages,
+    /// checkpointed_pages)` — so the row has to be read. Q22 is an unexplained loss of
+    /// committed rows, and "the checkpoint quietly copied nothing" is one of the few
+    /// explanations left, so both outcomes are on the record (D-187).
     pub fn checkpoint(&self) {
-        if let Err(e) = self.conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);") {
-            crate::log_warn!("cache", "checkpoint failed: {e}");
+        let result = self
+            .conn
+            .query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                ))
+            });
+        match result {
+            Ok((busy, log_pages, checkpointed)) => {
+                if checkpointed < log_pages {
+                    crate::log_warn!(
+                        "cache",
+                        "checkpoint copied {checkpointed} of {log_pages} page(s){}; the rest stays in the write-ahead log",
+                        if busy != 0 { ", blocked by a reader" } else { "" }
+                    );
+                }
+            }
+            Err(e) => crate::log_warn!("cache", "checkpoint failed: {e}"),
         }
     }
 

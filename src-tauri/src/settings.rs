@@ -165,16 +165,37 @@ impl SettingsStore {
         // Defaults are the right answer for a first run, but silently defaulting on an
         // unreadable file meant the next preference change wrote them over the user's
         // launch profiles for good (D-160). Keep a copy and say so.
+        // A settings file is a JSON object. Anything else is corruption, whatever
+        // serde is willing to make of it.
+        let parse = |bytes: &[u8]| -> Result<Settings, String> {
+            let value: Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+            if !value.is_object() {
+                return Err("the file is not a JSON object".into());
+            }
+            if let Some(ui) = value.get("ui") {
+                if !ui.is_object() {
+                    return Err("\"ui\" is not a JSON object".into());
+                }
+            }
+            serde_json::from_value(value).map_err(|e| e.to_string())
+        };
         let mut current = match std::fs::read(path) {
-            Ok(bytes) => match serde_json::from_slice::<Settings>(&bytes) {
+            Ok(bytes) => match parse(&bytes) {
                 Ok(s) => s,
                 Err(e) => {
-                    let aside = path.with_extension("json.unreadable");
+                    // Stamped, so a second bad start cannot overwrite the first copy.
+                    let aside = path.with_extension(format!(
+                        "json.unreadable-{}",
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |d| d.as_secs())
+                    ));
                     let saved = std::fs::write(&aside, &bytes).is_ok();
                     crate::log_error!(
                         "settings",
-                        "{} is unreadable ({e}); starting from defaults, copy kept: {saved}",
-                        path.display()
+                        "{} is unreadable ({e}); starting from defaults, copy kept: {saved} ({})",
+                        path.display(),
+                        aside.display()
                     );
                     Settings::default()
                 }
@@ -265,6 +286,61 @@ impl SettingsStore {
 
 fn invalid(e: serde_json::Error) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+}
+
+#[cfg(test)]
+mod shape_tests {
+    use super::*;
+
+    /// serde deserialises a struct from a JSON sequence, so `[]` parsed as a valid
+    /// `Settings` and yielded silent defaults — past the very safety net that exists
+    /// to catch a corrupt file (D-187).
+    #[test]
+    fn a_settings_file_must_be_an_object() {
+        let dir = std::env::temp_dir().join(format!(
+            "dayz-settings-shape-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+
+        // A real file survives a round trip, profiles and all.
+        let good = Settings {
+            profile_name: "Survivor".into(),
+            launch_profiles: vec![LaunchProfile {
+                name: "night".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        std::fs::write(&path, serde_json::to_vec(&good).unwrap()).unwrap();
+        let read = SettingsStore::load(&path).get();
+        assert_eq!(read.profile_name, "Survivor");
+        assert_eq!(read.launch_profiles.len(), 1);
+
+        // Each of these is corruption, and each must fall back to defaults *and*
+        // leave a copy behind rather than passing silently.
+        for bad in ["[]", r#"{"ui": []}"#, r#"["profileName", "x"]"#] {
+            std::fs::write(&path, bad).unwrap();
+            let s = SettingsStore::load(&path).get();
+            assert_eq!(
+                s.profile_name, "",
+                "{bad} should have fallen back to defaults"
+            );
+            let kept = std::fs::read_dir(&dir)
+                .unwrap()
+                .filter_map(Result::ok)
+                .any(|e| e.file_name().to_string_lossy().contains("unreadable"));
+            assert!(kept, "{bad} should have been copied aside");
+            for e in std::fs::read_dir(&dir).unwrap().filter_map(Result::ok) {
+                if e.file_name().to_string_lossy().contains("unreadable") {
+                    std::fs::remove_file(e.path()).ok();
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

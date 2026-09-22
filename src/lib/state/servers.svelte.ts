@@ -423,13 +423,21 @@ class ServersStore {
       for (const r of cached.rows) this.rows.set(r.id, r);
       this.#namesDirty = true;
       this.rowsChanged();
+    } catch (e) {
+      // The list is the one thing a refresh rebuilds by itself, so say so rather
+      // than leaving a bare backend string on screen.
+      this.error = `The cached server list could not be read (${describe(e)}). Refresh to fetch a new one.`;
+    }
+    try {
       this.steam = await invoke<SteamStatus>("steam_status");
       this.localVersion = await invoke<string | null>("local_game_version");
-      await this.loadFavourites();
-      void this.loadModsIndex();
     } catch (e) {
-      this.error = String(e);
+      logWarn("steam", `status unavailable at start: ${describe(e)}`);
     }
+    // Favourites are the user's own data and live in their own tables: a failure to
+    // read the server list must not take them off the screen with it.
+    await this.loadFavourites();
+    void this.loadModsIndex();
     this.#unlisten.push(
       await listen<ServerRow[]>("servers:batch", (ev) => {
         for (const r of ev.payload) this.#inbox.push(r);
