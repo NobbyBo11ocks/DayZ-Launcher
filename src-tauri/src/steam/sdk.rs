@@ -713,25 +713,67 @@ fn query_details(ugc: &UGC, ids: Vec<u64>, reply: mpsc::Sender<Result<Vec<ItemDe
     }
 }
 
+/// How often the thread retries `SteamAPI_Init` while Steam is not running (D-125).
+const STEAM_RETRY: Duration = Duration::from_secs(10);
+
+/// Answers a command that cannot be served because there is no Steam session.
+fn reject(cmd: Cmd, events: &UnboundedSender<SteamEvent>, e: String) {
+    match cmd {
+        Cmd::ItemDetails { reply, .. } => {
+            let _ = reply.send(Err(e));
+        }
+        Cmd::Unsubscribe { reply, .. } => {
+            let _ = reply.send(Err(e));
+        }
+        Cmd::Friends { reply } => {
+            let _ = reply.send(Err(e));
+        }
+        Cmd::Avatar { reply } | Cmd::FriendAvatar { reply, .. } => {
+            let _ = reply.send(None);
+        }
+        Cmd::Sync { job, .. } => {
+            let _ = events.send(SteamEvent::SyncDone(SyncDone {
+                job,
+                ok: false,
+                error: Some(e),
+                items: Vec::new(),
+                elapsed_ms: 0,
+            }));
+        }
+        Cmd::Refresh(_) | Cmd::Shutdown => {}
+    }
+}
+
 fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Shared) {
-    let mut session = match open_session() {
-        Ok(s) => Some(s),
-        Err(e) => {
-            shared.set_status(&events, |s| s.error = Some(e));
-            while let Ok(cmd) = rx.recv() {
-                if matches!(cmd, Cmd::Shutdown) {
-                    break;
+    // Steam may start after the launcher (auto-start, a cold boot, D-125): keep
+    // trying every ten seconds, answering commands with the error meanwhile.
+    let mut session: Option<Session> = None;
+    let mut next_try = Instant::now();
+    while session.is_none() {
+        if Instant::now() >= next_try {
+            match open_session() {
+                Ok(s) => session = Some(s),
+                Err(e) => {
+                    shared.set_status(&events, |st| st.error = Some(e));
+                    next_try = Instant::now() + STEAM_RETRY;
                 }
             }
-            return;
         }
-    };
+        if session.is_none() {
+            match rx.recv_timeout(Duration::from_millis(250)) {
+                Ok(Cmd::Shutdown) | Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                Ok(cmd) => reject(cmd, &events, "Steam is not running".into()),
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+            }
+        }
+    }
     {
         let s = session.as_ref().expect("session just opened");
         let steam_id = s.client.user().steam_id().raw();
         let persona = s.client.friends().name();
         shared.set_status(&events, |st| {
             st.initialized = true;
+            st.error = None;
             st.steam_id = Some(steam_id);
             st.persona = Some(persona);
         });
@@ -775,30 +817,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                     }
                     Err(e) => {
                         shared.set_status(&events, |st| st.error = Some(e.clone()));
-                        match cmd {
-                            Cmd::ItemDetails { reply, .. } => {
-                                let _ = reply.send(Err(e));
-                            }
-                            Cmd::Unsubscribe { reply, .. } => {
-                                let _ = reply.send(Err(e));
-                            }
-                            Cmd::Friends { reply } => {
-                                let _ = reply.send(Err(e));
-                            }
-                            Cmd::Avatar { reply } | Cmd::FriendAvatar { reply, .. } => {
-                                let _ = reply.send(None);
-                            }
-                            Cmd::Sync { job, .. } => {
-                                let _ = events.send(SteamEvent::SyncDone(SyncDone {
-                                    job,
-                                    ok: false,
-                                    error: Some(e),
-                                    items: Vec::new(),
-                                    elapsed_ms: 0,
-                                }));
-                            }
-                            _ => {}
-                        }
+                        reject(cmd, &events, e);
                         continue;
                     }
                 }

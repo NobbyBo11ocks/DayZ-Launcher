@@ -109,7 +109,7 @@
     <div class="statusline">
       <span class="status">{status}</span>
       {#if servers.steam && !servers.steam.initialized}
-        <span class="warn">Steam unavailable: {servers.steam.error ?? "not initialised"}.</span>
+        <span class="warn" title={servers.steam.error ?? ""}>Steam is not running; the launcher connects as soon as it starts.</span>
         <button class="link" onclick={() => servers.loadDzsa()} disabled={servers.dzsaLoading} title="Download the DZSA Launcher's public server list (about 24 MB) instead">
           {servers.dzsaLoading ? "Downloading…" : "Load list from DZSA"}
         </button>

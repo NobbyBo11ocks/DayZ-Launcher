@@ -31,7 +31,7 @@
         {servers.lanRows.length} server{servers.lanRows.length === 1 ? "" : "s"} on your network
         {#if lastScan}· scan answered {lastScan.responded} in {(lastScan.elapsedMs / 1000).toFixed(1)} s{#if scannedAt} at {scannedAt}{/if}{/if}
       </span>
-      {#if servers.steam && !servers.steam.initialized}<span class="warn">Steam unavailable: LAN discovery needs Steam.</span>{/if}
+      {#if servers.steam && !servers.steam.initialized}<span class="warn">Steam is not running; LAN discovery needs it and works once it is up.</span>{/if}
       {#if servers.error}<span class="error">{servers.error}</span>{/if}
     </div>
   </div>

@@ -109,8 +109,8 @@
   </div>
   {#if !steamOk}
     <div class="empty">
-      <p>Steam unavailable.</p>
-      <p class="muted">{servers.steam?.error ?? "The friends list comes from Steam."}</p>
+      <p>Steam is not running.</p>
+      <p class="muted">The friends list comes from Steam; it fills in by itself once Steam is up.</p>
     </div>
   {:else if visible.length === 0}
     <div class="empty">
