@@ -9,10 +9,12 @@
   import { SvelteMap } from "svelte/reactivity";
   import { avatarDataUrl } from "./avatar";
   import { servers } from "./state/servers.svelte";
-  import { trustedPlayers, type Avatar, type FriendInfo, type FriendState } from "./types";
+  import { trustedPlayers, type FriendInfo, type FriendState } from "./types";
 
   // Avatars (D-115): 32 px, requested once per friend when the row renders; Steam
   // answers from its cache, so a miss is retried once a few seconds later.
+  /** Steam's small avatar, the size `Cmd::FriendAvatar` asks for. */
+  const AVATAR_PX = 32;
   const avatars = new SvelteMap<string, string>();
   const avatarTries = new Map<string, number>();
   function avatarFor(f: FriendInfo): string | null {
@@ -21,9 +23,11 @@
     const tries = avatarTries.get(f.steamId) ?? 0;
     if (tries >= 2) return null;
     avatarTries.set(f.steamId, tries + 1);
-    void invoke<Avatar | null>("friend_avatar", { steamId: f.steamId })
-      .then((a) => {
-        const url = a ? avatarDataUrl(a) : null;
+    // Raw bytes, not a JSON array of numbers: the same 4 096-byte picture crossed
+    // IPC as 14 657 bytes of decimal text before (D-181).
+    void invoke<ArrayBuffer>("friend_avatar", { steamId: f.steamId })
+      .then((buf) => {
+        const url = buf.byteLength === AVATAR_PX * AVATAR_PX * 4 ? avatarDataUrl({ width: AVATAR_PX, height: AVATAR_PX, rgba: new Uint8ClampedArray(buf) }) : null;
         if (url) avatars.set(f.steamId, url);
         else if (tries === 0) setTimeout(() => avatarTries.set(f.steamId, 1), 4000);
       })

@@ -150,6 +150,25 @@ class ServersStore {
    */
   rows = new Map<string, ServerRow>();
   #rowsVersion = $state(0);
+  /**
+   * Position of each row in collator order by name. Sorting the visible list by name
+   * costs 38.6 ms over 19 000 rows because `Intl.Collator.compare` is expensive and
+   * runs n log n times; the names only change when rows are added, removed or
+   * renamed, which verification never does. One collator sort here turns every later
+   * comparison into integer subtraction (~3.6 ms), and the tie-break on id is baked
+   * into the ranks (D-181).
+   */
+  #nameRank = new Map<string, number>();
+  #namesDirty = true;
+  #rankByName(): Map<string, number> {
+    if (!this.#namesDirty) return this.#nameRank;
+    const sorted = [...this.rows.values()].sort((a, b) => COLLATOR.compare(a.name, b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const rank = new Map<string, number>();
+    for (let i = 0; i < sorted.length; i++) rank.set(sorted[i]!.id, i);
+    this.#nameRank = rank;
+    this.#namesDirty = false;
+    return rank;
+  }
   /** Call after any batch of writes to `rows`. */
   rowsChanged() {
     this.#rowsVersion++;
@@ -303,10 +322,12 @@ class ServersStore {
     // reactive, so a lookup inside the comparator was ~n log n signal reads.
     const modCounts =
       key === "mods" ? new Map(out.map((r) => [r.id, this.modsByServer.get(r.id)?.length ?? -1])) : null;
+    const nameRank = key === "name" ? this.#rankByName() : null;
     const cmp = (a: ServerRow, b: ServerRow): number => {
       switch (key) {
         case "name":
-          return COLLATOR.compare(a.name, b.name) || byId(a, b);
+          // Precomputed ranks (D-181); the id tie-break is already in them.
+          return (nameRank?.get(a.id) ?? 0) - (nameRank?.get(b.id) ?? 0);
         case "map":
           return COLLATOR.compare(a.map, b.map) || trustedPlayers(b) - trustedPlayers(a) || byId(a, b);
         case "mods": {
@@ -423,6 +444,7 @@ class ServersStore {
       this.fromCache = cached.rows.length;
       this.lastRefresh = cached.lastRefresh;
       for (const r of cached.rows) this.rows.set(r.id, r);
+      this.#namesDirty = true;
       this.rowsChanged();
       this.steam = await invoke<SteamStatus>("steam_status");
       this.localVersion = await invoke<string | null>("local_game_version");
@@ -622,6 +644,9 @@ class ServersStore {
     this.#inbox = [];
     for (const r of batch) {
       const prev = this.rows.get(r.id);
+      // A new row, or one that renamed itself, invalidates the name ranks; a changed
+      // player count does not (D-181).
+      if (!prev || prev.name !== r.name) this.#namesDirty = true;
       // Keep verification results the Steam batch does not carry.
       this.rows.set(r.id, prev ? { ...r, verifiedPlayers: prev.verifiedPlayers, verifiedAt: prev.verifiedAt, verdict: prev.verdict } : r);
     }
@@ -737,6 +762,7 @@ class ServersStore {
     try {
       const row = await invoke<ServerRow>("direct_connect", { address });
       this.rows.set(row.id, row);
+      this.#namesDirty = true;
       this.rowsChanged();
       this.selectedId = row.id;
       return row;

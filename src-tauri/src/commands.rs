@@ -804,15 +804,19 @@ pub async fn news_cached(state: State<'_, AppState>) -> AppResult<NewsCached> {
 pub async fn friend_avatar(
     state: State<'_, AppState>,
     steam_id: String,
-) -> AppResult<Option<crate::steam::sdk::Avatar>> {
+) -> AppResult<tauri::ipc::Response> {
     let id: u64 = steam_id
         .parse()
         .map_err(|_| AppError::Internal(format!("bad steam id {steam_id}")))?;
     let steam = state.steam.clone_handle();
-    tauri::async_runtime::spawn_blocking(move || steam.friend_avatar(id))
+    let avatar = tauri::async_runtime::spawn_blocking(move || steam.friend_avatar(id))
         .await
         .map_err(|e| AppError::Internal(format!("avatar task failed: {e}")))?
-        .map_err(AppError::Internal)
+        .map_err(AppError::Internal)?;
+    // Raw RGBA, always 32x32; empty means Steam has not cached it yet (D-181).
+    Ok(tauri::ipc::Response::new(
+        avatar.map(|a| a.rgba).unwrap_or_default(),
+    ))
 }
 
 /// The most recent diagnostic entries, newest last (D-158).
