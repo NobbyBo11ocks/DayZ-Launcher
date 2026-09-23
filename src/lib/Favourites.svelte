@@ -3,6 +3,18 @@
   import DetailsPane from "./DetailsPane.svelte";
   import ServerTable from "./ServerTable.svelte";
   import { servers } from "./state/servers.svelte";
+
+  import { searchBox } from "./search";
+
+  // The shared search filter, written on a pause rather than on every keystroke
+  // (D-222). `typed` keeps the field responsive while the filter lags behind it.
+  const box = searchBox();
+  let typed = $state(servers.filters.search);
+  $effect(() => box.dispose);
+  // A reset from elsewhere has to show up in the field (D-159).
+  $effect(() => {
+    if (servers.filters.search === "" && typed !== "") typed = "";
+  });
   import type { ImportResult } from "./types";
 
   let importing = $state(false);
@@ -20,7 +32,7 @@
 <div class="favs">
   <div class="top">
     <div class="bar">
-      <input class="search" type="search" placeholder="Search favourites…" bind:value={servers.filters.search} aria-label="Search favourites" />
+      <input class="search" type="search" placeholder="Search favourites…" value={typed} oninput={(e) => (typed = e.currentTarget.value, box.set(typed))} aria-label="Search favourites" />
       <button class="btn secondary" onclick={importOfficial} disabled={importing} title="Reads %LOCALAPPDATA%\DayZ Launcher\FavouriteServers.xml">
         {importing ? "Importing…" : "Import from the official launcher"}
       </button>

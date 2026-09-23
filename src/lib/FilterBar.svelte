@@ -5,6 +5,7 @@
   // ping, trust, specific mod, reset; 26 px) for the second.
   import { servers, type HiveFilter, type ModFilter, type Perspective, type StyleFilter } from "./state/servers.svelte";
   import { countryName } from "./types";
+  import { mapLabel } from "./maps";
 
   let { part = "primary" }: { part?: "primary" | "chips" } = $props();
 
@@ -47,6 +48,11 @@
   // 1 611 of 3 446 cached servers answer inside 60 ms and 742 are 120 ms or worse, so
   // these are the cuts that actually divide the list (D-211).
   const PING_PRESETS = [50, 80, 100, 150, 200];
+
+  // Sliced once rather than twice per render: the each block and the guard below it
+  // both need the same list.
+  const shownMaps = $derived(servers.maps.slice(0, 40));
+  const shownCountries = $derived(servers.countries.slice(0, 60));
 
   const f = $derived(servers.filters);
   const fmt = new Intl.NumberFormat();
@@ -137,16 +143,24 @@
 
     <select class="select" bind:value={servers.filters.map} onchange={() => servers.saveFilters()} aria-label="Map">
       <option value="">All maps</option>
-      {#each servers.maps.slice(0, 40) as [id, label, n] (id)}
+      {#each shownMaps as [id, label, n] (id)}
         <option value={id}>{label} ({n})</option>
       {/each}
+      <!-- A map filtered to and then ranked out of the top 40, or restored from a
+           saved filter, still has to name itself (D-222). -->
+      {#if f.map && !shownMaps.some(([id]) => id === f.map)}
+        <option value={f.map}>{mapLabel(f.map)}</option>
+      {/if}
     </select>
 
     <select class="select" bind:value={servers.filters.country} onchange={() => servers.saveFilters()} aria-label="Country">
       <option value="">All countries</option>
-      {#each servers.countries.slice(0, 60) as [cc, n] (cc)}
+      {#each shownCountries as [cc, n] (cc)}
         <option value={cc}>{countryName(cc)} ({n})</option>
       {/each}
+      {#if f.country && !shownCountries.some(([cc]) => cc === f.country)}
+        <option value={f.country}>{countryName(f.country)}</option>
+      {/if}
     </select>
 
     <div class="seg" role="group" aria-label="Mods">

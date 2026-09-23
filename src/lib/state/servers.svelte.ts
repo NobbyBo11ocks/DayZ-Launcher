@@ -720,7 +720,17 @@ class ServersStore {
    */
   async pollFriends() {
     const s = this.steam;
-    if (!s?.initialized || s.idle) return;
+    // An idle release is deliberate and keeps the last values: the session comes back
+    // by itself. Steam actually going is different, and nothing used to clear these —
+    // so the title bar went on saying "2 friends in DayZ" for the rest of the session
+    // and rows kept pills naming people who had left, while the Friends page
+    // correctly said Steam was not running (D-222).
+    if (!s?.initialized) {
+      this.friendsInDayz = null;
+      this.friendsOn.clear();
+      return;
+    }
+    if (s.idle) return;
     try {
       const list = await invoke<FriendInfo[]>("friends_list");
       this.friendsInDayz = list.filter((f) => f.inDayz).length;
@@ -755,7 +765,12 @@ class ServersStore {
 
   private maybeAutoRefresh() {
     if (this.steam?.initialized && !this.steam.refreshing && !this.#autoRefreshed) {
-      this.#autoRefreshed = true;
+      // Armed by `refresh` itself, from what the worker actually answered. Set here,
+      // it was spent even when the worker declined — and it declines for 60 s after
+      // the last completed refresh, seeded across restarts from the cache. So a
+      // restart inside that minute (routine after the updater relaunches) sat on the
+      // cached list with stale counts, said nothing, and left the user to press a
+      // Refresh that has been the multi-minute full pass since D-141 (D-222).
       void this.refresh(false, false);
     } else if (this.steam && !this.steam.initialized && this.steam.error && !this.#dzsaTried && !this.#autoRefreshed) {
       // Steam failed to initialise: fall back to the DZSA list once (D-089), unless a
@@ -810,6 +825,7 @@ class ServersStore {
     this.error = null;
     try {
       const started = await invoke<boolean>("servers_refresh", { force, full });
+      this.#autoRefreshed = started;
       if (started) {
         this.done = null;
         this.verifySummary = null;

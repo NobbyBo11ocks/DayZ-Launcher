@@ -75,16 +75,19 @@
 
   $effect(() => {
     void load();
-    const unlisteners: UnlistenFn[] = [];
-    (async () => {
-      unlisteners.push(
+    // Every argument is awaited before `push` runs, so the array stayed empty until
+    // all of them resolved and an early unmount unsubscribed nothing. Keep the
+    // promises instead (D-222).
+    const pending: Promise<UnlistenFn>[] = [];
+    {
+      pending.push(
         // Any job, not just this page's: a download started from the join dialog is
         // the one the user is most likely to come here to watch (D-184).
-        await listen<SyncProgress>("mods:progress", (ev) => {
+        listen<SyncProgress>("mods:progress", (ev) => {
           updating = ev.payload;
           fromJoin = ev.payload.job !== updateJob;
         }),
-        await listen<SyncDone>("mods:done", (ev) => {
+        listen<SyncDone>("mods:done", (ev) => {
           updating = null;
           fromJoin = false;
           notice = ev.payload.ok ? `Downloaded ${ev.payload.items.length} mod${ev.payload.items.length === 1 ? "" : "s"}.` : null;
@@ -92,8 +95,8 @@
           void load();
         }),
       );
-    })();
-    return () => unlisteners.forEach((u) => u());
+    }
+    return () => pending.forEach((p) => void p.then((u) => u()));
   });
 
   /** The `.acf`'s `needsUpdate` corrected by Steam's live, subscription-aware

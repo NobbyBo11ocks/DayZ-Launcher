@@ -76,9 +76,10 @@
       .catch(() => (installed = new Set()));
   });
   $effect(() => {
-    let off: UnlistenFn | undefined;
-    void listen("mods:done", () => (installed = null)).then((f) => (off = f));
-    return () => off?.();
+    // The unlisten handle arrives after an await, so cleanup has to wait for the
+    // promise rather than read a variable that may still be undefined (D-222).
+    const pending = listen("mods:done", () => (installed = null));
+    return () => void pending.then((f) => f());
   });
 
   // Live INFO/RULES/PLAYER, once per selection.
@@ -313,7 +314,7 @@
         <p class="muted">Vanilla, no mods required.</p>
       {:else if mods.length}
         <ul class="mods">
-          {#each shownMods as m (m.workshopId)}
+          {#each shownMods as m, i (`${m.workshopId}#${i}`)}
             <li class:missing={installed && !installed.has(m.workshopId)}>
               <span class="tick" aria-hidden="true">{installed ? (installed.has(m.workshopId) ? "✓" : "○") : "·"}</span>
               <span class="mname" title={m.name}>{m.name}</span>

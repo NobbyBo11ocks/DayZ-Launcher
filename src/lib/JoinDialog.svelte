@@ -97,33 +97,36 @@
   }
 
   $effect(() => {
-    const unlisteners: UnlistenFn[] = [];
+    // Subscribed before anything is awaited, and cleaned up through the promises
+    // rather than their results: every argument used to be awaited before `push`
+    // ran, so the array was empty until all three resolved and an unmount inside
+    // the IPC round trip unsubscribed nothing (D-222).
+    const pending: Promise<UnlistenFn>[] = [
+      listen<SyncProgress>("mods:progress", (ev) => {
+        if (ev.payload.job !== job) return;
+        syncInfo = ev.payload;
+        progress = new Map(ev.payload.items.map((i) => [i.id, i]));
+      }),
+      listen<SyncDone>("mods:done", (ev) => {
+        if (ev.payload.job !== job) return;
+        progress = new Map(ev.payload.items.map((i) => [i.id, i]));
+        if (ev.payload.ok) {
+          if (plan) plan = { ...plan, mods: plan.mods.map((m) => ({ ...m, installed: true, needsUpdate: false })), missing: 0, updates: 0 };
+          phase = "ready";
+          if (autoLaunch) void joinNow();
+        } else {
+          error = ev.payload.error ?? "Mod download failed";
+          phase = "error";
+        }
+      }),
+      listen<LaunchExited>("launch:exited", (ev) => {
+        if (launched && ev.payload.pid === launched.pid) {
+          exit = ev.payload;
+          phase = "exited";
+        }
+      }),
+    ];
     (async () => {
-      unlisteners.push(
-        await listen<SyncProgress>("mods:progress", (ev) => {
-          if (ev.payload.job !== job) return;
-          syncInfo = ev.payload;
-          progress = new Map(ev.payload.items.map((i) => [i.id, i]));
-        }),
-        await listen<SyncDone>("mods:done", (ev) => {
-          if (ev.payload.job !== job) return;
-          progress = new Map(ev.payload.items.map((i) => [i.id, i]));
-          if (ev.payload.ok) {
-            if (plan) plan = { ...plan, mods: plan.mods.map((m) => ({ ...m, installed: true, needsUpdate: false })), missing: 0, updates: 0 };
-            phase = "ready";
-            if (autoLaunch) void joinNow();
-          } else {
-            error = ev.payload.error ?? "Mod download failed";
-            phase = "error";
-          }
-        }),
-        await listen<LaunchExited>("launch:exited", (ev) => {
-          if (launched && ev.payload.pid === launched.pid) {
-            exit = ev.payload;
-            phase = "exited";
-          }
-        }),
-      );
       void refreshSlots();
       try {
         plan = await invoke<JoinPlan>("join_plan", { id: serverId });
@@ -134,7 +137,7 @@
       }
     })();
     return () => {
-      unlisteners.forEach((u) => u());
+      pending.forEach((p) => void p.then((u) => u()));
       stopWaiting();
     };
   });
@@ -308,7 +311,7 @@
             {#if toSync.length}<span class="warn"> · {toSync.length} to download{#if plan.downloadBytes} ({fmtBytes(plan.downloadBytes)}){/if}</span>{:else}<span class="ok"> · all installed</span>{/if}
           </h3>
           <ul>
-            {#each plan.mods as m (m.id)}
+            {#each plan.mods as m, i (`${m.id}#${i}`)}
               {@const p = progress.get(m.id)}
               <li class:missing={!m.installed} class:update={m.installed && m.needsUpdate}>
                 <span class="tick" aria-hidden="true">{p ? (p.state === "installed" ? "✓" : p.state === "failed" ? "✕" : "…") : m.installed && !m.needsUpdate ? "✓" : "○"}</span>
