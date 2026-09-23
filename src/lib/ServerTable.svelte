@@ -20,6 +20,7 @@
     friendsOn,
     modsByServer,
     empty,
+    filterKey = "",
     inert = false,
   }: {
     rows: ServerRow[];
@@ -43,6 +44,9 @@
     empty?: string;
     /** Scanned mod lists by server id (D-146): the Mods column counts them. */
     modsByServer?: Map<string, number[]>;
+    /** Changes only when the filters change, so a filter that swaps the rows under an
+     *  unchanged viewport still re-arms on-demand verification (D-209). */
+    filterKey?: string;
   } = $props();
 
   const ROW = 36;
@@ -88,7 +92,10 @@
     // came out equal, Svelte stopped the propagation and the rows now on screen were
     // not reported — they waited up to 60 s for the tick below. It is already a prop,
     // so this costs no new dependency on the data (D-197).
-    const key = `${start}:${end}:${sort.key}:${sort.dir}`;
+    // The filters belong in the key for the same reason the sort does: a search term
+    // typed at the top of the list changes every row without moving either bound
+    // (D-209).
+    const key = `${start}:${end}:${sort.key}:${sort.dir}:${filterKey}`;
     void key;
     clearTimeout(visTimer);
     visTimer = setTimeout(() => onVisible(rows.slice(start, end).map((r) => r.id)), 400);
@@ -266,6 +273,7 @@
               {mods ?? "–"}
             </div>
             <div
+              role="gridcell"
               class="cell c-num players"
               title={isInflated(r)
                 ? `Steam reports 0 authenticated players; the server claims ${r.players}`

@@ -704,6 +704,36 @@ impl Cache {
         tx.commit()
     }
 
+    /// The mod list a scan recorded for one server, with the time it was scanned.
+    ///
+    /// The join dialog asks the server itself; this is what it falls back to when the
+    /// server will not answer RULES, because "launching without mods" on a modded
+    /// server is a kick, not a join (D-209).
+    pub fn server_mods(&self, id: &str) -> rusqlite::Result<Option<(i64, Vec<(u64, String)>)>> {
+        let scanned_at: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT scanned_at FROM server_mods_at WHERE server_id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(scanned_at) = scanned_at else {
+            return Ok(None);
+        };
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT mod_id, name FROM server_mods WHERE server_id = ?1")?;
+        let rows = stmt.query_map(params![id], |r| {
+            Ok((r.get::<_, i64>(0)? as u64, r.get::<_, String>(1)?))
+        })?;
+        let mut mods = Vec::new();
+        for row in rows {
+            mods.push(row?);
+        }
+        Ok(Some((scanned_at, mods)))
+    }
+
     /// Everything the browser needs for the mod filter: names with server counts, and
     /// the mod ids per scanned server (servers scanned as vanilla have an empty list).
     pub fn mods_index(&self) -> rusqlite::Result<ModsIndex> {

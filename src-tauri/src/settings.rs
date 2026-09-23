@@ -238,19 +238,26 @@ impl SettingsStore {
         if key.get_value::<u32, _>("DisableNews").unwrap_or(0) != 1 {
             return;
         }
-        let _ = key.delete_value("DisableNews");
+        // Persist first, delete second. Deleting first meant a failed write — a full
+        // disk, a locked file — threw the instruction away and the news page came back
+        // for good; leaving the value in place retries it on the next start (D-209).
         let snapshot = {
             let Ok(mut cur) = self.current.lock() else {
                 return;
             };
-            if !cur.ui.news {
+            cur.ui.news.then(|| {
+                cur.ui.news = false;
+                cur.clone()
+            })
+        };
+        if let Some(snapshot) = snapshot {
+            if let Err(e) = self.persist(&snapshot) {
+                crate::log_warn!("settings", "installer choice not saved, will retry: {e}");
                 return;
             }
-            cur.ui.news = false;
-            cur.clone()
-        };
-        crate::log_info!("settings", "news page switched off by the installer");
-        let _ = self.persist(&snapshot);
+            crate::log_info!("settings", "news page switched off by the installer");
+        }
+        let _ = key.delete_value("DisableNews");
     }
 
     pub fn get(&self) -> Settings {

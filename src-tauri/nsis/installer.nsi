@@ -451,7 +451,7 @@ Function PageOptions
   ${OrIf} ${Silent}
     Abort
   ${EndIf}
-  !insertmacro MUI_HEADER_TEXT "Options" "Choose what the launcher does on its first start."
+  !insertmacro MUI_HEADER_TEXT "Options" "These can all be changed later in Settings."
   nsDialogs::Create 1018
   Pop $0
   ${If} $0 == error
@@ -462,7 +462,7 @@ Function PageOptions
   ${If} $OptNewsState = 1
     ${NSD_Check} $OptNewsCheckbox
   ${EndIf}
-  ${NSD_CreateLabel} 12u 24u 96% 26u "With the news page off, the launcher never contacts Steam${\}s news feed, its picture CDN or YouTube. It can be turned back on at any time in Settings."
+  ${NSD_CreateLabel} 12u 24u 96% 26u "With the news page off, the launcher never contacts Steam's news feed, its picture CDN or YouTube. It can be turned back on at any time in Settings."
   Pop $0
   nsDialogs::Show
 FunctionEnd

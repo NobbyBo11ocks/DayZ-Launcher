@@ -74,6 +74,16 @@
     }, 300);
   }
 
+  // An emptied number field binds as null and Rust's u32 refuses it, so the save
+  // throws — and because the null stays in `launch`, every later save throws too and
+  // the whole page silently stops persisting. Clamp before scheduling (D-209).
+  function saveIdle() {
+    if (!launch) return;
+    const n = Math.round(Number(launch.steamIdleMinutes));
+    launch.steamIdleMinutes = Number.isFinite(n) ? Math.min(1440, Math.max(0, n)) : 15;
+    scheduleSave();
+  }
+
   const themes: { id: Theme; label: string }[] = [
     { id: "slate", label: "Slate (dark)" },
     { id: "light", label: "Light" },
@@ -171,7 +181,7 @@
             <label class="row">
               <span class="label">Idle release</span>
               <span class="inline">
-                after <input class="text num" type="number" min="0" max="1440" step="1" bind:value={launch.steamIdleMinutes} onchange={scheduleSave} aria-label="Minutes before the Steam session is released" /> min
+                after <input class="text num" type="number" min="0" max="1440" step="1" bind:value={launch.steamIdleMinutes} onchange={saveIdle} aria-label="Minutes before the Steam session is released" /> min
                 <span class="muted">0 = stay connected</span>
               </span>
             </label>

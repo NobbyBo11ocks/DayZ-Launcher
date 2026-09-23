@@ -218,7 +218,20 @@ class ServersStore {
   done = $state<RefreshDone | null>(null);
   verifySummary = $state<VerifySummary | null>(null);
   filters = $state<Filters>(loadFilters());
+
+  /** Changes when the filter set changes and never when data arrives. The table keys
+   *  its visibility effect on it: a search term with the list scrolled to the top
+   *  leaves both viewport bounds at 0:25, so the effect never re-ran and the rows the
+   *  search had just brought on screen waited up to 60 s to be verified (D-209).
+   *  Keeping data out of the key is the whole point of D-060 and D-160. */
+  filterKey = $derived(JSON.stringify(this.filters));
   sort = $state<{ key: SortKey; dir: 1 | -1 }>({ key: "players", dir: -1 });
+
+  /** Whether the list holds any server Steam reported as empty. The automatic refresh
+   *  asks for `hasplayers` only (D-046), so until someone presses Refresh the list
+   *  structurally cannot contain the freshly wiped server they are searching for — and
+   *  the empty state told them to widen filters that could never produce it (D-209). */
+  hasEmptyServers = $state(false);
   selectedId = $state<string | null>(null);
   localVersion = $state<string | null>(null);
   error = $state<string | null>(null);
@@ -388,6 +401,16 @@ class ServersStore {
       if (friendsOnly && !friendsOn.has(r.id)) continue;
       out.push(r);
     }
+    this.#sortInPlace(out);
+    return out;
+  });
+
+  /** Sorts rows in place by the chosen column. Shared so that the sort arrows the
+   *  Favourites and LAN tabs draw actually move their rows: both passed `servers.sort`
+   *  and `setSort` into the table while keeping a hard-coded busiest-first order, so
+   *  clicking a header moved the arrow, reordered nothing, and silently changed the
+   *  Servers page behind your back (D-209). */
+  #sortInPlace(out: ServerRow[]) {
     const { key, dir } = this.sort;
     // Ping is quantised to 20 ms steps and ties break on the id so that the
     // jitter from re-verification never reorders rows (D-060: reorders exposed
@@ -437,8 +460,7 @@ class ServersStore {
       }
     };
     out.sort((a, b) => dir * cmp(a, b));
-    return out;
-  });
+  }
 
   selected = $derived.by(() => {
     void this.#rowsVersion;
@@ -508,7 +530,7 @@ class ServersStore {
       if (q && !(r.name.toLowerCase().includes(q) || mapHaystack(r.map).includes(q) || r.ip.startsWith(q))) continue;
       out.push(r);
     }
-    out.sort((a, b) => trustedPlayers(b) - trustedPlayers(a) || a.pingMs - b.pingMs);
+    this.#sortInPlace(out);
     return out;
   });
 
@@ -522,7 +544,7 @@ class ServersStore {
       if (q && !(r.name.toLowerCase().includes(q) || mapHaystack(r.map).includes(q) || r.ip.startsWith(q))) continue;
       out.push(r);
     }
-    out.sort((a, b) => trustedPlayers(b) - trustedPlayers(a) || a.pingMs - b.pingMs);
+    this.#sortInPlace(out);
     return out;
   });
 
@@ -533,7 +555,10 @@ class ServersStore {
       const cached = await invoke<CachedServers>("servers_cached");
       this.fromCache = cached.rows.length;
       this.lastRefresh = cached.lastRefresh;
-      for (const r of cached.rows) this.rows.set(r.id, r);
+      for (const r of cached.rows) {
+        this.rows.set(r.id, r);
+        if (r.steamEmpty === true) this.hasEmptyServers = true;
+      }
       this.#namesDirty = true;
       this.rowsChanged();
     } catch (e) {
@@ -566,9 +591,15 @@ class ServersStore {
         // "0 of 0 shown · 0 from Steam in 0 s" and read as a success.
         this.flushRows();
         if (ev.payload.rejected) {
-          this.verifying = false;
-          this.#verifyingSince = 0;
-          this.error = "Steam did not answer the refresh, so the list was not updated.";
+          // "Busy" is not a failure: a refresh is already running and will report for
+          // itself. Treating the two the same put a permanent red "Steam did not answer
+          // the refresh" on screen for a double-click on Refresh, and switched off the
+          // verifying indicator for the pass that was genuinely running (D-208).
+          if (ev.payload.reason !== "busy") {
+            this.verifying = false;
+            this.#verifyingSince = 0;
+            this.error = "Steam did not answer the refresh, so the list was not updated.";
+          }
           return;
         }
         this.done = ev.payload;
@@ -757,6 +788,7 @@ class ServersStore {
       if (!prev || prev.name !== r.name) this.#namesDirty = true;
       // Keep verification results the Steam batch does not carry.
       this.rows.set(r.id, prev ? { ...r, verifiedPlayers: prev.verifiedPlayers, verifiedAt: prev.verifiedAt, verdict: prev.verdict } : r);
+      if (r.steamEmpty === true && !this.hasEmptyServers) this.hasEmptyServers = true;
     }
     this.rowsChanged();
   }

@@ -184,6 +184,10 @@ export type RefreshDone = {
   stoppedEarly: boolean;
   /** The request never reached Steam: an answer so the UI stops waiting, not a result (D-160). */
   rejected?: boolean;
+  /** Why: "busy" (a refresh is already running and will report for itself — not an
+   *  error) or "no-session" (Steam is not there). One flag for both put a permanent
+   *  failure on screen for a double-click on Refresh (D-208). */
+  reason?: "busy" | "no-session" | null;
 };
 
 export type Verification = {
@@ -201,6 +205,9 @@ export type Verification = {
 };
 
 export type VerifySummary = {
+  /** No pass ran: one was already in flight. An all-zero summary would read as
+   *  "0 verified · 0 fake · 0 offline", which is a result nobody produced (D-208). */
+  skipped?: boolean;
   total: number;
   verified: number;
   inflated: number;

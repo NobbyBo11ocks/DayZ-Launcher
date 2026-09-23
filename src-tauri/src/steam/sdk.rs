@@ -178,10 +178,19 @@ pub struct RefreshDone {
     /// `steam` for the master server, `lan` for LAN discovery (D-087), `dzsa` for
     /// the fallback list (D-089).
     pub source: &'static str,
-    /// The request never reached Steam (no session). The caller must not treat this
-    /// as a completed refresh: it is an answer so the UI can stop waiting (D-160).
+    /// The request never reached Steam. The caller must not treat this as a completed
+    /// refresh: it is an answer so the UI can stop waiting (D-160).
     #[serde(default)]
     pub rejected: bool,
+    /// *Why* it was rejected, because the two reasons want opposite handling and one
+    /// flag for both put a permanent "Steam did not answer the refresh" on screen while
+    /// the refresh was running perfectly (D-208).
+    ///
+    /// `"busy"` — a refresh is already running and will report for itself. Not an error,
+    /// and the targets it is collecting belong to it.
+    /// `"no-session"` — Steam is not there. A real failure; nothing else is coming.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<&'static str>,
 }
 
 /// Where a friend is playing, from `ISteamFriends::GetFriendGamePlayed` (S-64).
@@ -807,6 +816,7 @@ fn reject(cmd: Cmd, events: &UnboundedSender<SteamEvent>, e: String) {
                 capped: false,
                 stopped_early: true,
                 rejected: true,
+                reason: Some("no-session"),
                 source: if partitions.iter().any(|p| p.contains_key("lan")) {
                     "lan"
                 } else {
@@ -975,6 +985,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                         capped: false,
                         stopped_early: true,
                         rejected: true,
+                        reason: Some("busy"),
                         source: "steam",
                     }));
                 }
@@ -1096,6 +1107,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                                 capped: false,
                                 stopped_early: true,
                                 rejected: true,
+                                reason: Some("no-session"),
                                 source: "steam",
                             }));
                         }
@@ -1156,6 +1168,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                             capped: r.results.iter().any(|p| p.capped),
                             stopped_early: r.stopped_early,
                             rejected: false,
+                            reason: None,
                             partitions: std::mem::take(&mut r.results),
                         };
                         let _ = events.send(SteamEvent::Done(done));

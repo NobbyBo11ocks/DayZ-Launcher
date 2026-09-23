@@ -64,7 +64,10 @@
    */
   const emptyText = $derived.by(() => {
     void servers.rowsTick;
-    if (servers.rows.size > 0) return "No server matches these filters. Clear the search, or widen the filters above.";
+    if (servers.rows.size > 0)
+      return servers.hasEmptyServers
+        ? "No server matches these filters. Clear the search, or widen the filters above."
+        : "No server matches these filters — and servers with nobody on them have not been fetched. Press Refresh to include them; it takes a few minutes.";
     const s = servers.steam;
     if (s?.refreshing || servers.dzsaLoading) return "Fetching the list…";
     if (s == null) return "Starting up…";
@@ -83,6 +86,8 @@
     else if (servers.dzsaLoading) parts.push("downloading the DZSA list…");
     else if (d) parts.push(`${fmt.format(d.responded)} from ${d.source === "dzsa" ? "DZSA" : d.source === "lan" ? "the LAN" : "Steam"} in ${(d.elapsedMs / 1000).toFixed(0)} s`);
     if (servers.verifying && !v) parts.push("verifying player counts…");
+    // A skipped pass is not a result: all zeroes would read as "nothing found" (D-208).
+    else if (v?.skipped) parts.push("verification deferred — a pass is already running");
     else if (v) parts.push(`${fmt.format(v.verified)} verified · ${fmt.format(v.inflated + v.unverifiable + v.synthetic)} fake · ${v.offline} offline`);
     if (servers.modScanning) parts.push(`scanning mod lists (${fmt.format(servers.modScan?.total ?? 0)})…`);
     if (servers.filters.mod && servers.unscannedModded > 0) parts.push(`${fmt.format(servers.unscannedModded)} modded servers not scanned yet`);
@@ -153,6 +158,7 @@
       favourites={servers.favourites}
       onSelect={(id) => servers.select(id)}
       onSort={(k) => servers.setSort(k)}
+      filterKey={servers.filterKey}
       onVisible={(ids) => servers.verifyVisible(ids)}
       onActivate={(id) => (servers.joiningId = id)}
       onFavourite={(id) => servers.toggleFavourite(id)}

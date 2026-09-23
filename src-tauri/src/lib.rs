@@ -267,6 +267,7 @@ pub fn run() {
                 a2s: a2s.clone(),
                 verifying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 scanning: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                dzsa: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 settings,
             });
 
@@ -364,7 +365,17 @@ pub fn run() {
                             // guard held, skipped, and left the UI reading "verifying
                             // player counts…" until the five-minute watchdog invented an
                             // error (D-204).
+                            // A rejected `Done` takes no targets — but only "busy"
+                            // leaves them for someone else. That rejection comes from a
+                            // refresh that is still running and still collecting into
+                            // this accumulator; every other one means nothing is coming,
+                            // so the partial rows have to go or the next refresh
+                            // verifies them a second time and the totals stop adding up
+                            // (D-208, after D-204).
                             let targets = if d.rejected {
+                                if d.reason != Some("busy") {
+                                    populated.clear();
+                                }
                                 Vec::new()
                             } else {
                                 std::mem::take(&mut populated)
@@ -387,11 +398,20 @@ pub fn run() {
                                 let Some(guard) = guard else {
                                     // The UI arms "verifying" on every refresh and only
                                     // `servers:verify-done` disarms it, so skipping has to
-                                    // say so rather than go quiet (D-204).
+                                    // say so rather than go quiet (D-204) — but an empty
+                                    // summary reads as "0 verified · 0 fake · 0 offline",
+                                    // which is the invented result D-159 removed from the
+                                    // LAN path. It says it was skipped, and the targets go
+                                    // back so the running pass or the next refresh still
+                                    // gets them (D-208).
                                     log_info!("verify", "a pass is already running; skipped");
+                                    populated = targets;
                                     let _ = handle.emit(
                                         "servers:verify-done",
-                                        &commands::VerifySummary::default(),
+                                        &commands::VerifySummary {
+                                            skipped: true,
+                                            ..Default::default()
+                                        },
                                     );
                                     continue;
                                 };

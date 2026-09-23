@@ -50,7 +50,8 @@
         favourites={servers.favourites}
         onSelect={(id) => servers.select(id)}
         onSort={(k) => servers.setSort(k)}
-        onVisible={(ids) => servers.verifyVisible(ids)}
+        filterKey={servers.filterKey}
+      onVisible={(ids) => servers.verifyVisible(ids)}
         onActivate={(id) => (servers.joiningId = id)}
         onFavourite={(id) => servers.toggleFavourite(id)}
         friendsOn={servers.friendsOn}

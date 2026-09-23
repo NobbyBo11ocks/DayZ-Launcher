@@ -31,6 +31,10 @@ pub struct AppState {
     pub verifying: Arc<AtomicBool>,
     /// A mod scan is in flight (D-197).
     pub scanning: Arc<AtomicBool>,
+    /// A DZSA import is in flight. Two of them write the same ~13 000 rows through the
+    /// same mutex, emit two `servers:done` and queue two verification passes for one
+    /// list; the front end's own guard does not survive a reload (D-209).
+    pub dzsa: Arc<AtomicBool>,
 }
 
 /// Clears its flag however the pass ends, including an early `return`.
@@ -213,6 +217,11 @@ pub fn servers_refresh(
 /// Returns the number of servers imported.
 #[tauri::command]
 pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResult<usize> {
+    let Some(_busy) = InFlight::claim(&state.dzsa) else {
+        return Err(AppError::Internal(
+            "The DZSA list is already being downloaded.".into(),
+        ));
+    };
     let t0 = Instant::now();
     let rows = crate::browser::dzsa::fetch()
         .await
@@ -281,6 +290,7 @@ pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResu
         capped: false,
         stopped_early: false,
         rejected: false,
+        reason: None,
         source: "dzsa",
     };
     let _ = app.emit("servers:done", &done);
@@ -326,6 +336,11 @@ pub struct VerifySummary {
     pub synthetic: usize,
     pub offline: usize,
     pub elapsed_ms: u64,
+    /// No pass ran: one was already in flight. The UI has to stop waiting either way,
+    /// but an all-zero summary reads as "0 verified · 0 fake · 0 offline", which is the
+    /// invented result D-159 removed from the LAN path (D-208).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub skipped: bool,
 }
 
 /// Verifies targets as a stream (D-193); only the events are batched: emits `servers:verified` (Vec<Verification>) per
@@ -710,6 +725,12 @@ pub async fn mods_scan(app: AppHandle, state: State<'_, AppState>, force: bool) 
     // The claim lives inside `run_mod_scan` so that the automatic scan after a refresh
     // is covered too — it calls the function directly and took no flag at all, which is
     // two scans at 200 pps over the same chunks (D-204).
+    // …but a button press that lands on a running scan has to say so. Without this the
+    // command returned Ok, the spawned task logged "ignored" and gave up, and the only
+    // thing the user saw was a watchdog clearing the flag ~2 min later (D-209).
+    if state.scanning.load(Ordering::Acquire) {
+        return Err(AppError::Internal("A mod scan is already running.".into()));
+    }
     let (app2, cache, client, scanning) = (
         app,
         Arc::clone(&state.cache),
@@ -1083,6 +1104,31 @@ async fn cached_row(cache: &Arc<Mutex<Cache>>, id: &str) -> Option<ServerRow> {
     .flatten()
 }
 
+/// The mod list the last scan recorded for one server, with when it was scanned.
+/// `Some((_, []))` means the scan found it vanilla, which is not the same as never
+/// having looked.
+async fn cached_mods(cache: &Arc<Mutex<Cache>>, id: &str) -> Option<(i64, Vec<(u64, String)>)> {
+    let c = Arc::clone(cache);
+    let key = id.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        c.lock().ok().and_then(|c| c.server_mods(&key).ok().flatten())
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// "12 minutes ago" / "3 hours ago" / "2 days ago", for text the user reads once.
+fn humanise_age(secs: i64) -> String {
+    let plural = |n: i64, unit: &str| format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" });
+    match secs {
+        s if s < 90 => "just now".to_string(),
+        s if s < 90 * 60 => plural(s / 60, "minute"),
+        s if s < 36 * 3600 => plural(s / 3600, "hour"),
+        s => plural(s / 86_400, "day"),
+    }
+}
+
 async fn cached_counts(cache: &Arc<Mutex<Cache>>, id: &str) -> (i32, i32) {
     cached_row(cache, id)
         .await
@@ -1159,12 +1205,26 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
                     .collect()
             })
             .unwrap_or_default(),
-        Err(e) => {
-            warnings.push(format!(
-                "Could not read the server's mod list ({e}); launching without mods."
-            ));
-            Vec::new()
-        }
+        // A server that will not answer RULES is not a vanilla server. Launching
+        // without its mods is a kick on arrival, so fall back to the list the mod scan
+        // recorded and say how old it is rather than inventing an empty one (D-209).
+        Err(e) => match cached_mods(&state.cache, &id).await {
+            Some((scanned_at, mods)) if !mods.is_empty() => {
+                let age = ServerRow::now_unix().saturating_sub(scanned_at);
+                warnings.push(format!(
+                    "The server did not answer the mod query ({e}); using the list from the last scan, {}.",
+                    humanise_age(age)
+                ));
+                mods
+            }
+            Some(_) => Vec::new(),
+            None => {
+                warnings.push(format!(
+                    "Could not read the server's mod list ({e}) and it has never been scanned; launching without mods."
+                ));
+                Vec::new()
+            }
+        },
     };
     let inventory: HashMap<u64, (Option<String>, bool)> = diag
         .workshop
