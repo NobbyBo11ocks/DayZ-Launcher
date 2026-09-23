@@ -5,6 +5,7 @@
 // Every command through the logging wrapper: a failure is recorded with its
 // command name before it is rethrown (D-158).
 import { invokeLogged as invoke } from "../log";
+import { mapHaystack, mapLabel } from "../maps";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { uiPrefs } from "./uiprefs.svelte";
@@ -30,6 +31,9 @@ import {
 export type SortKey = "name" | "map" | "mods" | "players" | "ping" | "time" | "version";
 export type Perspective = "any" | "1pp" | "3pp";
 export type ModFilter = "any" | "modded" | "vanilla";
+/** Official = Bohemia's public hive, your character follows you between them.
+ *  Community = a private shard, your character lives on that one box (D-195). */
+export type HiveFilter = "any" | "official" | "community";
 
 export type Filters = {
   search: string;
@@ -43,8 +47,8 @@ export type Filters = {
   notEmpty: boolean;
   hasQueue: boolean;
   noPassword: boolean;
-  battleyeOnly: boolean;
   mods: ModFilter;
+  hive: HiveFilter;
   dayOnly: boolean;
   /** 0 = no limit. */
   maxPing: number;
@@ -80,8 +84,8 @@ export const defaultFilters = (): Filters => ({
   notEmpty: false,
   hasQueue: false,
   noPassword: false,
-  battleyeOnly: false,
   mods: "any",
+  hive: "any",
   dayOnly: false,
   maxPing: 0,
   versionMine: false,
@@ -93,7 +97,13 @@ export const defaultFilters = (): Filters => ({
 function loadFilters(): Filters {
   try {
     const raw = localStorage.getItem(FILTERS_KEY);
-    if (raw) return { ...defaultFilters(), ...(JSON.parse(raw) as Partial<Filters>), search: "" };
+    if (raw) {
+      const f = { ...defaultFilters(), ...(JSON.parse(raw) as Partial<Filters>), search: "" };
+      // Saved before D-195 the map could be any capitalisation the server used, and
+      // the filter compares against the lower-cased id now.
+      f.map = f.map.toLowerCase();
+      return f;
+    }
   } catch {
     /* storage unavailable */
   }
@@ -245,12 +255,23 @@ class ServersStore {
     });
   }
 
-  /** Distinct maps with counts, most common first. */
+  /**
+   * Distinct maps with counts, most common first, as `[id, label, count]`.
+   *
+   * Keyed by the lower-cased id, because servers disagree about capitalisation —
+   * `chernarusplus` and `ChernarusPlus`, `deerisle` and `DeerIsle` — and the dropdown
+   * used to list each spelling as its own map (D-195).
+   */
   maps = $derived.by(() => {
     void this.#rowsVersion;
     const counts = new Map<string, number>();
-    for (const r of this.rows.values()) counts.set(r.map, (counts.get(r.map) ?? 0) + 1);
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    for (const r of this.rows.values()) {
+      const key = r.map.toLowerCase();
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([id, n]) => [id, mapLabel(id), n] as [string, string, number])
+      .sort((a, b) => b[2] - a[2]);
   });
 
   untrustedCount = $derived.by(() => {
@@ -272,7 +293,7 @@ class ServersStore {
   moreFilterCount = $derived.by(() => {
     const f = this.filters;
     return (
-      [f.notFull, f.notEmpty, f.hasQueue, f.noPassword, f.battleyeOnly, f.dayOnly, f.versionMine].filter(Boolean).length +
+      [f.notFull, f.notEmpty, f.hasQueue, f.noPassword, f.dayOnly, f.versionMine].filter(Boolean).length +
       (f.mod ? 1 : 0) +
       (f.maxPing > 0 ? 1 : 0) +
       (f.hideUntrusted ? 0 : 1) +
@@ -315,7 +336,7 @@ class ServersStore {
     const notEmpty = f.notEmpty;
     const hasQueue = f.hasQueue;
     const noPassword = f.noPassword;
-    const battleyeOnly = f.battleyeOnly;
+    const hive = f.hive;
     const mods = f.mods;
     const dayOnly = f.dayOnly;
     const maxPing = f.maxPing;
@@ -327,10 +348,12 @@ class ServersStore {
     const out: ServerRow[] = [];
     for (const r of this.rows.values()) {
       if (hideUntrusted && isUntrusted(r)) continue;
-      if (q && !(r.name.toLowerCase().includes(q) || r.map.toLowerCase().includes(q) || r.ip.startsWith(q))) continue;
+      if (q && !(r.name.toLowerCase().includes(q) || mapHaystack(r.map).includes(q) || r.ip.startsWith(q))) continue;
       if (perspective === "1pp" && !r.tags.firstPersonOnly) continue;
       if (perspective === "3pp" && r.tags.firstPersonOnly) continue;
-      if (map && r.map !== map) continue;
+      // The dropdown's value is the lower-cased id, because servers disagree about
+      // capitalisation and `ChernarusPlus` is the same map as `chernarusplus` (D-195).
+      if (map && r.map.toLowerCase() !== map) continue;
       if (country && r.country !== country) continue;
       if (mod && !modsByServer.get(r.id)?.includes(mod)) continue;
       const pop = trustedPlayers(r);
@@ -338,7 +361,10 @@ class ServersStore {
       if (notEmpty && pop <= 0) continue;
       if (hasQueue && !(r.tags.queue && r.tags.queue > 0)) continue;
       if (noPassword && r.password) continue;
-      if (battleyeOnly && !r.tags.battleye) continue;
+      // 13 375 of 13 380 servers run BattlEye, so the chip that used to sit here
+      // filtered out five of them; the hive is the distinction that changes what a
+      // join means (D-195).
+      if (hive !== "any" && r.tags.privateHive !== (hive === "community")) continue;
       if (mods === "modded" && !r.tags.modded) continue;
       if (mods === "vanilla" && r.tags.modded) continue;
       if (dayOnly && !(r.tags.timeMinutes != null && r.tags.timeMinutes >= 6 * 60 && r.tags.timeMinutes < 20 * 60)) continue;
@@ -460,7 +486,7 @@ class ServersStore {
     for (const id of this.favourites) {
       const r = this.rows.get(id);
       if (!r) continue;
-      if (q && !(r.name.toLowerCase().includes(q) || r.map.toLowerCase().includes(q) || r.ip.startsWith(q))) continue;
+      if (q && !(r.name.toLowerCase().includes(q) || mapHaystack(r.map).includes(q) || r.ip.startsWith(q))) continue;
       out.push(r);
     }
     out.sort((a, b) => trustedPlayers(b) - trustedPlayers(a) || a.pingMs - b.pingMs);
@@ -474,7 +500,7 @@ class ServersStore {
     const out: ServerRow[] = [];
     for (const r of this.rows.values()) {
       if (!isLanIp(r.ip)) continue;
-      if (q && !(r.name.toLowerCase().includes(q) || r.map.toLowerCase().includes(q) || r.ip.startsWith(q))) continue;
+      if (q && !(r.name.toLowerCase().includes(q) || mapHaystack(r.map).includes(q) || r.ip.startsWith(q))) continue;
       out.push(r);
     }
     out.sort((a, b) => trustedPlayers(b) - trustedPlayers(a) || a.pingMs - b.pingMs);

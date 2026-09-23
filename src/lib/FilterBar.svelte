@@ -3,7 +3,7 @@
   // parts share this component: `primary` (search, perspective, map, country, mods;
   // 28 px controls) for the first row of the Servers page and `chips` (quick toggles,
   // ping, trust, specific mod, reset; 26 px) for the second.
-  import { servers, type ModFilter, type Perspective } from "./state/servers.svelte";
+  import { servers, type HiveFilter, type ModFilter, type Perspective } from "./state/servers.svelte";
   import { countryName } from "./types";
 
   let { part = "primary" }: { part?: "primary" | "chips" } = $props();
@@ -46,8 +46,12 @@
 
   const f = $derived(servers.filters);
   const fmt = new Intl.NumberFormat();
-  const toggle = (key: "notFull" | "notEmpty" | "hasQueue" | "noPassword" | "battleyeOnly" | "dayOnly" | "versionMine" | "hideUntrusted" | "friendsOnly") => {
+  const toggle = (key: "notFull" | "notEmpty" | "hasQueue" | "noPassword" | "dayOnly" | "versionMine" | "hideUntrusted" | "friendsOnly") => {
     servers.filters[key] = !servers.filters[key];
+    servers.saveFilters();
+  };
+  const setHive = (h: HiveFilter) => {
+    servers.filters.hive = h;
     servers.saveFilters();
   };
   const setPerspective = (p: Perspective) => {
@@ -105,10 +109,19 @@
       {/each}
     </div>
 
+    <!-- Official is Bohemia's public hive, where your character follows you between
+         servers; Community is a private shard, where it does not. The in-game browser
+         makes this a top-level tab, and the tag is already on every row (D-195). -->
+    <div class="seg" role="group" aria-label="Hive">
+      {#each [["any", "Any", "Both hives"], ["official", "Official", "Bohemia's public hive: your character follows you between these"], ["community", "Community", "Private shards: your character lives on that one server"]] as [v, label, hint] (v)}
+        <button class="segbtn" class:on={f.hive === v} aria-pressed={f.hive === v} title={hint} onclick={() => setHive(v as HiveFilter)}>{label}</button>
+      {/each}
+    </div>
+
     <select class="select" bind:value={servers.filters.map} onchange={() => servers.saveFilters()} aria-label="Map">
       <option value="">All maps</option>
-      {#each servers.maps.slice(0, 40) as [map, n] (map)}
-        <option value={map}>{map} ({n})</option>
+      {#each servers.maps.slice(0, 40) as [id, label, n] (id)}
+        <option value={id}>{label} ({n})</option>
       {/each}
     </select>
 
@@ -131,7 +144,6 @@
     <button class="chip" class:on={f.notFull} aria-pressed={f.notFull} onclick={() => toggle("notFull")}>Not full</button>
     <button class="chip" class:on={f.hasQueue} aria-pressed={f.hasQueue} onclick={() => toggle("hasQueue")}>Has queue</button>
     <button class="chip" class:on={f.noPassword} aria-pressed={f.noPassword} onclick={() => toggle("noPassword")}>No password</button>
-    <button class="chip" class:on={f.battleyeOnly} aria-pressed={f.battleyeOnly} onclick={() => toggle("battleyeOnly")}>BattlEye</button>
     <button class="chip" class:on={f.dayOnly} aria-pressed={f.dayOnly} onclick={() => toggle("dayOnly")}>Daytime</button>
     <button class="chip" class:on={f.versionMine} aria-pressed={f.versionMine} onclick={() => toggle("versionMine")} disabled={!servers.localVersion} title={servers.localVersion ? `Only ${servers.localVersion}` : "DayZ not found"}>
       My version

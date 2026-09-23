@@ -10,6 +10,7 @@
   import Flag from "./Flag.svelte";
   import Sparkline from "./Sparkline.svelte";
   import { external } from "./external";
+  import { mapLabel } from "./maps";
   import { servers } from "./state/servers.svelte";
   import { clock, countryName, isInflated, trustedPlayers, type Diagnostics, type PopulationSample, type ServerDetails, type ServerRow } from "./types";
 
@@ -180,7 +181,7 @@
       <h2 title={row.name}>{row.name}</h2>
       <div class="meta">
         {#if row.country}<span class="chip"><Flag code={row.country} /> {countryName(row.country)}</span>{/if}
-        <span class="chip">{row.map}</span>
+        <span class="chip" title={row.map}>{mapLabel(row.map)}</span>
         <span class="chip" class:bad={!versionOk} title={versionOk ? "Server version" : `Server version differs from your DayZ_x64.exe (${localVersion})`}>v{row.version}{#if !versionOk} ≠ mine{/if}</span>
         {#if row.password}<span class="chip">🔒 password</span>{/if}
       </div>
@@ -229,9 +230,16 @@
         {#if row.tags.timeMultiplier != null}<span class="muted"> · day ×{row.tags.timeMultiplier}{#if row.tags.nightMultiplier != null}, night ×{row.tags.nightMultiplier}{/if}</span>{/if}
       </dd>
       <dt>Hive</dt>
-      <dd>{row.tags.privateHive ? "Private" : "Public"}{#if row.tags.shard}<span class="muted"> · shard {row.tags.shard}</span>{/if}</dd>
-      <dt>Anti-cheat</dt>
-      <dd>{row.tags.battleye ? "BattlEye" : "None"}{#if row.tags.allowedFilePatching}<span class="muted"> · file patching allowed</span>{/if}</dd>
+      <dd>
+        {row.tags.privateHive ? "Community" : "Official"}
+        <span class="muted"> · {row.tags.privateHive ? "your character lives on this server" : "your character follows you across official servers"}</span>
+      </dd>
+      {#if !row.tags.battleye || row.tags.allowedFilePatching}
+        <dt>Anti-cheat</dt>
+        <dd class="bad">
+          {row.tags.battleye ? "BattlEye" : "No BattlEye"}{#if row.tags.allowedFilePatching}<span class="muted"> · file patching allowed</span>{/if}
+        </dd>
+      {/if}
     </dl>
 
     {#if description}

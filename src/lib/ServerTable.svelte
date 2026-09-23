@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { mapLabel } from "./maps";
   // Virtualised server table (docs/05 §5, docs/06 §2): fixed 36 px rows, renders only
   // the viewport plus overscan, reports visible ids for verification, keyboard nav.
   import Flag from "./Flag.svelte";
@@ -225,7 +226,10 @@
               </span>
               <span class="name">{r.name}</span>
             </div>
-            <div role="gridcell" class="cell c-map">{r.map}</div>
+            <!-- The name players use, not the folder A2S reports: Livonia is
+                 `enoch` and Chernarus is `chernarusplus` (D-195). The raw id stays
+                 in the tooltip, since server owners quote it in their rules. -->
+            <div role="gridcell" class="cell c-map" title={r.map}>{mapLabel(r.map)}</div>
             <!-- Mod count from the last scan (D-146); a dash means this server has not
                  been scanned yet, which is not the same as "no mods". -->
             <div role="gridcell" class="cell c-num mods" class:muted={mods === undefined} title={mods === undefined ? "Mod list not scanned yet" : mods === 0 ? "Vanilla" : `${mods} mods`}>

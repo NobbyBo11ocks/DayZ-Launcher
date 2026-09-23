@@ -77,7 +77,8 @@ Key-free server list straight from Steam · player counts verified with every se
 <tr valign="top"><td>
 
 - Steam's own matchmaking list — no API key, the same list the in-game browser sees
-- Filters for perspective, map, country, mod, queue, password, BattlEye, daytime, version, ping and friends
+- Filters for perspective, official or community hive, map, country, mod, queue, password, daytime, version, ping and friends
+- Maps by the name people use — searching "Livonia" finds `enoch`, "Frostline" finds `sakhal`
 - Country flags from an offline table, no lookups
 - A details pane with the server's mods and installed ticks, 72 h population history, and your past sessions there
 - Find every server running a given mod
@@ -220,7 +221,7 @@ The public key is in `src-tauri/tauri.conf.json`; the updater polls `https://git
 Bump `version` in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`, commit, then push a matching tag:
 
 ```bash
-git tag v0.1.26 && git push origin main v0.1.26
+git tag v0.1.27 && git push origin main v0.1.27
 ```
 
 The [release workflow](.github/workflows/release.yml) builds the signed installer on a clean Windows runner, creates the release with generated notes, uploads the installer, its `.sig` and `latest.json`, smoke-installs the result, and verifies the published manifest. It needs **one** repository secret, set once from the machine that holds the key. In PowerShell:
@@ -247,17 +248,17 @@ Run the workflow manually from the Actions tab for a build-only dry run.
 2. Create the GitHub release with the installer and its signature:
 
    ```bash
-   gh release create v0.1.26 "src-tauri/target/release/bundle/nsis/DZSA CrayZ Launcher_0.1.26_x64-setup.exe" "src-tauri/target/release/bundle/nsis/DZSA CrayZ Launcher_0.1.26_x64-setup.exe.sig" --title v0.1.26 --notes-file notes.md
+   gh release create v0.1.27 "src-tauri/target/release/bundle/nsis/DZSA CrayZ Launcher_0.1.27_x64-setup.exe" "src-tauri/target/release/bundle/nsis/DZSA CrayZ Launcher_0.1.27_x64-setup.exe.sig" --title v0.1.27 --notes-file notes.md
    ```
 
 3. Generate the update manifest from the uploaded asset (GitHub renames spaces in asset names to dots, so the URL must come from the API) and upload it:
 
    ```bash
-   node tools/make_latest.js v0.1.26 --notes notes.md
+   node tools/make_latest.js v0.1.27 --notes notes.md
    ```
 
    ```bash
-   gh release upload v0.1.26 src-tauri/target/release/bundle/nsis/latest.json --clobber
+   gh release upload v0.1.27 src-tauri/target/release/bundle/nsis/latest.json --clobber
    ```
 
 4. Check the release the way the app will see it (fetches the manifest through the endpoint, downloads the installer, verifies the minisign signature against the public key):
