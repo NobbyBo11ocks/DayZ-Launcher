@@ -256,10 +256,10 @@
   {#if all.length}
     <div class="bar tools">
       <input class="search" type="search" placeholder="Search mods" bind:value={search} aria-label="Search mods" spellcheck="false" />
-      <div class="chips" role="tablist" aria-label="Mod filter">
+      <div class="chips" role="group" aria-label="Mod filter">
         {#each views as v (v.id)}
           {@const n = v.count()}
-          <button class="chip" class:on={view === v.id} role="tab" aria-selected={view === v.id} onclick={() => (view = v.id)} disabled={n === 0 && v.id !== "all"}>
+          <button class="chip" class:on={view === v.id} aria-pressed={view === v.id} onclick={() => (view = v.id)} disabled={n === 0 && v.id !== "all"}>
             {v.label} <span class="n">{n}</span>
           </button>
         {/each}
@@ -284,8 +284,8 @@
     </div>
   {/if}
 
-  {#if error}<p class="error">{error}</p>{/if}
-  {#if notice}<p class="ok small">{notice}</p>{/if}
+  {#if error}<p class="error" role="alert">{error}</p>{/if}
+  {#if notice}<p class="ok small" role="status" aria-live="polite">{notice}</p>{/if}
 
   {#if data && (!data.workshop || all.length === 0)}
     <div class="empty">
@@ -366,7 +366,7 @@
   .scroll { flex: 1; min-height: 0; overflow: auto; }
 
   .search { flex: 0 1 240px; min-width: 120px; box-sizing: border-box; height: 26px; padding: 0 9px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg); font-size: 12.5px; }
-  .search:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .search:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
 
   .chips { display: inline-flex; gap: 5px; }
   .chip { all: unset; cursor: pointer; box-sizing: border-box; height: 26px; padding: 0 10px; display: inline-flex; align-items: center; gap: 5px; border-radius: var(--radius); border: 1px solid var(--border); color: var(--fg-muted); font-size: 12.5px; white-space: nowrap; }

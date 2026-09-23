@@ -124,7 +124,9 @@
     </div>
 
     <div class="statusline">
-      <span class="status">{status}</span>
+      <!-- `polite`, so it waits for a pause: it changes several times a second
+           during a refresh and would otherwise talk over everything (D-198). -->
+      <span class="status" role="status" aria-live="polite">{status}</span>
       <!-- The scan runs itself after a refresh, but until now there was no way to ask
            for it: a mod filter with unscanned servers was a dead end (D-160). -->
       {#if servers.unscannedModded > 0 && !servers.modScanning}
@@ -178,13 +180,13 @@
   .iconbtn { all: unset; cursor: pointer; box-sizing: border-box; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg-muted); }
   .iconbtn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; }
   .iconbtn:hover, .iconbtn.on { color: var(--fg); border-color: var(--accent-ink); }
-  .iconbtn:focus-visible { outline: 2px solid var(--accent); }
+  .iconbtn:focus-visible { outline: 2px solid var(--accent-ink); }
 
   .connect { position: relative; }
   .pop { position: absolute; top: 34px; right: 0; z-index: 20; display: flex; align-items: center; gap: 6px; padding: 8px; border-radius: 10px; background: var(--bg-elev); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); }
   .poptitle { font-size: 11.5px; color: var(--fg-muted); white-space: nowrap; padding-right: 2px; }
   .pop input { box-sizing: border-box; width: 190px; height: 28px; padding: 0 10px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg); font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
-  .pop input:focus-visible { outline: 2px solid var(--accent); }
+  .pop input:focus-visible { outline: 2px solid var(--accent-ink); }
 
   .statusline { display: flex; align-items: center; gap: 10px; min-height: 16px; font-size: 11px; color: var(--fg-muted); }
   .status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }

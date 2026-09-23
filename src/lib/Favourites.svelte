@@ -69,7 +69,7 @@
   .search { flex: 0 0 260px; padding: 6px 10px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg); }
   .btn { all: unset; cursor: pointer; padding: 6px 12px; border-radius: var(--radius); background: var(--bg-row); color: var(--fg); border: 1px solid var(--border); }
   .btn:disabled { opacity: 0.5; cursor: default; }
-  .btn:focus-visible { outline: 2px solid var(--accent); }
+  .btn:focus-visible { outline: 2px solid var(--accent-ink); }
   .empty { margin: auto; text-align: center; max-width: 520px; }
   .empty p { margin: 4px 0; }
   kbd { padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-row); font-size: 11px; }

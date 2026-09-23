@@ -127,7 +127,7 @@
         {#if loadedAt}· updated {loadedAt}{/if}
       </span>
       {#if servers.steam?.idle && !friends.length}<span class="muted">Steam session released while idle — press Refresh to fetch the list.</span>{/if}
-      {#if error}<span class="error">{error}</span>{/if}
+      {#if error}<span class="error" role="alert">{error}</span>{/if}
     </div>
   </div>
   {#if !steamOk}

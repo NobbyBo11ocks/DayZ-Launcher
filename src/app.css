@@ -184,7 +184,7 @@ button {
 }
 
 .rail-item:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-ink);
   outline-offset: -2px;
 }
 
@@ -308,6 +308,11 @@ h1 {
    specificity tie the component wins on source order — so roughly forty buttons had
    no focus ring at all, including every control in the join dialog (D-186). */
 ::placeholder { color: var(--fg-muted); opacity: 1; }
+
+/* Same story as the `.btn` ring above, for the buttons that are not `.btn`: the Mods
+   page's filter tabs and sort headers and the toast's close button all open with
+   `all: unset`, which clears `outline`, and no component rule puts one back (D-198). */
+button:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
 
 button.btn:focus-visible,
 a.btn:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }

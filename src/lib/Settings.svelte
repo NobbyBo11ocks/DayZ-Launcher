@@ -80,6 +80,23 @@
   ];
   // Twelve accents as colour dots (D-131): the id is the label, capitalised.
   const accents = ACCENTS.map((id) => ({ id, label: id.charAt(0).toUpperCase() + id.slice(1) }));
+
+  /**
+   * Arrow keys inside a radiogroup, which is what makes it one tab stop instead of
+   * one per option — twelve of them for the accents alone (D-198).
+   */
+  function roving(e: KeyboardEvent, ids: string[], current: string, pick: (id: string) => void) {
+    const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+    if (step === 0) return;
+    e.preventDefault();
+    const i = ids.indexOf(current);
+    const next = ids[(i + step + ids.length) % ids.length];
+    if (!next) return;
+    pick(next);
+    // The newly checked option is the one that now holds the tab stop, so focus follows.
+    const group = e.currentTarget as HTMLElement;
+    queueMicrotask(() => group.querySelector<HTMLElement>('[tabindex="0"]')?.focus());
+  }
 </script>
 
 <section class="settings">
@@ -101,17 +118,17 @@
         <div class="cbody">
           <div class="row">
             <span class="label">Theme</span>
-            <div class="group" role="radiogroup" aria-label="Theme">
+            <div class="group" role="radiogroup" aria-label="Theme" tabindex="-1" onkeydown={(e) => roving(e, themes.map((t) => t.id), prefs.theme, (id) => (prefs.theme = id as typeof prefs.theme))}>
               {#each themes as t (t.id)}
-                <button class="chip" class:on={prefs.theme === t.id} role="radio" aria-checked={prefs.theme === t.id} onclick={() => (prefs.theme = t.id)}>{t.label}</button>
+                <button class="chip" class:on={prefs.theme === t.id} role="radio" aria-checked={prefs.theme === t.id} tabindex={prefs.theme === t.id ? 0 : -1} onclick={() => (prefs.theme = t.id)}>{t.label}</button>
               {/each}
             </div>
           </div>
           <div class="row">
             <span class="label">Accent</span>
-            <div class="group dots" role="radiogroup" aria-label="Accent">
+            <div class="group dots" role="radiogroup" aria-label="Accent" tabindex="-1" onkeydown={(e) => roving(e, accents.map((a) => a.id), prefs.accent, (id) => (prefs.accent = id as typeof prefs.accent))}>
               {#each accents as a (a.id)}
-                <button class="dot" data-accent={a.id} class:on={prefs.accent === a.id} role="radio" aria-checked={prefs.accent === a.id} aria-label={a.label} title={a.label} onclick={() => (prefs.accent = a.id)}></button>
+                <button class="dot" data-accent={a.id} class:on={prefs.accent === a.id} role="radio" aria-checked={prefs.accent === a.id} aria-label={a.label} title={a.label} tabindex={prefs.accent === a.id ? 0 : -1} onclick={() => (prefs.accent = a.id)}></button>
               {/each}
               <span class="muted swatch">{accents.find((a) => a.id === prefs.accent)?.label}</span>
             </div>
@@ -294,7 +311,7 @@
   .chip.accent { background: var(--accent); color: var(--accent-fg); border-color: transparent; font-weight: 600; }
   .chip.accent:hover { filter: brightness(1.08); color: var(--accent-fg); }
   .chip:disabled { opacity: 0.5; cursor: default; }
-  .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .chip:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
 
   /* Accent dots: each carries its own --accent through its data-accent attribute (app.css), so the
      fill and the selection ring are the dot's colour, not the current theme's. */
@@ -308,7 +325,7 @@
   .check input { accent-color: var(--accent); flex: none; }
 
   .text { flex: 1; min-width: 0; max-width: 420px; padding: 5px 10px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg); font-size: 12.5px; }
-  .text:focus-visible { outline: 2px solid var(--accent); }
+  .text:focus-visible { outline: 2px solid var(--accent-ink); }
   .text.num { width: 62px; flex: none; }
   .inline { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 12.5px; }
   .inline.wrap { flex-wrap: wrap; }

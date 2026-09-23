@@ -12,10 +12,41 @@
     importing = false;
     imported = r ? `${r.imported} imported${r.already ? `, ${r.already} already here` : ""}` : (servers.error ?? "nothing to import");
   }
+
+  // It declares `aria-modal="true"` and behaved like nothing of the sort: focus stayed
+  // behind it, Tab walked the page underneath and Escape did nothing. The join dialog
+  // has done this properly since D-184; this is the same treatment (D-198).
+  let cardEl = $state<HTMLDivElement | null>(null);
+  const FOCUSABLE = 'input:not([disabled]), select:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
+
+  $effect(() => {
+    if (!cardEl || cardEl.contains(document.activeElement)) return;
+    (cardEl.querySelector<HTMLElement>(FOCUSABLE) ?? cardEl).focus();
+  });
+
+  function trap(e: KeyboardEvent) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      onDone();
+      return;
+    }
+    if (e.key !== "Tab" || !cardEl) return;
+    const items = [...cardEl.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+    if (items.length === 0) return;
+    const first = items[0]!;
+    const last = items[items.length - 1]!;
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
 </script>
 
 <div class="backdrop" role="presentation">
-  <div class="card" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
+  <div class="card" role="dialog" aria-modal="true" aria-labelledby="welcome-title" bind:this={cardEl} tabindex="-1" onkeydown={trap}>
     <h2 id="welcome-title">Welcome to DZSA CrayZ Launcher</h2>
     <ol>
       <li><strong>Steam stays in charge.</strong> The server list comes from Steam, mods download through the Workshop, and the game starts through BattlEye exactly like the official launcher. Keep Steam running.</li>

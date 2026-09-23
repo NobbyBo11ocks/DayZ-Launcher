@@ -60,9 +60,9 @@
 <section class="home">
   <div class="bar">
     <h2>{news.view === "updates" ? "Latest updates" : "Latest from DayZ"}</h2>
-    <div class="seg" role="tablist" aria-label="Which posts to show">
+    <div class="seg" role="group" aria-label="Which posts to show">
       {#each VIEWS as v (v.id)}
-        <button class="segbtn" class:on={news.view === v.id} role="tab" aria-selected={news.view === v.id} title={v.title} onclick={() => (news.view = v.id)}>{v.label}</button>
+        <button class="segbtn" class:on={news.view === v.id} aria-pressed={news.view === v.id} title={v.title} onclick={() => (news.view = v.id)}>{v.label}</button>
       {/each}
     </div>
     {#if news.error}<span class="error">{news.error}</span>{/if}
@@ -183,7 +183,7 @@
   .segbtn { all: unset; cursor: pointer; padding: 4px 11px; border-radius: 8px; color: var(--fg-muted); font-size: 12px; font-weight: 500; }
   .segbtn:hover { color: var(--fg); }
   .segbtn.on { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
-  .segbtn:focus-visible { outline: 2px solid var(--accent); }
+  .segbtn:focus-visible { outline: 2px solid var(--accent-ink); }
 
   .scroll { flex: 1; min-height: 0; overflow: auto; padding-right: 4px; display: flex; flex-direction: column; gap: 12px; }
   /* The list scrolls; its children keep their natural height instead of shrinking
@@ -194,7 +194,7 @@
   .media { all: unset; cursor: pointer; position: relative; display: block; width: 100%; aspect-ratio: 16 / 9; background: var(--bg-row); overflow: hidden; }
   .media img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 150ms; }
   .media:hover img { transform: scale(1.03); }
-  .media:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .media:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
   .play { position: absolute; inset: 0; margin: auto; width: 56px; height: 56px; border-radius: 50%; background: rgba(0, 0, 0, 0.55); border: 2px solid rgba(255, 255, 255, 0.85); backdrop-filter: blur(2px); }
   .play::after { content: ""; position: absolute; left: 21px; top: 16px; border-style: solid; border-width: 10px 0 10px 17px; border-color: transparent transparent transparent #fff; }
   .play.small { width: 40px; height: 40px; }
@@ -219,7 +219,7 @@
   .pill.new { background: var(--accent); color: var(--accent-fg); }
   .link { all: unset; cursor: pointer; color: var(--fg); }
   .link:hover { color: var(--accent-ink); }
-  .link:focus-visible { outline: 2px solid var(--accent); border-radius: 4px; }
+  .link:focus-visible { outline: 2px solid var(--accent-ink); border-radius: 4px; }
   .summary { margin: 0; font-size: 13px; color: var(--fg-muted); line-height: 1.5; overflow-wrap: anywhere; }
   .summary.clamp { display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
   .summary.feat { -webkit-line-clamp: 5; line-clamp: 5; }

@@ -194,9 +194,18 @@
 
   const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
+  /** Whatever had focus when the dialog opened, so closing does not drop the
+   *  keyboard user back to `<body>` and lose the row they came from (D-198). */
+  const opener = typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null;
+
   function close() {
     stopWaiting();
     onClose();
+    // After the dialog is gone: focusing an element that is about to be hidden does
+    // nothing useful.
+    queueMicrotask(() => {
+      if (opener?.isConnected) opener.focus();
+    });
   }
 
   /** The dialog element, focused on open so the page behind it stops seeing keys. */
@@ -323,9 +332,9 @@
       </p>
 
       {#if phase === "syncing" && syncInfo}
-        <p class="status">Downloading via Steam… {syncInfo.installed}/{syncInfo.total} installed{#if totalBytes > 0} · {fmtBytes(downloadedBytes)} of {fmtBytes(totalBytes)}{/if}</p>
+        <p class="status" role="status" aria-live="polite">Downloading via Steam… {syncInfo.installed}/{syncInfo.total} installed{#if totalBytes > 0} · {fmtBytes(downloadedBytes)} of {fmtBytes(totalBytes)}{/if}</p>
       {:else if phase === "waiting"}
-        <p class="status">
+        <p class="status" role="status" aria-live="polite">
           {#if slotMisses >= 3}
             The server has stopped answering — {slotMisses} checks in a row. Still trying · {mmss(waitedSecs)}
           {:else}
@@ -334,12 +343,12 @@
         </p>
         <p class="muted small">DayZ starts as soon as the server reports a free slot; the window will flash in the taskbar.</p>
       {:else if phase === "launching"}
-        <p class="status">Starting DayZ through BattlEye…</p>
+        <p class="status" role="status" aria-live="polite">Starting DayZ through BattlEye…</p>
       {:else if phase === "running" && launched}
         <p class="status ok">DayZ is running (pid {launched.pid}). You can close this window.</p>
         <details class="cmd"><summary class="muted small">Command line</summary><code>{launched.commandLine}</code></details>
       {:else if phase === "exited" && exit}
-        <p class="status" class:warn={exit.code !== 0}>DayZ exited{exit.code != null ? ` with code ${exit.code}` : ""}.</p>
+        <p class="status" role="status" aria-live="polite" class:warn={exit.code !== 0}>DayZ exited{exit.code != null ? ` with code ${exit.code}` : ""}.</p>
       {/if}
     {/if}
 

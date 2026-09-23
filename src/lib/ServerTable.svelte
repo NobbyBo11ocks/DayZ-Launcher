@@ -128,6 +128,21 @@
       }
       return;
     }
+    // Sorting from the keyboard. The column headers are deliberately outside the tab
+    // order — seven extra stops in front of a 20 000-row grid is worse — so the grid
+    // carries the keys instead: ←/→ move the sort column, Space flips its direction.
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      const i = columns.findIndex((c) => c.key === sort.key);
+      const next = columns[(i + (e.key === "ArrowRight" ? 1 : columns.length - 1)) % columns.length];
+      if (next) onSort(next.key);
+      return;
+    }
+    if (e.key === " ") {
+      e.preventDefault();
+      onSort(sort.key);
+      return;
+    }
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Enter" && e.key !== "Home" && e.key !== "End") return;
     e.preventDefault();
     if (rows.length === 0) return;
@@ -160,6 +175,9 @@
 
   const sortMark = (key: SortKey) => (sort.key === key ? (sort.dir === 1 ? " ▲" : " ▼") : "");
   const pingClass = (ms: number) => (ms < 60 ? "ok" : ms >= 120 ? "warn" : "");
+  /** Ping quality in words: the colour alone said it, which is not available to a
+   *  screen reader and not distinguishable to everyone else (D-198). */
+  const pingTitle = (ms: number) => `${ms} ms — ${ms < 60 ? "good" : ms >= 120 ? "far away" : "usable"}`;
 </script>
 
 <!-- Roving selection on the grid: the grid takes focus, arrow keys move the selected row. -->
@@ -274,14 +292,19 @@
                 {pop}/{r.maxPlayers}{#if r.tags.queue}<span class="muted"> +{r.tags.queue}</span>{/if}
               </span>
             </div>
-            <div role="gridcell" class="cell c-num {pingClass(r.pingMs)}">{r.pingMs}</div>
+            <div role="gridcell" class="cell c-num {pingClass(r.pingMs)}" title={pingTitle(r.pingMs)}>{r.pingMs}</div>
             <div role="gridcell" class="cell c-time">
               {#if r.tags.timeMinutes != null}
                 <span class="glyph" aria-hidden="true">{r.tags.timeMinutes >= 6 * 60 && r.tags.timeMinutes < 20 * 60 ? "☀" : "☾"}</span>
               {/if}
               {clock(r.tags.timeMinutes)}
             </div>
-            <div role="gridcell" class="cell c-ver" class:warn={localVersion != null && r.version !== localVersion}>{r.version}</div>
+            <div
+              role="gridcell"
+              class="cell c-ver"
+              class:warn={localVersion != null && r.version !== localVersion}
+              title={localVersion != null && r.version !== localVersion ? `Server runs ${r.version}; your DayZ is ${localVersion}` : `Server version ${r.version}`}
+            >{r.version}</div>
           </div>
         {/each}
       </div>
@@ -297,7 +320,7 @@
   /* Accent, like the title-bar counts (user request, D-177). */
   .th { all: unset; cursor: pointer; padding: 0 8px; height: 30px; display: flex; align-items: center; color: var(--accent-ink); font-weight: 500; white-space: nowrap; }
   .th:hover { filter: brightness(1.15); }
-  .th:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .th:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
   /* The header is a separate grid from the body, so the body always reserves the
      scrollbar and the header matches it with padding. `scrollbar-gutter` on the header
      did nothing — it only applies to scroll containers — which left every column from
@@ -311,7 +334,19 @@
   .row { height: 36px; border-bottom: 1px solid var(--border); cursor: default; }
   .no-rows { margin: 28px auto 0; max-width: 46ch; text-align: center; color: var(--fg-muted); font-size: 13px; line-height: 1.5; }
   .row:hover { background: var(--bg-row); }
-  .row.selected { background: color-mix(in srgb, var(--accent) 18%, var(--bg-row)); box-shadow: inset 3px 0 0 var(--accent); }
+  /* The tint was 18 %, and on it `--fg-muted`, `.ok` and `.warn` measured 3.41, 3.58
+     and 3.43 at worst across all 24 theme × accent combinations — under 4.5 in every
+     one of them. Two changes: a lighter tint, and the selected row drops the dim and
+     quality colours altogether for full `--fg` (10.02 dark / 12.00 light at worst).
+     Nothing is lost — the ping's quality and the version mismatch are in their
+     tooltips in words now, and the row is already marked by the bar (D-198). */
+  .row.selected { background: color-mix(in srgb, var(--accent) 12%, var(--bg-row)); box-shadow: inset 3px 0 0 var(--accent-ink); }
+  .row.selected,
+  .row.selected.untrusted,
+  .row.selected .cell,
+  .row.selected .ok,
+  .row.selected .warn,
+  .row.selected .muted { color: var(--fg); }
   .row.untrusted { color: var(--fg-muted); }
   .cell { padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .c-name { display: flex; align-items: center; gap: 6px; min-width: 0; }

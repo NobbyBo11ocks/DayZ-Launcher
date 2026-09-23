@@ -162,7 +162,7 @@
        file as well as here (D-172). -->
   <div class="areas" role="group" aria-label="What to record">
     {#each AREAS as a (a.id)}
-      <button class="chip sm" class:off={isMuted(a.id)} onclick={() => void toggleArea(a.id)} title={isMuted(a.id) ? `Not recording: ${a.hint}` : a.hint} disabled={!recording || !settings}>
+      <button class="chip sm" aria-pressed={!isMuted(a.id)} class:off={isMuted(a.id)} onclick={() => void toggleArea(a.id)} title={isMuted(a.id) ? `Not recording: ${a.hint}` : a.hint} disabled={!recording || !settings}>
         {a.label}
         {#if !isMuted(a.id) && counts.get(a.id)}<span class="n">{counts.get(a.id)}</span>{/if}
       </button>
@@ -200,7 +200,7 @@
   .chip { all: unset; box-sizing: border-box; cursor: pointer; display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 999px; background: var(--bg-row); border: 1px solid var(--border); font-size: 11.5px; white-space: nowrap; }
   .chip:hover { border-color: var(--accent-ink); }
   .chip:disabled { opacity: 0.5; cursor: default; }
-  .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .chip:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
   .chip.on { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); color: var(--fg); }
 
   .areas { display: flex; flex-wrap: wrap; gap: 5px; }

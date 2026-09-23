@@ -62,5 +62,5 @@
   .wbtn { all: unset; width: 40px; height: 100%; display: inline-flex; align-items: center; justify-content: center; color: var(--fg-muted); cursor: default; }
   .wbtn:hover { background: var(--bg-row); color: var(--fg); }
   .wbtn.close:hover { background: #e81123; color: #fff; }
-  .wbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .wbtn:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
 </style>
