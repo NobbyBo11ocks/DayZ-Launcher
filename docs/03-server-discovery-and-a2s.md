@@ -118,7 +118,7 @@ DayZ smuggles a binary structure through the key/value pairs (S-09, S-11, S-12, 
 
 **Match mods by Workshop ID only.** Names differ between A2S (`mod.cpp`), DZSA (Workshop title) and the local junction name (`meta.cpp` name). Live example: `Community Framework` / `CF` / `@CF`.
 
-**DayZ does not split large RULES answers** (D-033). Live captures of a 121-mod server (4 587-byte datagram, 43 rules, 34 fragments) and a 105-mod server (5 309 bytes, 49 rules, 40 fragments, 197 signatures) each arrived as **one** UDP datagram, far above the 1 400-byte Source convention. Receive buffers must therefore be large (the client uses 64 KiB); the split-packet path stays implemented per spec but has not been observed from DayZ. Fragment index is 1-based and fits in a byte (max seen 40).
+**DayZ does not split large RULES answers** (D-033). Live captures of a 121-mod server (4 587-byte datagram, 43 rules, 34 fragments) and a 105-mod server (5 309 bytes, 49 rules, 40 fragments, 197 signatures) each arrived as **one** UDP datagram, far above the 1 400-byte Source convention. Receive buffers must therefore be large (the client uses 64 KiB for RULES and 16 KiB for INFO and PLAYER); the split-packet path stays implemented per spec but has not been observed from DayZ. Fragment index is 1-based and fits in a byte (max seen 40).
 
 The per-mod `hash` is a **content hash**: Community Framework 1559212036 reported `0x68AFC6C1` on all three captured servers (D-035), so it can later flag "server runs a different build of this mod".
 
@@ -147,6 +147,6 @@ The 12 `steamWorkshopId`s matched the live A2S_RULES decode exactly. Per-server 
 - `a2s::Client`: one short-lived socket per query, challenge loop (max 3), split reassembly, 64 KiB receive buffer, ICMP-unreachable detection, **send pacing** (default 400 datagrams/s), concurrency 128, timeout 1 s, 1 retry. Measured (D-037): live servers answer with p99 ≈ 250 ms; loss is driven by burst size through consumer NAT, so pacing and modest concurrency beat raw fan-out width.
 - **Player counts**: INFO `players` is spoofed by more than half of community servers (D-038). Query PLAYER for every server that is on screen, in favourites, or being joined, and display that head-count; show the INFO number only as "reported" with a warning when it disagrees.
 - Keep a per-server state machine: `Listed → InfoOk(ping) → PlayersOk(head-count) → RulesOk(mods)`; RULES only on demand (selection, favourites, filters that need mods, join).
-- Store the raw INFO/RULES bytes for a server when a parse fails and surface it in the diagnostics view; that is how protocol drift gets caught.
+- Store the raw INFO/RULES bytes for a server when a parse fails and surface it on the Logs page (D-168); that is how protocol drift gets caught.
 - Cache: list snapshot + last INFO per server in SQLite with timestamps; on startup render the cache immediately, then refresh.
 - Version check: compare INFO `version` with the local `DayZ_x64.exe` ProductVersion; `requiredVersion=129` maps to 1.29.

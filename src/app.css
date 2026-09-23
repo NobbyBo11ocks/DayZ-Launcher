@@ -13,7 +13,13 @@
   --ok: #3fb950;
   --warn: #d29922;
   --danger: #f85149;
-  --border: #262d37;
+  /* The separator between surfaces. It was #262d37 — 1.17:1 against `--bg-row` —
+     which is not a line anyone can see; this one measures 1.90 / 1.75 / 1.64 against
+     the three dark surfaces, which reads as a border without weighing the UI down. */
+  --border: #3a4452;
+  /* The boundary of an actual control, where WCAG 1.4.11 asks for 3:1. Measured
+     3.48 / 3.21 / 3.00 against bg, bg-elev and bg-row (D-197). */
+  --border-control: #5c6b85;
   --radius: 8px;
   --row-h: 36px;
   color-scheme: dark;
@@ -25,7 +31,9 @@
   --bg-row: #eef1f5;
   --fg: #1f2328;
   --fg-muted: #59636e;
-  --border: #d9dee5;
+  --border: #b6bfcb;
+  /* 3.41 / 3.20 / 3.01 against the light theme's three surfaces. */
+  --border-control: #788cae;
   --ok: #1a7f37;
   --warn: #9a6700;
   --danger: #cf222e;
@@ -277,7 +285,7 @@ h1 {
 /* A view caught by the error boundary in App.svelte (D-160). */
 .crashed { margin: auto; padding: 32px; max-width: 46ch; text-align: center; display: grid; gap: 10px; justify-items: center; }
 .crashed-why { color: var(--fg-muted); font-size: 12.5px; overflow-wrap: anywhere; }
-.crashed-retry { cursor: pointer; padding: 6px 14px; border-radius: var(--radius); background: var(--bg-row); border: 1px solid var(--border); color: var(--fg); font: inherit; }
+.crashed-retry { cursor: pointer; padding: 6px 14px; border-radius: var(--radius); background: var(--bg-row); border: 1px solid var(--border-control); color: var(--fg); font: inherit; }
 .crashed-retry:hover { border-color: var(--accent); }
 
 /* Shared button base (D-160). Components override with their own scoped rules,
@@ -299,11 +307,19 @@ h1 {
    every component block starts with `all: unset`, which resets `outline`, and on a
    specificity tie the component wins on source order — so roughly forty buttons had
    no focus ring at all, including every control in the join dialog (D-186). */
+::placeholder { color: var(--fg-muted); opacity: 1; }
+
 button.btn:focus-visible,
 a.btn:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
-.btn.secondary { background: var(--bg-row); color: var(--fg); border: 1px solid var(--border); font-weight: 500; }
-.btn.secondary:hover { border-color: var(--accent); filter: none; }
-.btn.ghost { background: transparent; color: var(--fg-muted); border: 1px solid var(--border); font-weight: 500; }
-.btn.ghost:hover { color: var(--fg); filter: none; }
-.btn.danger { border-color: var(--danger); color: var(--danger); }
+/* Same trick, same reason, and it had to be here too: a component's own
+   `.btn.svelte-hash` is (0,2,0) as well, comes later in the bundle and opens with
+   `all: unset`, so every one of these modifiers was a no-op inside a component.
+   Cancel rendered identically to Join in the join dialog, and the unsubscribe
+   confirmation's "Yes" carried no red at all (D-197). */
+button.btn.secondary, a.btn.secondary { background: var(--bg-row); color: var(--fg); border: 1px solid var(--border-control); font-weight: 500; }
+button.btn.secondary:hover, a.btn.secondary:hover { border-color: var(--accent); filter: none; }
+button.btn.ghost, a.btn.ghost { background: transparent; color: var(--fg-muted); border: 1px solid var(--border-control); font-weight: 500; }
+button.btn.ghost:hover, a.btn.ghost:hover { color: var(--fg); filter: none; }
+button.btn.danger, a.btn.danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); font-weight: 600; }
+button.btn.danger:hover, a.btn.danger:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); filter: none; }
 .btn.small { padding: 4px 10px; font-size: 12px; }

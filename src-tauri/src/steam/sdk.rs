@@ -958,6 +958,26 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                         });
                     let _ = reply.send(avatar);
                 }
+                // `refresh()` guards on `status.refreshing`, which the worker only
+                // sets when it dequeues, so two calls inside one tick both pass it. The
+                // second used to be discarded in silence — a manual Full refresh
+                // downgraded to whatever was already running, with no event to say so.
+                // D-159 made this rule for the no-session path; the busy path kept it
+                // (D-197).
+                Cmd::Refresh(_) if active.is_some() => {
+                    let _ = events.send(SteamEvent::Done(RefreshDone {
+                        total: 0,
+                        responded: 0,
+                        failed: 0,
+                        inflated: 0,
+                        elapsed_ms: 0,
+                        partitions: Vec::new(),
+                        capped: false,
+                        stopped_early: true,
+                        rejected: true,
+                        source: "steam",
+                    }));
+                }
                 Cmd::Refresh(mut parts) => {
                     if active.is_some() {
                         continue;
@@ -1191,7 +1211,13 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                             let _ = q.release();
                         }
                         let p = r.current.take().expect("current partition");
-                        r.next_allowed = Instant::now() + PARTITION_GAP;
+                        // Only when another request follows. The completion branch is
+                        // gated on the same clock, so arming this unconditionally held
+                        // `servers:done` back by the full gap after the last partition
+                        // had already finished — measured at exactly 3 000 ms (D-197).
+                        if !r.pending.is_empty() {
+                            r.next_allowed = Instant::now() + PARTITION_GAP;
+                        }
                         let no_answer = timed_out
                             || (total == 0
                                 && finished == Some(ServerResponse::NoServersListedOnMasterServer));

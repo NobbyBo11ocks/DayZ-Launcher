@@ -249,9 +249,17 @@ class ServersStore {
   #started = false;
   #autoRefreshed = false;
 
+  /** The user changed a filter before the settings file was read (D-197). */
+  #filtersTouched = false;
+
   constructor() {
     void uiPrefs.ready.then((u) => {
-      if (u.filters) this.filters = { ...defaultFilters(), ...(u.filters as Partial<Filters>), search: this.filters.search };
+      if (!u.filters || this.#filtersTouched) return;
+      const f = { ...defaultFilters(), ...(u.filters as Partial<Filters>), search: this.filters.search };
+      // Same migration as `loadFilters`: before D-195 this held whatever capitalisation
+      // the server used, and the predicate compares against the lower-cased id.
+      f.map = f.map.toLowerCase();
+      this.filters = f;
     });
   }
 
@@ -285,7 +293,14 @@ class ServersStore {
   activeFilterCount = $derived.by(() => {
     const f = this.filters;
     return (
-      this.moreFilterCount + (f.perspective !== "any" ? 1 : 0) + (f.mods !== "any" ? 1 : 0) + (f.map ? 1 : 0) + (f.country ? 1 : 0)
+      this.moreFilterCount +
+      (f.perspective !== "any" ? 1 : 0) +
+      (f.mods !== "any" ? 1 : 0) +
+      // Missed when the hive filter was added (D-195): the Reset chip only renders
+      // while this is above zero, so filtering to Official alone hid the way back.
+      (f.hive !== "any" ? 1 : 0) +
+      (f.map ? 1 : 0) +
+      (f.country ? 1 : 0)
     );
   });
 
@@ -389,7 +404,11 @@ class ServersStore {
     // distinct values turns every comparison into integer subtraction. Measured here
     // at 13 380 rows, 13.43 → 4.69 ms with byte-identical order, and it runs on every
     // 350 ms flush while the column is selected (D-193).
-    const mapRank = key === "map" ? rankDistinct(out, (r) => r.map) : null;
+    const mapRank = key === "map" ? rankDistinct(out, (r) => mapLabel(r.map).toLowerCase()) : null;
+    // One `mapLabel` per row rather than one per comparison, the shape `modCounts`
+    // above already uses.
+    const mapKey =
+      key === "map" ? new Map(out.map((r) => [r.id, mapRank!.get(mapLabel(r.map).toLowerCase()) ?? 0])) : null;
     const cmp = (a: ServerRow, b: ServerRow): number => {
       switch (key) {
         case "name":
@@ -397,7 +416,7 @@ class ServersStore {
           return (nameRank?.get(a.id) ?? 0) - (nameRank?.get(b.id) ?? 0);
         case "map":
           return (
-            (mapRank!.get(a.map) ?? 0) - (mapRank!.get(b.map) ?? 0) ||
+            (mapKey!.get(a.id) ?? 0) - (mapKey!.get(b.id) ?? 0) ||
             trustedPlayers(b) - trustedPlayers(a) ||
             byId(a, b)
           );
@@ -875,6 +894,11 @@ class ServersStore {
   }
 
   saveFilters() {
+    // The cached list paints before the settings file has been read, and that read
+    // retries for up to two seconds (D-112): anything changed in that window used to
+    // be overwritten wholesale when the file arrived, while the queued patch still
+    // wrote the user's value to disk, so the two disagreed until the next save (D-197).
+    this.#filtersTouched = true;
     const { search: _s, ...rest } = this.filters;
     uiPrefs.patch({ filters: rest });
     try {

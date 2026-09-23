@@ -204,6 +204,14 @@
   $effect(() => {
     // The first focusable control, or the dialog itself: either way the grid behind
     // no longer has focus, and Tab starts inside the dialog.
+    //
+    // Depends on the phase deliberately. The footer sits inside
+    // `{#if phase === "waiting"}`, so pressing Join destroys the button that had
+    // focus and drops it to `<body>` — where `trap`, which is bound to the dialog,
+    // never sees another key. One Shift+Tab then reached the grid behind the modal,
+    // which is the D-184 failure all over again (D-197).
+    void phase;
+    if (dialogEl?.contains(document.activeElement)) return;
     const first = dialogEl?.querySelector<HTMLElement>(
       'input:not([disabled]), select:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
     );

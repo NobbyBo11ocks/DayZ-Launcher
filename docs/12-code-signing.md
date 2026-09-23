@@ -80,7 +80,7 @@ Certificate Profile Signer" role.
 ## Verifying a signed build
 
 ```powershell
-Get-AuthenticodeSignature "src-tauri\target\release\bundle\nsis\DayZ Launcher_<version>_x64-setup.exe" | Format-List Status, SignerCertificate, TimeStamperCertificate
+Get-AuthenticodeSignature "src-tauri\target\release\bundle\nsis\DZSA CrayZ Launcher_<version>_x64-setup.exe" | Format-List Status, SignerCertificate, TimeStamperCertificate
 ```
 
 `Status` must be `Valid` and the timestamp present, otherwise the signature expires with the

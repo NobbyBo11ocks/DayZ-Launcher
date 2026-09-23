@@ -19,13 +19,13 @@ Goal: the fastest way from "open launcher" to "in game", in a dark, quiet, infor
 │ Recent   │                               │ population sparkline   │
 │ Mods     │                               │                        │
 │ Settings │                               │                        │
-│ Diagn.   │                               │                        │
+│ Logs   │                               │                        │
 └──────────┴───────────────────────────────┴────────────────────────┘
 ```
 
 - News (D-099) sits first with an unread badge (③ above); it is a padded view of cards that scrolls inside, not a table.
 
-- Responsive: rail collapses to icons < 1100 px; details pane hidden < 1000 px. The third breakpoint specified here — dropping "time" and "version" below 900 px — was never built and is unreachable anyway: the window minimum is 960 px. The open recommendation from D-153 stands: make the pane an overlay at small widths rather than hiding it, so Join is reachable at the minimum size.
+- Responsive: rail collapses to icons < 1100 px; details pane hidden < 1000 px. The third breakpoint specified here — dropping "time" and "version" below 900 px — was never built and is unreachable anyway: the window minimum is 960 px. D-189 did it: below 1240 px the pane is an overlay at small widths rather than hiding it, so Join is reachable at the minimum size.
 - Only the server list views scroll their table. Recent, Mods, Settings, Diagnostics and Friends fit the viewport (`.content.padded` is `overflow: hidden`); when the window is smaller than their content, a table or a column scrolls on its own, never the page (D-094).
 
 ## 2. Server table
@@ -50,7 +50,7 @@ Header: name, map, version (red badge if it differs from the local client), JOIN
 
 ## 4. Filters
 
-Chips above the table: Perspective (1PP/3PP), Map, Country (D-073), Not full, Not empty, Has queue, No password, BattlEye only, Modded/Vanilla, Day only, Max ping, Mod (one, chosen from the union of seen mods, D-080), Version = mine, Friends (D-128) and Hide inflated. All filters persist. Two specified here were never built: a time-acceleration filter, and multi-select on mods — one mod answers "which servers run this", which is the question people actually ask.
+Chips above the table: Perspective (1PP/3PP), Map, Country (D-073), Not full, Not empty, Has queue, No password, Official / Community hive (D-195), Modded/Vanilla, Day only, Max ping, Mod (one, chosen from the union of seen mods, D-080), Version = mine, Friends (D-128) and Hide inflated. All filters persist. Two specified here were never built: a time-acceleration filter, and multi-select on mods — one mod answers "which servers run this", which is the question people actually ask.
 
 ## 5. Visual system
 

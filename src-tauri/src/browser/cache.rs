@@ -345,6 +345,15 @@ impl Cache {
         if self.checkpoint() {
             return;
         }
+        // rusqlite's default busy timeout is five seconds, and every caller here holds
+        // the one cache mutex that the server list, every Steam batch and every
+        // verification publish also need — measured at 5.03 s with a reader on an
+        // older snapshot, after which 402 of 907 pages were *still* in the log. So it
+        // blocked the UI for five seconds and did not even get what it blocked for.
+        // A quarter of a second and a log line is the honest trade (D-197).
+        let _ = self
+            .conn
+            .busy_timeout(std::time::Duration::from_millis(250));
         match self.conn.query_row("PRAGMA wal_checkpoint(FULL)", [], |r| {
             Ok((r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
         }) {
@@ -356,6 +365,7 @@ impl Cache {
             Ok(_) => {}
             Err(e) => crate::log_warn!("cache", "full checkpoint failed: {e}"),
         }
+        let _ = self.conn.busy_timeout(std::time::Duration::from_secs(5));
     }
 
     pub fn history(&self, limit: usize) -> rusqlite::Result<Vec<HistoryEntry>> {

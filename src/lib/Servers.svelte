@@ -156,6 +156,7 @@
       onFavourite={(id) => servers.toggleFavourite(id)}
       friendsOn={servers.friendsOn}
       modsByServer={servers.modsByServer}
+      inert={servers.joiningId !== null}
       empty={emptyText}
     />
     {#if servers.selected}

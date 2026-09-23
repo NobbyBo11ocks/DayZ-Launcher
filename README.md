@@ -28,15 +28,15 @@ Key-free server list straight from Steam · player counts verified with every se
 |  |  |
 |---|---|
 | **Counts you can trust** | Every populated server is queried directly and cross-checked against Steam. Inflated and fabricated counts are flagged, and hidden by default. |
-| **Fast and light** | A Rust host, a plain Svelte 5 front end, a virtualised table and a SQLite cache. The last list is on screen well under a second after launch, and the installer is under 5 MB. |
+| **Fast and light** | A Rust host, a plain Svelte 5 front end, a virtualised table and a SQLite cache. The first screen is up well under a second after launch, the cached list with it, and the installer is under 5 MB. |
 | **One click to the game** | Missing Workshop mods are subscribed and downloaded through Steam, the `!Workshop` junctions are created the way the official launcher does it, and DayZ starts through BattlEye with the official argument form. |
 | **Nothing to sign up for** | No accounts, no API keys, no telemetry. It talks to Steam, to the game servers, to GitHub for updates, and to YouTube for the previews on the home page — which can be switched off. |
 
-| Installer | Cold start to first frame | Populated-server refresh | Idle CPU | Memory, whole app |
+| Installer | Cold start to first frame | Refresh, then verify | Idle CPU | Memory, whole app |
 |:-:|:-:|:-:|:-:|:-:|
-| 4.7 MB | 0.43 s | 42 s | 0.2 % of one core | ≈ 306 MB |
+| 4.7 MB | 0.43 s | 42 s + 19 s | 0.2 % of one core | ≈ 306 MB |
 
-<sub>Measured on the reference machine at v0.1.23; budgets, method and history in [docs/05 §6](docs/05-architecture-and-optimisation.md).</sub>
+<sub>Installer, memory and idle CPU measured at v0.1.23; cold start at v0.1.19 (D-136); the refresh figure is the list arriving, with verified counts following it — 2 187 servers verified in 18.9 s at v0.1.26. Budgets, method and history in [docs/05 §6](docs/05-architecture-and-optimisation.md).</sub>
 
 ---
 
@@ -110,7 +110,7 @@ Key-free server list straight from Steam · player counts verified with every se
 - Steam idle release, so it does not count as playtime while it sits open
 - A Logs page with per-area mutes and an off switch
 - Confirmed clean-up of dangling `!Workshop` junctions
-- A slim frameless window that remembers where it was, a dark and a light theme, twelve accent colours; every view except the server list fits without scrolling
+- A slim frameless window that remembers where it was, a dark and a light theme, twelve accent colours; the views that can fit do, and only their tables scroll
 - DZSA list fallback when Steam is unavailable
 
 </td></tr>
@@ -131,7 +131,7 @@ flowchart LR
 1. **List.** The Steamworks matchmaking API supplies the server list with pings, the same list the in-game browser sees. It is cached in SQLite so the previous list appears instantly and is refreshed in the background.
 2. **Verify.** Populated servers are queried directly with A2S (INFO, RULES, PLAYER). The advertised count is checked against the player list and against Steam; servers that fail the trust rules are marked inflated or fake.
 3. **Join.** The join plan compares the server's mod list with your Workshop items, subscribes and downloads what is missing, creates `!Workshop\@<mod>` junctions matched by Workshop ID, and starts `DayZ_BE.exe` with the official argument form.
-4. **Friends and news.** Friends' servers come from Steam's game info and rich presence. News comes from Steam's news feed for DayZ; pictures are shrunk to 640 px thumbnails on the host so the window stays light.
+4. **Friends and news.** Friends' servers come from Steam's game info and rich presence. News comes from Steam's news feed for DayZ; pictures are shrunk on the host — 360 px for the cards, 640 for the featured one — so the window stays light.
 
 Every protocol and launch fact is tied to a source in [docs/08](docs/08-sources.md), and every design choice to [docs/09](docs/09-decisions-log.md).
 
@@ -176,10 +176,18 @@ npm install
 npm run tauri dev
 ```
 
-The checks CI runs:
+The six checks CI runs, in order — `cargo fmt --check` is the one that catches people out:
 
 ```bash
 npm run check
+```
+
+```bash
+npm run build
+```
+
+```bash
+cargo fmt --manifest-path src-tauri/Cargo.toml --check
 ```
 
 ```bash
@@ -188,6 +196,10 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
 ```bash
 cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+```bash
+node tools/nsis_template_check.js
 ```
 
 <details>
@@ -221,7 +233,7 @@ The public key is in `src-tauri/tauri.conf.json`; the updater polls `https://git
 Bump `version` in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`, commit, then push a matching tag:
 
 ```bash
-git tag v0.1.27 && git push origin main v0.1.27
+git tag vX.Y.Z && git push origin main vX.Y.Z
 ```
 
 The [release workflow](.github/workflows/release.yml) builds the signed installer on a clean Windows runner, creates the release with generated notes, uploads the installer, its `.sig` and `latest.json`, smoke-installs the result, and verifies the published manifest. It needs **one** repository secret, set once from the machine that holds the key. In PowerShell:
@@ -248,17 +260,17 @@ Run the workflow manually from the Actions tab for a build-only dry run.
 2. Create the GitHub release with the installer and its signature:
 
    ```bash
-   gh release create v0.1.27 "src-tauri/target/release/bundle/nsis/DZSA CrayZ Launcher_0.1.27_x64-setup.exe" "src-tauri/target/release/bundle/nsis/DZSA CrayZ Launcher_0.1.27_x64-setup.exe.sig" --title v0.1.27 --notes-file notes.md
+   gh release create vX.Y.Z "src-tauri/target/release/bundle/nsis/DZSA CrayZ Launcher_<version>_x64-setup.exe" "src-tauri/target/release/bundle/nsis/DZSA CrayZ Launcher_<version>_x64-setup.exe.sig" --title vX.Y.Z --notes-file notes.md
    ```
 
 3. Generate the update manifest from the uploaded asset (GitHub renames spaces in asset names to dots, so the URL must come from the API) and upload it:
 
    ```bash
-   node tools/make_latest.js v0.1.27 --notes notes.md
+   node tools/make_latest.js vX.Y.Z --notes notes.md
    ```
 
    ```bash
-   gh release upload v0.1.27 src-tauri/target/release/bundle/nsis/latest.json --clobber
+   gh release upload vX.Y.Z src-tauri/target/release/bundle/nsis/latest.json --clobber
    ```
 
 4. Check the release the way the app will see it (fetches the manifest through the endpoint, downloads the installer, verifies the minisign signature against the public key):

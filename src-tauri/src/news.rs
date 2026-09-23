@@ -241,7 +241,10 @@ pub fn plain_text(s: &str, max: usize) -> String {
     }
     let cut: String = text.chars().take(max).collect();
     let cut = match cut.rfind(' ') {
-        Some(i) if i > max / 2 => &cut[..i],
+        // `i` is a byte offset and `max` counts characters: a 20-character Cyrillic
+        // cut is 38 bytes, so the word-boundary rule fired on the wrong condition for
+        // any non-ASCII post (D-197).
+        Some(i) if cut[..i].chars().count() > max / 2 => &cut[..i],
         _ => cut.as_str(),
     };
     format!("{}…", cut.trim_end_matches([',', '.', ':', ';']))
@@ -371,8 +374,12 @@ pub fn prune_thumbnails(dir: &std::path::Path, keep: &std::collections::HashSet<
     };
     for entry in entries.flatten() {
         let name = entry.file_name();
-        let stem = name.to_string_lossy();
-        let stem = stem.strip_suffix(".jpg").unwrap_or(&stem);
+        let full = name.to_string_lossy();
+        // Only ever a thumbnail: the unsuffixed branch below deletes on sight, and a
+        // half-written `.tmp` in this directory is not ours to remove (D-197).
+        let Some(stem) = full.strip_suffix(".jpg") else {
+            continue;
+        };
         // "<gid>-<max>.jpg" since D-160. A file with no suffix predates that and can
         // never be found again whatever its gid, but `rsplit_once` returning `None`
         // left the whole stem in place — a live gid — so the sweep kept precisely the

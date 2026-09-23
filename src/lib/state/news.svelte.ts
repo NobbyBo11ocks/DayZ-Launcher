@@ -72,6 +72,9 @@ class NewsStore {
     // A switch-off between here and now must not be overtaken by this first fetch.
     if (!this.#started) return;
     await this.refresh();
+    // `stop()` may have run while that was in flight; arming now would leave an
+    // interval nothing can clear (D-197).
+    if (!this.#started) return;
     this.#timer = setInterval(() => void this.refresh(), REFRESH_MS);
   }
 

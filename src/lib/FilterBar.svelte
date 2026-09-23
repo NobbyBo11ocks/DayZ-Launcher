@@ -206,6 +206,9 @@
   .chip.on::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
   .chip:disabled { opacity: 0.45; cursor: default; }
   .chip:focus-visible { outline: 2px solid var(--accent); }
+  /* On the accent fill the muted number measured 3.22:1 (lime, dark) and 3.82
+     (rose, light); Mods.svelte already does exactly this for its own (D-197). */
+  .chip.on .num { color: var(--fg); }
   .chip .num { color: var(--fg-muted); font-variant-numeric: tabular-nums; }
   .chip.reset { border-style: dashed; background: transparent; }
 

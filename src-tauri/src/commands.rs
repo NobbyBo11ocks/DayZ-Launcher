@@ -4,6 +4,7 @@
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -26,6 +27,28 @@ pub struct AppState {
     pub cache: Arc<Mutex<Cache>>,
     pub a2s: Client,
     pub settings: SettingsStore,
+    /// A full verification pass is in flight (D-197).
+    pub verifying: Arc<AtomicBool>,
+    /// A mod scan is in flight (D-197).
+    pub scanning: Arc<AtomicBool>,
+}
+
+/// Clears its flag however the pass ends, including an early `return`.
+pub struct InFlight(Arc<AtomicBool>);
+
+impl InFlight {
+    /// `None` when one is already running.
+    pub fn claim(flag: &Arc<AtomicBool>) -> Option<Self> {
+        flag.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| Self(Arc::clone(flag)))
+    }
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
 }
 
 #[derive(Serialize)]
@@ -305,7 +328,7 @@ pub struct VerifySummary {
     pub elapsed_ms: u64,
 }
 
-/// Verifies targets in chunks: emits `servers:verified` (Vec<Verification>) per
+/// Verifies targets as a stream (D-193); only the events are batched: emits `servers:verified` (Vec<Verification>) per
 /// chunk and persists. With `announce`, also emits `servers:verify-done`
 /// (VerifySummary); only the automatic post-refresh pass announces, so on-demand
 /// checks of visible rows never masquerade as the full pass.
@@ -343,7 +366,14 @@ pub async fn run_verification(
     // Streaming needs its own permit pool: these tasks hold permits continuously, and
     // in `state.a2s`'s shared FIFO that starved a row click of its three queries by 85×
     // (D-193).
-    let client = client.with_concurrency(VERIFY_CONCURRENCY);
+    let client = if announce {
+        client.with_concurrency(VERIFY_CONCURRENCY)
+    } else {
+        // `servers_verify` runs per visible row and is over in a second; giving each
+        // call its own 128-permit pool meant an unbounded number of pools against one
+        // pacer, which is what a row click then queues behind (D-197).
+        client
+    };
     let mut pending = verify::verify_stream(&client, targets, with_info);
     let mut batch: Vec<Verification> = Vec::with_capacity(VERIFY_FLUSH_ROWS);
     let mut last_flush = Instant::now();
@@ -571,7 +601,10 @@ pub async fn run_mod_scan(
             });
         }
         let mut batch: Vec<(String, Vec<(u64, String)>)> = Vec::with_capacity(chunk.len());
-        while let Some(Ok((id, mods))) = set.join_next().await {
+        // `while let Some(Ok(..))` stopped at the first cancelled task and dropped the
+        // rest of the chunk on the floor; `verify_many` already had the right shape.
+        while let Some(joined) = set.join_next().await {
+            let Ok((id, mods)) = joined else { continue };
             match mods {
                 Some(m) => batch.push((id, m)),
                 None => summary.failed += 1,
@@ -665,12 +698,18 @@ pub async fn mods_index(state: State<'_, AppState>) -> AppResult<crate::browser:
 /// Starts a mod scan now; `force` ignores the one-day freshness. Returns the target count.
 #[tauri::command]
 pub async fn mods_scan(app: AppHandle, state: State<'_, AppState>, force: bool) -> AppResult<()> {
-    tauri::async_runtime::spawn(run_mod_scan(
-        app,
-        Arc::clone(&state.cache),
-        state.a2s.clone(),
-        force,
-    ));
+    let Some(guard) = InFlight::claim(&state.scanning) else {
+        // Two scans at once put twice the datagrams on the wire that D-037 measured as
+        // the point where answers start going missing, and the second one rescans what
+        // the first is already doing (D-197).
+        crate::log_info!("mods", "scan already running; ignored");
+        return Ok(());
+    };
+    let (app2, cache, client) = (app, Arc::clone(&state.cache), state.a2s.clone());
+    tauri::async_runtime::spawn(async move {
+        let _guard = guard;
+        run_mod_scan(app2, cache, client, force).await;
+    });
     Ok(())
 }
 

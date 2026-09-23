@@ -333,6 +333,10 @@
 
   .facts { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 5px 10px; margin: 0; }
   .facts dt { color: var(--fg-muted); }
+  /* `.bad` existed only as `.chip.bad` and `.trust.bad`, so the anti-cheat warning
+     D-195 added rendered in plain `--fg` — the same silent miss as D-186's
+     `var(--muted)`. `--warn` measures 6.85:1 dark and 4.87:1 light here (D-197). */
+  .facts dd.bad { color: var(--warn); }
   .facts dd { margin: 0; min-width: 0; }
 
   section { display: flex; flex-direction: column; gap: 6px; padding-top: 12px; border-top: 1px solid var(--border); min-width: 0; }

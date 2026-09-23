@@ -119,8 +119,7 @@ export const isInflated = (r: ServerRow): boolean => r.steamEmpty === true && r.
 /**
  * Any rule fired: hidden by the default "Hide inflated" filter.
  * R4 (refuses PLAYER) only counts when Steam has not vouched for the server:
- * ~24 % of servers with Steam-authenticated players drop A2S_PLAYER at the host
- * firewall (D-047), so `steamEmpty === false` overrides an "unverifiable" verdict.
+ * a small minority of servers drop A2S_PLAYER at the host firewall — D-050 measured 6 of 2 858, and D-047 retracts the earlier 24 % reading as burst loss, so `steamEmpty === false` overrides an "unverifiable" verdict.
  */
 export const isUntrusted = (r: ServerRow): boolean =>
   isInflated(r) ||

@@ -5,7 +5,7 @@
 // nothing at all — 2 940 servers on this machine's cache were invisible to their own
 // name — and the map dropdown read like a directory listing. It is the same confusion
 // players hit with DZSA, where the answer on the Steam forums is the single word
-// "Enoch" (S-88).
+// "Enoch" (S-77).
 //
 // Only maps whose id genuinely differs from the name in use are listed. Anything else
 // is shown exactly as the server reports it: inventing a name for a community map

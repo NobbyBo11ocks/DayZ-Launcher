@@ -233,6 +233,10 @@
   .error { color: var(--danger); }
 
   @media (max-width: 1100px) {
+    /* Stacked, the cap that keeps the two-column hero tidy hides everything below the
+       picture — title, summary and all three buttons — across the whole 960–1100 px
+       band. D-153 recorded this as fixed; it never was (D-197). */
+    .featured { max-height: none; }
     .featured { grid-template-columns: 1fr; }
     .featured .media { aspect-ratio: 16 / 9; height: auto; min-height: 0; }
   }

@@ -21,14 +21,17 @@
   // and nothing is kept in memory. The setting lives with the rest of them, so it
   // survives a restart.
   let recording = $state(true);
-  let settings: Settings | null = null;
+  // Read by the chips’ `disabled` now, so it has to be reactive (D-197).
+  let settings = $state<Settings | null>(null);
   async function loadSettings() {
     try {
       settings = await invoke<Settings>("settings_get");
       recording = settings.logging;
       muted = settings.logMuted ?? [];
-    } catch {
-      /* leave the switch where it is */
+    } catch (e) {
+      // The chips guard on `settings` and would otherwise click with no effect and
+      // no message, which reads as "logging is off" when it is not (D-197).
+      error = `Log settings could not be read (${String(e)}); recording cannot be changed.`;
     }
   }
   /**
@@ -145,7 +148,7 @@
       <button class="chip" class:on={recording} onclick={() => void setRecording(!recording)} title="Keep a local record of what the launcher does">
         {recording ? "Recording" : "Paused"}
       </button>
-      <button class="chip" class:on={onlyProblems} onclick={() => (onlyProblems = !onlyProblems)} disabled={!recording}>
+      <button class="chip" class:on={onlyProblems} onclick={() => (onlyProblems = !onlyProblems)} disabled={!recording || !settings}>
         {onlyProblems ? "Problems only" : "Everything"}
       </button>
       <button class="chip" onclick={copy} disabled={!shown.length}>{copied ? "Copied" : "Copy"}</button>
@@ -159,7 +162,7 @@
        file as well as here (D-172). -->
   <div class="areas" role="group" aria-label="What to record">
     {#each AREAS as a (a.id)}
-      <button class="chip sm" class:off={isMuted(a.id)} onclick={() => void toggleArea(a.id)} title={isMuted(a.id) ? `Not recording: ${a.hint}` : a.hint} disabled={!recording}>
+      <button class="chip sm" class:off={isMuted(a.id)} onclick={() => void toggleArea(a.id)} title={isMuted(a.id) ? `Not recording: ${a.hint}` : a.hint} disabled={!recording || !settings}>
         {a.label}
         {#if !isMuted(a.id) && counts.get(a.id)}<span class="n">{counts.get(a.id)}</span>{/if}
       </button>

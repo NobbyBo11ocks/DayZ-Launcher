@@ -119,7 +119,11 @@ impl ServerRow {
             return 0;
         };
         match (a.parse::<i32>(), b.parse::<i32>(), c.parse::<i32>()) {
-            (Ok(a), Ok(b), Ok(c)) if b < 100 && c < 1_000_000 => {
+            // `a` was unguarded: a server advertising "22.0.0" overflows i32, which
+            // in release wraps to a fabricated version that then tells the user the
+            // server will reject them, and in a dev build panics inside
+            // `direct_connect`'s await chain so the dialog never resolves (D-197).
+            (Ok(a), Ok(b), Ok(c)) if (0..100).contains(&a) && b < 100 && c < 1_000_000 => {
                 a * 100_000_000 + b * 1_000_000 + c
             }
             _ => 0,

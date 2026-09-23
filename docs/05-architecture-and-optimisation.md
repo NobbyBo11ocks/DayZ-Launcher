@@ -9,7 +9,7 @@ launcher.exe (Tauri 2 / Rust)                  msedgewebview2.exe ×3–5 (share
 └─ launch supervisor (spawns DayZ_BE.exe, watches exit)
 ```
 
-One window, no tray icon by default, no background service. When the window is minimised, refresh timers pause.
+One window, no tray icon by default, no background service. Minimising does not pause anything: D-136 measured 0.2 % minimised against 0.02 % merely unfocused, so the window state is not the lever it looks like.
 
 ## 2. Rust module layout (`src-tauri/src`)
 
@@ -31,7 +31,7 @@ One window, no tray icon by default, no background service. When the window is m
 
 1. Startup: the browser calls `servers_cached` → UI renders in < 100 ms. (There is no `servers:snapshot` event; the emitted names are `servers:batch`, `servers:done`, `servers:verified`, `servers:verify-done`, `servers:mods*`, `steam:status` and `launch:*`.)
 2. Steam thread: `internet_server_list(221100)` streams `GameServerItem`s → batch every 100 ms → `servers:batch` event.
-3. A2S worker: INFO for every listed server (ping + live players/keywords) with concurrency 256, 2 s timeout, 1 retry; results coalesced to the UI every 100 ms.
+3. A2S worker: INFO for every listed server (ping + live players/keywords) with concurrency 128, 1 s timeout, one retry, 400 datagrams/s; the automatic pass sends PLAYER only, 1 retry; results coalesced to the UI every 100 ms.
 4. RULES on demand: selected row, favourites, filters that need mods, join.
 5. Join: RULES → diff mods against workshop inventory → subscribe/download with progress → junctions → spawn.
 
@@ -44,7 +44,7 @@ One window, no tray icon by default, no background service. When the window is m
 ## 5. Frontend state (Svelte 5 runes)
 
 - `servers = $state(new Map())`, `filtered = $derived(...)` recomputed only when filters/sort or a batch changes; batches mutate the map in one tick.
-- Virtual list: own component, fixed 36 px rows, renders viewport + 10 overscan rows; total DOM nodes stay < 1 000.
+- Virtual list: own component, fixed 36 px rows, renders viewport + 8 overscan rows; total DOM nodes stay < 1 000.
 - Sorting 20 000 rows with a precomputed key array takes single-digit ms; do it in the main thread inside `requestIdleCallback`.
 - No global stores library, no UI kit, no CSS framework. Inline SVG sprite for icons.
 

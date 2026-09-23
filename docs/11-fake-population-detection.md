@@ -26,9 +26,9 @@ The first partitioned refresh returned 2 988 servers for Steam's `hasplayers` fi
 
 A full per-map refresh (D-046) put the scale beyond doubt: **27 037 of 33 605 responding servers are inflated**, i.e. Steam's list holds roughly 6 500 genuine DayZ servers (≈ 3 000 populated, ≈ 3 900 empty) and about 27 000 fakes, concentrated on chernarusplus, enoch and namalsk (each capped at 10 000 with 77–90 % fakes). Because of that, the automatic refresh on start only asks Steam for `hasplayers` servers. The manual Refresh runs the whole partition list, which begins with the populated servers and then walks the empty ones map by map (D-141).
 
-So partition membership is a free, list-level inflated flag: a row from a `noplayers` partition whose INFO count is positive is fake (rule R0). This is why community posts say the "Steam API can't be spoofed" (S-53): the Web API's `players` and the master's filters use the same authenticated count. A future spoofer would have to fake Steam auth sessions, which is where rules R2–R7 take over.
+So partition membership is a free, list-level inflated flag: a row from a `noplayers` partition whose INFO count is positive is fake (rule R0). This is why community posts say the "Steam API can't be spoofed" (S-53): the Web API's `players` and the master's filters use the same authenticated count. A future spoofer would have to fake Steam auth sessions, which is where rules R2–R5 take over.
 
-## 3. Detection rules (R0 shipped in M3; R2–R5 in M4; R6–R7 in M6)
+## 3. Detection rules (R0 shipped in M3; R2–R5 in M4; **R6–R7 specified, never built**)
 
 Trust is computed per server from cheap signals; the INFO number is never shown as fact.
 
@@ -39,15 +39,15 @@ Trust is computed per server from cheap signals; the INFO number is never shown 
 | R2 | PLAYER answers; `verified = entries`; `INFO − verified ≤ 2` | **Verified** — show `verified` |
 | R3 | PLAYER answers; `INFO − verified ≥ 5` or ≥ 20 % of `max_players` | **Inflated** — show `verified`, badge, hidden by the default "Hide inflated" filter |
 | R4 | INFO `players` > 0 but PLAYER times out (after a patient 2.5 s retry) while INFO keeps answering | **Unverifiable** — treated like Inflated **only when Steam has not vouched for the server** (`steamEmpty ≠ false`); Steam-vouched rows stay visible with the server's own number and a "Steam-confirmed" note. Rare in practice: 6 of 2 858 populated servers (D-050); a first, burstier implementation mis-labelled 676 (D-047) |
-| R5 | PLAYER answers with ≥ 5 entries whose durations are all identical, all < 60 s, or whose names are non-empty | **Synthetic list** — treated like Inflated (defence against future PLAYER spoofing) |
-| R6 | Across samples (M6 history): INFO stays constant while `verified` stays 0 for ≥ 3 samples | trust score → 0, persisted |
-| R7 | ≥ 10 servers on one IP with ≥ 80 % Inflated/Unverifiable | IP marked as a **farm**; new servers on it start at low trust until verified |
+| R5 | PLAYER answers with ≥ 5 entries and **either** at most two distinct durations, **or** any non-empty name, **or** all durations under 60 s *and* repetitive. D-160 stopped "all young" firing on its own — a freshly restarted server looks exactly like that | **Synthetic list** — treated like Inflated (defence against future PLAYER spoofing) |
+| ~~R6~~ | *Not implemented.* Across samples: INFO stays constant while `verified` stays 0 for ≥ 3 samples | would need a persisted trust score; `verify.rs` judges one sample at a time and its own header says "rules R2–R5" |
+| ~~R7~~ | *Not implemented.* ≥ 10 servers on one IP with ≥ 80 % Inflated/Unverifiable | would need per-IP aggregation, which nothing in the host or the front end does |
 
-Hosting providers legitimately run many servers per IP, so R7 is only a prior, never a verdict on its own. Names ("official", "Vanilla++") are never used as signals.
+Hosting providers legitimately run many servers per IP, so R7 could only ever be a prior, never a verdict on its own — part of why it has not been built. Names ("official", "Vanilla++") are never used as signals.
 
 ## 4. Cost
 
-PLAYER is one datagram each way. Measured (D-050): the automatic pass after a refresh verifies every populated server (2 858) in 33 s at the client's 400 datagrams/s, sending PLAYER only and retrying non-answers once with INFO at a 2.5 s timeout; rows on screen are re-checked with INFO + PLAYER every 60 s (0.1–2 s for a screenful). Empty servers are not queried. Sending INFO + PLAYER for everything in one burst cost 60 s and produced hundreds of false "unverifiable"/"offline" results (D-047), so burst size matters more than raw rate.
+PLAYER is one datagram each way. Measured (D-050): the automatic pass after a refresh verifies every populated server (2 858) in 33 s at the client's 400 datagrams/s, sending PLAYER only and retrying non-answers once with INFO at a 2.5 s timeout; rows on screen are re-checked with INFO + PLAYER once their last verification is older than 120 s (0.1–2 s for a screenful). Empty servers are not queried. Sending INFO + PLAYER for everything in one burst cost 60 s and produced hundreds of false "unverifiable"/"offline" results (D-047), so burst size matters more than raw rate.
 
 ## 5. UX
 

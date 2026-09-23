@@ -89,6 +89,9 @@ class Updates {
     try {
       await relaunch();
     } catch (e) {
+      // Not "ready" any more: Settings renders "Installed, restarting…" for that
+      // state, which would sit next to this message for ever (D-197).
+      this.state = "error";
       this.error = `${u.version} is installed; the launcher could not restart itself (${describe(e)}). Close it and start it again.`;
       logWarn("update", `relaunch after ${u.version} failed: ${describe(e)}`);
     }

@@ -72,12 +72,16 @@
 
   // Re-runs only when Steam becomes available or goes away; `load` reads state, so
   // the first call is untracked to keep this effect from depending on it.
+  /** Only the flag, so an equal boolean stops the propagation: `servers.steam` is
+   *  a fresh object on every status event and rebuilt the 30 s poll each time (D-197). */
+  const steamIdle = $derived(servers.steam?.idle === true);
+
   $effect(() => {
     if (!steamOk) return;
     // Same rule as the poll below (D-159): opening this page must not re-open an
     // idle-released session either, or simply looking at it restarts Steam's
     // playtime clock. Refresh does it deliberately when the user asks (D-160).
-    if (!servers.steam?.idle) untrack(() => void load());
+    if (!steamIdle) untrack(() => void load());
     // Skip the poll while the Steam session is idle-released (D-159): asking for
     // friends re-opens it, which puts the user back to "Playing DayZ" in Steam and
     // restarts playtime — exactly what the idle release (D-077) exists to stop.

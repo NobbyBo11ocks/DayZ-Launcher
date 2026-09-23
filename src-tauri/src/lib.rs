@@ -49,13 +49,6 @@ pub fn elevation() -> proc::ElevationState {
         .unwrap_or(proc::ElevationState::Matched)
 }
 
-/// A dialog for the failures that happen before there is a window to put a message in.
-///
-/// `panic = "abort"` and `windows_subsystem = "windows"` between them mean a panic in
-/// `setup` — which is how Tauri reports a failed setup — ends the process with no
-/// window, no console and, if the data directory is the thing that failed, no log line
-/// either. The icon flashes and nothing else ever happens. One message box is the
-/// difference between "it doesn't work" and a sentence the user can act on (D-194).
 /// Last resort when `cache.db` can be neither opened nor moved out of the way: a
 /// cache that lives in memory for this run only. Nothing persists, and the user is
 /// told once, but the launcher starts and the server list — which comes from Steam,
@@ -85,6 +78,13 @@ fn in_memory_cache(why: &str) -> browser::Cache {
     }
 }
 
+/// A dialog for the failures that happen before there is a window to put a message in.
+///
+/// `panic = "abort"` and `windows_subsystem = "windows"` between them mean a panic in
+/// `setup` — which is how Tauri reports a failed setup — ends the process with no
+/// window, no console and, if the data directory is the thing that failed, no log line
+/// either. The icon flashes and nothing else ever happens. One message box is the
+/// difference between "it doesn't work" and a sentence the user can act on (D-194).
 fn fatal_dialog(message: &str) {
     use std::os::windows::ffi::OsStrExt;
     let wide = |s: &str| -> Vec<u16> {
@@ -265,6 +265,8 @@ pub fn run() {
                 steam,
                 cache: Arc::clone(&cache),
                 a2s: a2s.clone(),
+                verifying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                scanning: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 settings,
             });
 
@@ -360,8 +362,21 @@ pub fn run() {
                                 eprintln!("[verify] start: {} populated servers", targets.len());
                                 // Verification first (players), then the mod lists of
                                 // whatever is populated and modded (D-080).
+                                // One full pass at a time. Each one builds its own
+                                // 128-permit pool (D-193) and they all draw on the same
+                                // pacer, so overlapping passes multiply what an
+                                // interactive query waits for its first datagram —
+                                // measured 0.29 s for one, 2.53 s for eight (D-197).
+                                let guard = handle
+                                    .try_state::<AppState>()
+                                    .and_then(|s| commands::InFlight::claim(&s.verifying));
+                                let Some(guard) = guard else {
+                                    log_info!("verify", "a pass is already running; skipped");
+                                    continue;
+                                };
                                 let (h, c, client) = (handle.clone(), Arc::clone(&cache), a2s.clone());
                                 tauri::async_runtime::spawn(async move {
+                                    let _guard = guard;
                                     commands::run_verification(
                                         h.clone(),
                                         Arc::clone(&c),

@@ -20,12 +20,17 @@
     friendsOn,
     modsByServer,
     empty,
+    inert = false,
   }: {
     rows: ServerRow[];
     selectedId: string | null;
     sort: { key: SortKey; dir: 1 | -1 };
     localVersion: string | null;
     favourites: Set<string>;
+    /** A modal is open, so the grid answers no keys — it can still hold focus
+     *  behind one, and ArrowDown + Enter there used to rebuild the join dialog and
+     *  discard its plan (D-197). */
+    inert?: boolean;
     /** null clears the selection (click on the selected row again, or Escape). */
     onSelect: (id: string | null) => void;
     onSort: (key: SortKey) => void;
@@ -79,7 +84,11 @@
     // Only the viewport window, never the data: `rows.length` changes on most
     // batches during a refresh, so it re-armed the timer before it could fire and
     // on-demand verification fell back to the 60 s cadence below (D-160).
-    const key = `${start}:${end}`;
+    // The sort belongs in the key. It never changes `rows.length`, so both bounds
+    // came out equal, Svelte stopped the propagation and the rows now on screen were
+    // not reported — they waited up to 60 s for the tick below. It is already a prop,
+    // so this costs no new dependency on the data (D-197).
+    const key = `${start}:${end}:${sort.key}:${sort.dir}`;
     void key;
     clearTimeout(visTimer);
     visTimer = setTimeout(() => onVisible(rows.slice(start, end).map((r) => r.id)), 400);
@@ -102,6 +111,9 @@
   }
 
   function onKey(e: KeyboardEvent) {
+    // Belt and braces with D-197's focus fix: while a modal is open the grid answers
+    // no keys, the same guard `Servers.svelte` already applies to its own handler.
+    if (inert) return;
     if (e.key === "Escape") {
       if (selectedId) {
         e.preventDefault();
@@ -198,7 +210,7 @@
               onActivate(r.id);
             }}
           >
-            <div role="gridcell" class="cell c-name" title={r.description || r.name}>
+            <div role="gridcell" class="cell c-name" title={r.description ? [r.name, r.description].join(String.fromCharCode(10, 10)) : r.name}>
               <button
                 class="star"
                 class:on={favourites.has(r.id)}

@@ -1,5 +1,5 @@
 <script lang="ts">
-  // First-run overlay (docs/06 §6). Shown once; the flag lives in localStorage.
+  // First-run overlay (docs/06 §6). Shown once; the flag lives in settings.json (localStorage is only the legacy migration).
   import { servers } from "./state/servers.svelte";
 
   let { onDone }: { onDone: () => void } = $props();
