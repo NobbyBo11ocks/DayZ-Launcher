@@ -84,7 +84,7 @@ const WATCHDOG_MS = 30_000;
  * filter read it, so the per-row `toLowerCase()` the search used to do on every pass
  * over 13 000 rows is now done once per rename instead (D-188, D-211).
  */
-type Hay = { n: string; d: string | null; text: string; style: number };
+type Hay = { n: string; d: string | null; text: string; style: number; map: string };
 
 /** Bit 1 = says PVE, 2 = says PVP, 4 = says RP. A server may say several. */
 const STYLE_PVE = 1;
@@ -187,6 +187,17 @@ class ServersStore {
    */
   rows = new Map<string, ServerRow>();
   #rowsVersion = $state(0);
+
+  /**
+   * Bumped only when the row *set* changes, never when a verification rewrites one.
+   *
+   * A verification writes `verifiedPlayers`, `verdict`, `players`, `pingMs` and
+   * `tags` - it can never change a row’s map or its country. Both deriveds keyed on
+   * `#rowsVersion`, so a 30 s pass re-counted 13 000 rows on every one of its ~80
+   * flushes for an answer that could not have moved: 1.04 ms a flush, ~85 ms a pass
+   * (D-223). `untrustedCount` stays on the main tick - verdicts do change it.
+   */
+  #rowSetVersion = $state(0);
   /**
    * Position of each row in collator order by name. Sorting the visible list by name
    * costs 38.6 ms over 19 000 rows because `Intl.Collator.compare` is expensive and
@@ -213,6 +224,7 @@ class ServersStore {
       this.#dirtyTimer = undefined;
     }
     this.#rowsVersion++;
+    this.#rowSetVersion++;
   }
   #dirtyTimer: ReturnType<typeof setTimeout> | undefined;
   /**
@@ -263,7 +275,7 @@ class ServersStore {
     let e = this.#hay.get(r.id);
     if (e === undefined || e.n !== r.name || e.d !== r.description) {
       const text = r.description ? (r.name + " | " + r.description).toLowerCase() : r.name.toLowerCase();
-      e = { n: r.name, d: r.description, text, style: styleOf(text) };
+      e = { n: r.name, d: r.description, text, style: styleOf(text), map: r.map.toLowerCase() };
       this.#hay.set(r.id, e);
     }
     return e;
@@ -327,7 +339,7 @@ class ServersStore {
    * used to list each spelling as its own map (D-195).
    */
   maps = $derived.by(() => {
-    void this.#rowsVersion;
+    void this.#rowSetVersion;
     const counts = new Map<string, number>();
     for (const r of this.rows.values()) {
       const key = r.map.toLowerCase();
@@ -386,7 +398,7 @@ class ServersStore {
 
   /** Distinct countries with counts, most common first (rows without a country are skipped). */
   countries = $derived.by(() => {
-    void this.#rowsVersion;
+    void this.#rowSetVersion;
     const counts = new Map<string, number>();
     for (const r of this.rows.values()) if (r.country) counts.set(r.country, (counts.get(r.country) ?? 0) + 1);
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
@@ -421,13 +433,18 @@ class ServersStore {
     const out: ServerRow[] = [];
     for (const r of this.rows.values()) {
       if (hideUntrusted && isUntrusted(r)) continue;
-      const hay = this.#hayFor(r);
-      if (q && !(hay.text.includes(q) || mapHaystack(r.map).includes(q) || r.ip.startsWith(q))) continue;
+      // Only when something reads it: with no search term this was a Map.get plus
+      // three string compares per row for a value nobody looked at - 0.475 ms per
+      // pass at 13 000 rows (D-223).
+      const hay = q ? this.#hayFor(r) : null;
+      if (q && !(hay!.text.includes(q) || mapHaystack(r.map).includes(q) || r.ip.startsWith(q))) continue;
       if (perspective === "1pp" && !r.tags.firstPersonOnly) continue;
       if (perspective === "3pp" && r.tags.firstPersonOnly) continue;
       // The dropdown's value is the lower-cased id, because servers disagree about
       // capitalisation and `ChernarusPlus` is the same map as `chernarusplus` (D-195).
-      if (map && r.map.toLowerCase() !== map) continue;
+      // The lower-cased id lives in the cached entry rather than being rebuilt per
+      // row per pass - 0.164 ms at 13 000 rows whenever the dropdown is set (D-223).
+      if (map && this.#hayFor(r).map !== map) continue;
       if (country && r.country !== country) continue;
       if (mod && !modsByServer.get(r.id)?.includes(mod)) continue;
       const pop = trustedPlayers(r);
@@ -439,7 +456,7 @@ class ServersStore {
       // filtered out five of them; the hive is the distinction that changes what a
       // join means (D-195).
       if (hive !== "any" && r.tags.privateHive !== (hive === "community")) continue;
-      if (styleBit && !(hay.style & styleBit)) continue;
+      if (styleBit && !(this.#hayFor(r).style & styleBit)) continue;
       if (mods === "modded" && !r.tags.modded) continue;
       if (mods === "vanilla" && r.tags.modded) continue;
       if (dayOnly && !(r.tags.timeMinutes != null && r.tags.timeMinutes >= 6 * 60 && r.tags.timeMinutes < 20 * 60)) continue;
@@ -459,54 +476,78 @@ class ServersStore {
    *  Servers page behind your back (D-209). */
   #sortInPlace(out: ServerRow[]) {
     const { key, dir } = this.sort;
+    const n = out.length;
+    if (n < 2) return;
     // Ping is quantised to 20 ms steps and ties break on the id so that the
     // jitter from re-verification never reorders rows (D-060: reorders exposed
     // fresh rows to verification in a loop that grew CPU and memory).
     const pingBucket = (r: ServerRow) => Math.round(r.pingMs / 20);
-    const byId = (a: ServerRow, b: ServerRow) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
     // Mod counts once per sort rather than once per comparison (D-152): the map is
     // reactive, so a lookup inside the comparator was ~n log n signal reads.
     const modCounts =
       key === "mods" ? new Map(out.map((r) => [r.id, this.modsByServer.get(r.id)?.length ?? -1])) : null;
     const nameRank = key === "name" ? this.#rankByName() : null;
-    // Same argument as D-181's name ranks, and cheaper still because there are only
-    // ~149 distinct map names across the whole list: one collator pass over the
-    // distinct values turns every comparison into integer subtraction. Measured here
-    // at 13 380 rows, 13.43 → 4.69 ms with byte-identical order, and it runs on every
-    // 350 ms flush while the column is selected (D-193).
+    // Same argument as D-181’s name ranks, and cheaper still because there are only
+    // ~100 distinct map names across the whole list: one collator pass over the
+    // distinct values turns every comparison into integer subtraction (D-193).
     const mapRank = key === "map" ? rankDistinct(out, (r) => mapLabel(r.map).toLowerCase()) : null;
-    // One `mapLabel` per row rather than one per comparison, the shape `modCounts`
-    // above already uses.
-    const mapKey =
-      key === "map" ? new Map(out.map((r) => [r.id, mapRank!.get(mapLabel(r.map).toLowerCase()) ?? 0])) : null;
-    const cmp = (a: ServerRow, b: ServerRow): number => {
+
+    // Decorate, sort indices, permute. D-181 and D-193 precomputed the ranks but left
+    // the *lookup* inside the comparator, so every one of ~346 000 comparisons at
+    // 12 710 rows did two hashed string lookups. Reading a typed array by integer
+    // index instead: map 11.86 -> 6.06 ms, mods 10.17 -> 4.65, name 7.28 -> 2.81,
+    // players 6.93 -> 4.84, with byte-identical order in both directions. This runs on
+    // every 350 ms flush for the whole length of a refresh (D-223).
+    //
+    // `k2` is negated where the old comparator sorted that level descending, so both
+    // levels compare ascending and `dir` still flips the whole thing, tie-break
+    // included, exactly as `dir * cmp(a, b)` did.
+    const k1 = new Float64Array(n);
+    const k2 = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const r = out[i]!;
       switch (key) {
         case "name":
-          // Precomputed ranks (D-181); the id tie-break is already in them.
-          return (nameRank?.get(a.id) ?? 0) - (nameRank?.get(b.id) ?? 0);
+          // The id tie-break is already inside the rank (D-181).
+          k1[i] = nameRank!.get(r.id) ?? 0;
+          break;
         case "map":
-          return (
-            (mapKey!.get(a.id) ?? 0) - (mapKey!.get(b.id) ?? 0) ||
-            trustedPlayers(b) - trustedPlayers(a) ||
-            byId(a, b)
-          );
-        case "mods": {
+          k1[i] = mapRank!.get(mapLabel(r.map).toLowerCase()) ?? 0;
+          k2[i] = -trustedPlayers(r);
+          break;
+        case "mods":
           // Unscanned servers sort below every scanned one, in both directions.
-          const ma = modCounts?.get(a.id) ?? -1;
-          const mb = modCounts?.get(b.id) ?? -1;
-          return ma - mb || trustedPlayers(b) - trustedPlayers(a) || byId(a, b);
-        }
+          k1[i] = modCounts!.get(r.id) ?? -1;
+          k2[i] = -trustedPlayers(r);
+          break;
         case "players":
-          return trustedPlayers(a) - trustedPlayers(b) || pingBucket(b) - pingBucket(a) || byId(a, b);
+          k1[i] = trustedPlayers(r);
+          k2[i] = -pingBucket(r);
+          break;
         case "ping":
-          return pingBucket(a) - pingBucket(b) || trustedPlayers(b) - trustedPlayers(a) || byId(a, b);
+          k1[i] = pingBucket(r);
+          k2[i] = -trustedPlayers(r);
+          break;
         case "time":
-          return (a.tags.timeMinutes ?? -1) - (b.tags.timeMinutes ?? -1) || byId(a, b);
+          k1[i] = r.tags.timeMinutes ?? -1;
+          break;
         case "version":
-          return a.serverVersion - b.serverVersion || byId(a, b);
+          k1[i] = r.serverVersion;
+          break;
       }
-    };
-    out.sort((a, b) => dir * cmp(a, b));
+    }
+    const idx = new Uint32Array(n);
+    for (let i = 0; i < n; i++) idx[i] = i;
+    idx.sort((x, y) => {
+      const d = k1[x]! - k1[y]! || k2[x]! - k2[y]!;
+      if (d !== 0) return dir * d;
+      const a = out[x]!.id;
+      const b = out[y]!.id;
+      return dir * (a < b ? -1 : a > b ? 1 : 0);
+    });
+    const permuted = new Array<ServerRow>(n);
+    for (let i = 0; i < n; i++) permuted[i] = out[idx[i]!]!;
+    for (let i = 0; i < n; i++) out[i] = permuted[i]!;
   }
 
   selected = $derived.by(() => {
@@ -574,8 +615,11 @@ class ServersStore {
     for (const id of this.favourites) {
       const r = this.rows.get(id);
       if (!r) continue;
-      const hay = this.#hayFor(r);
-      if (q && !(hay.text.includes(q) || mapHaystack(r.map).includes(q) || r.ip.startsWith(q))) continue;
+      // Only when something reads it: with no search term this was a Map.get plus
+      // three string compares per row for a value nobody looked at - 0.475 ms per
+      // pass at 13 000 rows (D-223).
+      const hay = q ? this.#hayFor(r) : null;
+      if (q && !(hay!.text.includes(q) || mapHaystack(r.map).includes(q) || r.ip.startsWith(q))) continue;
       out.push(r);
     }
     this.#sortInPlace(out);
@@ -589,8 +633,11 @@ class ServersStore {
     const out: ServerRow[] = [];
     for (const r of this.rows.values()) {
       if (!isLanIp(r.ip)) continue;
-      const hay = this.#hayFor(r);
-      if (q && !(hay.text.includes(q) || mapHaystack(r.map).includes(q) || r.ip.startsWith(q))) continue;
+      // Only when something reads it: with no search term this was a Map.get plus
+      // three string compares per row for a value nobody looked at - 0.475 ms per
+      // pass at 13 000 rows (D-223).
+      const hay = q ? this.#hayFor(r) : null;
+      if (q && !(hay!.text.includes(q) || mapHaystack(r.map).includes(q) || r.ip.startsWith(q))) continue;
       out.push(r);
     }
     this.#sortInPlace(out);

@@ -343,6 +343,23 @@ impl Cache {
     /// Q22 kept producing. FULL waits for the readers instead of stepping around
     /// them, bounded by the connection's busy timeout so a stuck reader costs a few
     /// seconds and a log line rather than the thread (D-194).
+    /// Checkpoints and then truncates the write-ahead log, for the way out.
+    ///
+    /// Tauri leaves through `process::exit`, so the `Connection` is never dropped and
+    /// SQLite never truncates. Nothing is at risk — the pages have been copied — but
+    /// the file keeps its high-water mark: 6.34 MB of stale bytes measured here on a
+    /// machine with no process running, costing 0.71 ms of every cold start
+    /// (`load_all` 5.93 ms with it against 5.22 without). TRUNCATE measured 20.8 ms,
+    /// paid once, at exit, where nobody is waiting (D-223).
+    pub fn checkpoint_truncate(&self) {
+        self.checkpoint_durable();
+        let _ = self
+            .conn
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| {
+                r.get::<_, i64>(0)
+            });
+    }
+
     pub fn checkpoint_durable(&self) {
         if self.checkpoint() {
             return;

@@ -554,7 +554,7 @@ pub fn run() {
                 if let Some(state) = handle.try_state::<AppState>() {
                     state.steam.shutdown();
                     if let Ok(c) = state.cache.lock() {
-                        c.checkpoint();
+                        c.checkpoint_truncate();
                     }
                 }
                 log_info!("app", "exited cleanly");
