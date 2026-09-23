@@ -25,7 +25,7 @@
 
 <br>
 
-<img src="docs/screenshots/servers.png" width="900" alt="The server browser: country flags, verified player counts, filter bar, and a details pane with the server's mods, population history and past sessions">
+<img src="docs/screenshots/servers.png" width="900" alt="The server browser: country flags, verified player counts, filter bar, and a details pane with the server's mods and population history">
 
 </div>
 
@@ -37,7 +37,7 @@ DayZ's server list is full of servers that say they have forty players and have 
 
 This one asks the server directly, counts the players itself, and compares the answer with Steam's authenticated session count. A full sweep of this machine's list flagged **6 309 of 13 380 servers** — 47 % — and hid them by default.
 
-That number is also why the automatic refresh asks Steam only for servers that have players: it arrives in about forty seconds and it skips the partitions where almost all of the fakes live. Of the 3 446 populated servers in the current cache, 25 are flagged. Press **Refresh** when you want the empty ones too — a server you can be first on, or your own at an off-hour — and the list will say so when they are missing.
+That number is also why the automatic refresh asks Steam only for servers that have players: it arrives in about forty seconds and it skips the partitions where almost all of the fakes live. Of the 3 446 populated servers in the current cache, 25 did not verify and 20 of those are flagged and hidden — the difference is the five that refuse player queries while Steam vouches for them, which the rule deliberately keeps. Press **Refresh** when you want the empty ones too — a server you can be first on, or your own at an off-hour — and the list will say so when they are missing.
 
 <table>
 <tr><td width="33%" align="center">
@@ -109,7 +109,7 @@ No accounts, no API keys, no telemetry. Every destination it contacts is listed 
 - **Official or community hive**, perspective, map, country, mod, queue, password, daytime, version, ping and friends
 - **Maps by the name people use** — "Livonia" finds `enoch`, "Frostline" finds `sakhal`
 - Country flags from an offline table, no lookups
-- A details pane with the server's mods and installed ticks, 72 h population history, and your past sessions there
+- A details pane with the server's mods and installed ticks, 72 h population history, and the other servers at the same address
 - Find every server running a given mod
 - Favourites, a clearable Recent list, and import of the official launcher's favourites
 - LAN discovery
@@ -250,10 +250,17 @@ npm run tauri build
 
 Output: `src-tauri/target/release/bundle/nsis/` (`DZSA CrayZ Launcher_<version>_x64-setup.exe` plus a `.sig` for the updater).
 
-`src-tauri/nsis/installer.nsi` is a copy of Tauri's stock template with exactly two lines changed, and `node tools/nsis_template_check.js` fails if that stops being true:
+`src-tauri/nsis/installer.nsi` is a copy of Tauri's stock template carrying **eight marked deviations**, plus one new file (`nsis/hooks.nsh`) on Tauri's own extension point. Each deviation is bracketed by `; >>> dzl-change:` and carries the upstream lines it replaces, so `node tools/nsis_template_check.js` puts them all back and compares against the real thing rather than keeping a second copy of what we wrote (D-205):
 
 1. The per-user default install directory is `%LOCALAPPDATA%\Programs\<product>` rather than `%LOCALAPPDATA%\<product>`, which collided with the official DayZ Launcher's data folder under this app's original name (D-067).
-2. `un.onInit` initialises the "delete app data" state to 0. The stock template reads it only in `un.ConfirmLeave`, which never runs in a silent uninstall — and installing over a *different* version runs the old uninstaller silently, which deleted favourites, join history, population and settings (D-200). Auto-updates were never affected, because the updater passes `/UPDATE`.
+2. An options page before anything is written, so the news question is answered before the launcher has ever run (D-206), and `/NONEWS` for silent installs.
+3. A straight upgrade skips the reinstall page entirely. Upstream shows it on every reinstall with *uninstall* pre-selected, and choosing it runs the previous version's uninstaller in the middle of the install — which is where the "delete application data" checkbox lives (D-207).
+4. The uninstaller an upgrade does run is passed `/UPDATE /S`, as belt to that braces (D-205).
+5. The Add/Remove Programs entry survives an upgrade, so an interrupted one still leaves a way back (D-214).
+6. The install waits for the old binary's lock to clear before overwriting it, because WebView2's children outlive the host (D-214).
+7. `AllowSkipFiles off`: NSIS otherwise skips a locked file, and a silent install exited 0 having changed nothing while writing the new version to Add/Remove Programs (D-205).
+
+Auto-updates were never affected by any of this — the updater always passes `/UPDATE`.
 
 After upgrading `@tauri-apps/cli`, run the check (add `--write` to refresh the copy from the new tag and re-apply both changes).
 
@@ -362,7 +369,7 @@ tools/               Node scripts: A2S probe and capture, GeoIP and flag builder
 | `node tools/make_latest.js vX.Y.Z --notes notes.md` | Build `latest.json` from the uploaded release asset |
 | `node tools/nsis_template_check.js` | Diff our NSIS template against the installed Tauri CLI's |
 | `node tools/geoip_build.js` · `node tools/flags_build.js` | Rebuild the offline GeoIP table and the flag sprite |
-| `node tools/make_icon.js` | Redraw the app icon and write `icon.ico` plus the PNG sizes. Needs `sharp`, which is not a project dependency: `npm i --no-save sharp` first |
+| `node tools/make_icon.js` | Redraw the app icon and write `icon.ico` plus the PNG sizes. Needs `sharp`, which is deliberately not a project dependency: `npm i --no-save sharp` first, and note that `npm ci` removes it again. `tools/nsis_art.js` and `tools/readme_banner.js` need it too |
 
 </details>
 

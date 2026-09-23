@@ -36,7 +36,7 @@ pub struct ServerRow {
     pub keywords: String,
     #[serde(default)]
     pub tags: DayzTags,
-    /// Steam's id for the server. Identity is `ip:queryPort` (docs/04 §1), so
+    /// Steam's id for the server. Identity is `ip:queryPort` (docs/05 §4), so
     /// nothing in the UI uses this.
     #[serde(skip_serializing)]
     pub steam_id: u64,

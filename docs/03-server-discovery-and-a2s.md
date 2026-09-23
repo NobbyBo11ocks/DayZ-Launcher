@@ -12,7 +12,7 @@ Everything in this document was either read from the Valve wiki / two independen
 | Direct A2S_INFO / A2S_RULES to each server | No | n/a | **Yes** (RULES) | ~RTT per server, fan out | **Details + ping + mods** |
 | DZSA `GET https://dayzsalauncher.com/api/v1/query/{ip}/{queryPort}` (S-18) **[LIVE]** | No (Cloudflare blocks non-browser user agents; got 403 from a plain fetcher) | Only registered servers | Yes | One HTTP call | Optional fallback when RULES fails |
 | DZSA `GET /api/v1/launcher/servers/dayz` (S-19) | No | Registered only | Yes | > 10 MB JSON | Not used at startup (too heavy) |
-| BattleMetrics `GET https://api.battlemetrics.com/servers?filter[game]=dayz&filter[search]=…` (S-38) | Optional | Broad | Partial | 60 req/min unauthenticated | Optional link-out only |
+| BattleMetrics `GET https://api.battlemetrics.com/servers?filter[game]=dayz&filter[search]=…` (S-38) | Optional | Broad | Partial | subscription required since 2026 (403 unauthenticated, re-checked 2026-09-23) | Optional link-out only |
 
 Decision: primary list from Steamworks, then A2S fan-out for ping/details, RULES on demand (selected row, favourites, join). Fallbacks when Steamworks is unavailable: a user-supplied Steam Web API key (optional setting, never shipped in the binary), then the DZSA list. See ADR-002 in [04](04-tech-stack-decision.md).
 

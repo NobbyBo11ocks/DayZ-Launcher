@@ -75,7 +75,7 @@ pub struct Verification {
     pub ping_ms: Option<u32>,
     /// Written to the cache by `apply_verifications`, never rendered: the browser
     /// reads the parsed `tags` instead. One 500-server `servers:verified` event was
-    /// 202 KB with it — already at the ~200 KB cap docs/04 §4 sets — and 157 KB
+    /// 202 KB with it — already at the ~200 KB cap docs/05 §4 sets — and 157 KB
     /// without (D-188).
     #[serde(skip_serializing)]
     pub keywords: Option<String>,

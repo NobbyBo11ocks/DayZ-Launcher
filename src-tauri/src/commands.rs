@@ -378,7 +378,7 @@ pub struct VerifySummary {
 /// the pass is not being made gentler, it is being taken out of the queue the join
 /// dialog and the details pane share (D-193).
 const VERIFY_CONCURRENCY: usize = 128;
-/// Rows per `servers:verified` event. docs/04 §4 caps an event at ~200 KB and a row
+/// Rows per `servers:verified` event. docs/05 §4 caps an event at ~200 KB and a row
 /// measures 558 B, so 128 rows is ~71 KB — small enough that the front end's derived
 /// chain shrugs at it, large enough that a pass is not thousands of events.
 const VERIFY_FLUSH_ROWS: usize = 128;
@@ -671,7 +671,7 @@ pub async fn run_mod_scan(
             .collect();
         // The same handful of popular mods appears on most servers in a chunk, so
         // sending every occurrence made this event ~10x larger than it needs to be
-        // (200 servers x ~30 mods vs a few hundred distinct ids) — docs/04 §4 caps
+        // (200 servers x ~30 mods vs a few hundred distinct ids) — docs/05 §4 caps
         // an event at ~200 KB (D-160).
         let mut seen: HashSet<u64> = HashSet::with_capacity(256);
         let mut names: Vec<(u64, String)> = Vec::with_capacity(256);
