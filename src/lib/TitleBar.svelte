@@ -3,15 +3,14 @@
   // toggle-maximize,close,start-dragging} in capabilities/default.json.
   // Slim and unlabelled (D-091): the bar is a drag handle plus the three controls;
   // it carries accent-coloured live counts with icons (servers with players, friends
-  // in DayZ; D-103, D-105, D-106) and an update notice when one is pending.
+  // in DayZ; D-103, D-105, D-106). The update notice lives at the foot of the rail (D-216).
   import { getCurrentWindow } from "@tauri-apps/api/window";
 
   let {
     servers = null,
     friends = null,
-    notice = "",
     greeting = "",
-  }: { servers?: number | null; friends?: number | null; notice?: string; greeting?: string } = $props();
+  }: { servers?: number | null; friends?: number | null; greeting?: string } = $props();
   const win = getCurrentWindow();
   const fmt = new Intl.NumberFormat();
 </script>
@@ -29,7 +28,6 @@
       {friends} friend{friends === 1 ? "" : "s"} in DayZ
     </span>
   {/if}
-  {#if notice}<span class="notice" data-tauri-drag-region>{notice}</span>{/if}
   <span class="spacer" data-tauri-drag-region></span>
   {#if greeting}<span class="greeting" data-tauri-drag-region>{greeting}</span>{/if}
   <div class="controls">
@@ -54,7 +52,6 @@
   .stat { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--accent-ink); white-space: nowrap; }
   .stat + .stat { margin-left: 16px; }
   .icon { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; flex: none; }
-  .notice { font-size: 12px; color: var(--accent-ink); white-space: nowrap; }
   /* The welcome line lives here now (D-173), in the accent like the counts beside it. */
   .greeting { min-width: 0; margin-right: 12px; font-size: 12px; font-weight: 500; color: var(--accent-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .spacer { flex: 1; height: 100%; }

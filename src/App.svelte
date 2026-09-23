@@ -123,7 +123,7 @@
 
 <div class="shell">
   <!-- Title-bar counts (D-103, D-105, D-106): servers with players live from the row cache, friends in DayZ. -->
-  <TitleBar servers={servers.rowsTick >= 0 && servers.rows.size > 0 ? servers.populatedCount : null} friends={servers.friendsInDayz} notice={updates.state === "available" ? `Update ${updates.version} available in Settings` : ""} {greeting} />
+  <TitleBar servers={servers.rowsTick >= 0 && servers.rows.size > 0 ? servers.populatedCount : null} friends={servers.friendsInDayz} {greeting} />
 
   <nav class="rail" aria-label="Sections">
     {#each sections as s (s.id)}
@@ -134,6 +134,22 @@
         {#if s.id === "mods" && modUpdates.count > 0}<span class="badge" aria-label="{modUpdates.count} mods have an update waiting" title="{modUpdates.count} mod{modUpdates.count === 1 ? "" : "s"} can be updated">{modUpdates.count > 99 ? "99+" : modUpdates.count}</span>{/if}
       </button>
     {/each}
+
+    <!-- The update is applied in Settings, so this is a way there rather than a
+         label: a notice in the title bar could only be read, and the title bar is
+         for what is true right now (counts, who you are) rather than for something
+         to act on (D-216). `margin-top: auto` puts it at the foot of the rail. -->
+    {#if updates.state === "available"}
+      <button
+        class="rail-item update"
+        onclick={() => (active = "settings")}
+        title="Version {updates.version} is ready to install — opens Settings"
+        aria-label="Update {updates.version} is available; open Settings to install it"
+      >
+        <span class="glyph" aria-hidden="true">↑</span>
+        <span class="text">Update Available</span>
+      </button>
+    {/if}
   </nav>
 
   <main class="content" class:padded={!listViews.has(active)}>
