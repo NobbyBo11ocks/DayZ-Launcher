@@ -47,6 +47,32 @@
   const canSync = $derived(!!plan && plan.steamRunning && toSync.length > 0);
   const downloadedBytes = $derived([...progress.values()].reduce((a, p) => a + (p.state === "installed" ? p.total : p.downloaded), 0));
   const totalBytes = $derived([...progress.values()].reduce((a, p) => a + p.total, 0));
+  // The median server in the cached list needs 25 mods and the worst needs 139, so
+  // this is the longest wait in the product — and it showed a byte count creeping up,
+  // no rate and no estimate (D-211). The window is wide because Steam reports an
+  // item as a step change when it finishes, not as a smooth curve.
+  const RATE_WINDOW_MS = 10_000;
+  let rateSamples: { t: number; bytes: number }[] = [];
+  let rate = $state(0);
+  $effect(() => {
+    if (phase !== "syncing") {
+      rateSamples = [];
+      rate = 0;
+      return;
+    }
+    const bytes = downloadedBytes;
+    const now = Date.now();
+    rateSamples.push({ t: now, bytes });
+    while (rateSamples.length > 2 && now - rateSamples[0]!.t > RATE_WINDOW_MS) rateSamples.shift();
+    const first = rateSamples[0]!;
+    const dt = (now - first.t) / 1000;
+    // Under two seconds of history the number would jump around more than it informs.
+    rate = dt >= 2 ? Math.max(0, (bytes - first.bytes) / dt) : 0;
+  });
+  const etaSecs = $derived(rate > 0 && totalBytes > downloadedBytes ? Math.round((totalBytes - downloadedBytes) / rate) : 0);
+  const etaText = $derived(
+    etaSecs <= 0 ? "" : etaSecs < 60 ? `${etaSecs} s` : etaSecs < 5400 ? `${Math.max(1, Math.round(etaSecs / 60))} min` : `${(etaSecs / 3600).toFixed(1)} h`,
+  );
   // Only the launch itself is uninterruptible (D-151). A Workshop download used to lock
   // the dialog — and with it the window — until Steam finished or the backend's 45-minute
   // timeout fired. Closing now just stops watching: Steam keeps downloading and the Mods
@@ -332,7 +358,7 @@
       </p>
 
       {#if phase === "syncing" && syncInfo}
-        <p class="status" role="status" aria-live="polite">Downloading via Steam… {syncInfo.installed}/{syncInfo.total} installed{#if totalBytes > 0} · {fmtBytes(downloadedBytes)} of {fmtBytes(totalBytes)}{/if}</p>
+        <p class="status" role="status" aria-live="polite">Downloading via Steam… {syncInfo.installed}/{syncInfo.total} installed{#if totalBytes > 0} · {fmtBytes(downloadedBytes)} of {fmtBytes(totalBytes)}{/if}{#if rate > 0} · {fmtBytes(rate)}/s{#if etaText} · about {etaText} left{/if}{/if}</p>
       {:else if phase === "waiting"}
         <p class="status" role="status" aria-live="polite">
           {#if slotMisses >= 3}

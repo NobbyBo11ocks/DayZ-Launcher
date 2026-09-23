@@ -3,7 +3,7 @@
   // parts share this component: `primary` (search, perspective, map, country, mods;
   // 28 px controls) for the first row of the Servers page and `chips` (quick toggles,
   // ping, trust, specific mod, reset; 26 px) for the second.
-  import { servers, type HiveFilter, type ModFilter, type Perspective } from "./state/servers.svelte";
+  import { servers, type HiveFilter, type ModFilter, type Perspective, type StyleFilter } from "./state/servers.svelte";
   import { countryName } from "./types";
 
   let { part = "primary" }: { part?: "primary" | "chips" } = $props();
@@ -44,6 +44,10 @@
   });
   $effect(() => () => clearTimeout(searchTimer));
 
+  // 1 611 of 3 446 cached servers answer inside 60 ms and 742 are 120 ms or worse, so
+  // these are the cuts that actually divide the list (D-211).
+  const PING_PRESETS = [50, 80, 100, 150, 200];
+
   const f = $derived(servers.filters);
   const fmt = new Intl.NumberFormat();
   const toggle = (key: "notFull" | "notEmpty" | "hasQueue" | "noPassword" | "dayOnly" | "versionMine" | "hideUntrusted" | "friendsOnly") => {
@@ -52,6 +56,10 @@
   };
   const setHive = (h: HiveFilter) => {
     servers.filters.hive = h;
+    servers.saveFilters();
+  };
+  const setStyle = (v: StyleFilter) => {
+    servers.filters.style = v;
     servers.saveFilters();
   };
   const setPerspective = (p: Perspective) => {
@@ -112,6 +120,15 @@
     <!-- Official is Bohemia's public hive, where your character follows you between
          servers; Community is a private shard, where it does not. The in-game browser
          makes this a top-level tab, and the tag is already on every row (D-195). -->
+    <!-- What the server says it is, read out of its own name and description. Nobody
+         verifies a ruleset, so the labels and the tooltips say "says" — and a server
+         that claims both shows under both. 41.6 % of the list says PVE (D-211). -->
+    <div class="seg" role="group" aria-label="Playstyle">
+      {#each [["any", "Any", "Every playstyle"], ["pve", "PVE", "The name or description says PVE"], ["pvp", "PVP", "The name or description says PVP"], ["rp", "RP", "The name or description says RP or roleplay"]] as [v, label, hint] (v)}
+        <button class="segbtn" class:on={f.style === v} aria-pressed={f.style === v} title={hint} onclick={() => setStyle(v as StyleFilter)}>{label}</button>
+      {/each}
+    </div>
+
     <div class="seg" role="group" aria-label="Hive">
       {#each [["any", "Any", "Both hives"], ["official", "Official", "Bohemia's public hive: your character follows you between these"], ["community", "Community", "Private shards: your character lives on that one server"]] as [v, label, hint] (v)}
         <button class="segbtn" class:on={f.hive === v} aria-pressed={f.hive === v} title={hint} onclick={() => setHive(v as HiveFilter)}>{label}</button>
@@ -152,9 +169,20 @@
       Friends <span class="num">{servers.friendsOn.size}</span>
     </button>
 
-    <label class="ping" title="0 = no limit">
+    <!-- Presets rather than a number field: this was the one filter you had to click
+         into and type a number for, and an emptied number input binds as null (D-211).
+         A value saved before this, or set some other way, keeps its own option. -->
+    <label class="ping" title="Hide servers slower than this">
       Ping ≤
-      <input type="number" min="0" max="999" step="10" bind:value={servers.filters.maxPing} onchange={() => servers.saveFilters()} aria-label="Maximum ping" />
+      <select class="select small" class:on={f.maxPing > 0} bind:value={servers.filters.maxPing} onchange={() => servers.saveFilters()} aria-label="Maximum ping">
+        <option value={0}>Any</option>
+        {#each PING_PRESETS as ms (ms)}
+          <option value={ms}>{ms} ms</option>
+        {/each}
+        {#if f.maxPing > 0 && !PING_PRESETS.includes(f.maxPing)}
+          <option value={f.maxPing}>{f.maxPing} ms</option>
+        {/if}
+      </select>
     </label>
 
     <button class="chip" class:on={f.hideUntrusted} aria-pressed={f.hideUntrusted} onclick={() => toggle("hideUntrusted")} title="Hide servers whose player counts are inflated or unverifiable (docs/11)">
@@ -217,6 +245,5 @@
   .modsearch:focus-visible { outline: 2px solid var(--accent-ink); }
 
   .ping { display: inline-flex; align-items: center; gap: 6px; box-sizing: border-box; height: 26px; padding: 0 0 0 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-row); color: var(--fg-muted); font-size: 11.5px; white-space: nowrap; }
-  .ping input { width: 50px; height: 24px; padding: 0 6px; border: 0; border-left: 1px solid var(--border); border-radius: 0 7px 7px 0; background: transparent; color: var(--fg); font-size: 11.5px; }
-  .ping input:focus-visible { outline: 2px solid var(--accent-ink); }
+  .ping :global(select) { height: 24px; border: 0; border-left: 1px solid var(--border); border-radius: 0 7px 7px 0; }
 </style>

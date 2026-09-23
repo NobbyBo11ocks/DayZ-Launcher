@@ -34,6 +34,8 @@ export type ModFilter = "any" | "modded" | "vanilla";
 /** Official = Bohemia's public hive, your character follows you between them.
  *  Community = a private shard, your character lives on that one box (D-195). */
 export type HiveFilter = "any" | "official" | "community";
+/** A claim the server makes about itself, not a ruleset anyone verified (D-211). */
+export type StyleFilter = "any" | "pve" | "pvp" | "rp";
 
 export type Filters = {
   search: string;
@@ -49,6 +51,8 @@ export type Filters = {
   noPassword: boolean;
   mods: ModFilter;
   hive: HiveFilter;
+  /** What the server says it is, in its own name or description (D-211). */
+  style: StyleFilter;
   dayOnly: boolean;
   /** 0 = no limit. */
   maxPing: number;
@@ -74,6 +78,30 @@ const SCAN_DEADLINE_MS = 20 * 60_000;
 const WATCHDOG_MS = 30_000;
 
 
+
+/**
+ * What a server calls itself, lower-cased once. Both the search and the playstyle
+ * filter read it, so the per-row `toLowerCase()` the search used to do on every pass
+ * over 13 000 rows is now done once per rename instead (D-188, D-211).
+ */
+type Hay = { n: string; d: string | null; text: string; style: number };
+
+/** Bit 1 = says PVE, 2 = says PVP, 4 = says RP. A server may say several. */
+const STYLE_PVE = 1;
+const STYLE_PVP = 2;
+const STYLE_RP = 4;
+// Word boundaries matter: "rp" as a plain substring matches corp, sharp and airport,
+// and "pve"/"pvp" inside "PVE/PVP" still get their boundaries from the slash.
+const RE_PVE = /\bpve\b/;
+const RE_PVP = /\bpvp\b/;
+const RE_RP = /\b(?:rp|roleplay|role-play)\b/;
+
+function styleOf(text: string): number {
+  return (RE_PVE.test(text) ? STYLE_PVE : 0) | (RE_PVP.test(text) ? STYLE_PVP : 0) | (RE_RP.test(text) ? STYLE_RP : 0);
+}
+
+const STYLE_BIT: Record<Exclude<StyleFilter, "any">, number> = { pve: STYLE_PVE, pvp: STYLE_PVP, rp: STYLE_RP };
+
 export const defaultFilters = (): Filters => ({
   search: "",
   perspective: "any",
@@ -86,6 +114,7 @@ export const defaultFilters = (): Filters => ({
   noPassword: false,
   mods: "any",
   hive: "any",
+  style: "any",
   dayOnly: false,
   maxPing: 0,
   versionMine: false,
@@ -225,6 +254,20 @@ class ServersStore {
    *  search had just brought on screen waited up to 60 s to be verified (D-209).
    *  Keeping data out of the key is the whole point of D-060 and D-160. */
   filterKey = $derived(JSON.stringify(this.filters));
+
+  /** Lower-cased name + description per row, with the playstyle it claims. Rebuilt for
+   *  a row only when that row renames, so the filter loop allocates nothing (D-211). */
+  #hay = new Map<string, Hay>();
+
+  #hayFor(r: ServerRow): Hay {
+    let e = this.#hay.get(r.id);
+    if (e === undefined || e.n !== r.name || e.d !== r.description) {
+      const text = r.description ? (r.name + " | " + r.description).toLowerCase() : r.name.toLowerCase();
+      e = { n: r.name, d: r.description, text, style: styleOf(text) };
+      this.#hay.set(r.id, e);
+    }
+    return e;
+  }
   sort = $state<{ key: SortKey; dir: 1 | -1 }>({ key: "players", dir: -1 });
 
   /** Whether the list holds any server Steam reported as empty. The automatic refresh
@@ -312,6 +355,7 @@ class ServersStore {
       // Missed when the hive filter was added (D-195): the Reset chip only renders
       // while this is above zero, so filtering to Official alone hid the way back.
       (f.hive !== "any" ? 1 : 0) +
+      (f.style !== "any" ? 1 : 0) +
       (f.map ? 1 : 0) +
       (f.country ? 1 : 0)
     );
@@ -366,6 +410,7 @@ class ServersStore {
     const noPassword = f.noPassword;
     const hive = f.hive;
     const mods = f.mods;
+    const styleBit = f.style === "any" ? 0 : STYLE_BIT[f.style];
     const dayOnly = f.dayOnly;
     const maxPing = f.maxPing;
     const versionMine = f.versionMine;
@@ -376,7 +421,8 @@ class ServersStore {
     const out: ServerRow[] = [];
     for (const r of this.rows.values()) {
       if (hideUntrusted && isUntrusted(r)) continue;
-      if (q && !(r.name.toLowerCase().includes(q) || mapHaystack(r.map).includes(q) || r.ip.startsWith(q))) continue;
+      const hay = this.#hayFor(r);
+      if (q && !(hay.text.includes(q) || mapHaystack(r.map).includes(q) || r.ip.startsWith(q))) continue;
       if (perspective === "1pp" && !r.tags.firstPersonOnly) continue;
       if (perspective === "3pp" && r.tags.firstPersonOnly) continue;
       // The dropdown's value is the lower-cased id, because servers disagree about
@@ -393,6 +439,7 @@ class ServersStore {
       // filtered out five of them; the hive is the distinction that changes what a
       // join means (D-195).
       if (hive !== "any" && r.tags.privateHive !== (hive === "community")) continue;
+      if (styleBit && !(hay.style & styleBit)) continue;
       if (mods === "modded" && !r.tags.modded) continue;
       if (mods === "vanilla" && r.tags.modded) continue;
       if (dayOnly && !(r.tags.timeMinutes != null && r.tags.timeMinutes >= 6 * 60 && r.tags.timeMinutes < 20 * 60)) continue;
@@ -527,7 +574,8 @@ class ServersStore {
     for (const id of this.favourites) {
       const r = this.rows.get(id);
       if (!r) continue;
-      if (q && !(r.name.toLowerCase().includes(q) || mapHaystack(r.map).includes(q) || r.ip.startsWith(q))) continue;
+      const hay = this.#hayFor(r);
+      if (q && !(hay.text.includes(q) || mapHaystack(r.map).includes(q) || r.ip.startsWith(q))) continue;
       out.push(r);
     }
     this.#sortInPlace(out);
@@ -541,7 +589,8 @@ class ServersStore {
     const out: ServerRow[] = [];
     for (const r of this.rows.values()) {
       if (!isLanIp(r.ip)) continue;
-      if (q && !(r.name.toLowerCase().includes(q) || mapHaystack(r.map).includes(q) || r.ip.startsWith(q))) continue;
+      const hay = this.#hayFor(r);
+      if (q && !(hay.text.includes(q) || mapHaystack(r.map).includes(q) || r.ip.startsWith(q))) continue;
       out.push(r);
     }
     this.#sortInPlace(out);
