@@ -119,6 +119,32 @@
 
   const MODS_COLLAPSED = 10;
   const mods = $derived(details?.rules?.dayz?.mods ?? []);
+
+  // 644 hosts in the cached list run two or more servers, and 1 689 rows — 49 % of
+  // the list — have at least one sibling; 478 of those groups span more than one map
+  // and the largest runs nine across six. Finding a server you like and not being able
+  // to get on it, while the launcher silently knows about its eight neighbours, is a
+  // gap worth closing. Titled by address rather than by owner, because sharing a host
+  // is not the same as sharing a community — some of these groups are one community,
+  // others are one host's unrelated customers (D-212).
+  const SIBLINGS_SHOWN = 6;
+  const siblings = $derived.by(() => {
+    void servers.rowsTick;
+    const ip = row?.ip;
+    const self = row?.id;
+    if (!ip) return [];
+    const out: ServerRow[] = [];
+    for (const r of servers.rows.values()) if (r.ip === ip && r.id !== self) out.push(r);
+    out.sort((a, b) => trustedPlayers(b) - trustedPlayers(a) || a.pingMs - b.pingMs);
+    return out;
+  });
+  let allSiblings = $state(false);
+  const shownSiblings = $derived(allSiblings ? siblings : siblings.slice(0, SIBLINGS_SHOWN));
+  // A fresh selection collapses the list again.
+  $effect(() => {
+    void id;
+    allSiblings = false;
+  });
   const shownMods = $derived(allMods ? mods : mods.slice(0, MODS_COLLAPSED));
   const missing = $derived(installed ? mods.filter((m) => !installed!.has(m.workshopId)).length : 0);
   const description = $derived((details?.info?.game || row?.description || "").trim());
@@ -250,6 +276,25 @@
       </section>
     {/if}
 
+    {#if siblings.length}
+      <section>
+        <h3>Other servers at this address <span class="count">{siblings.length}</span></h3>
+        <ul class="sibs">
+          {#each shownSiblings as sv (sv.id)}
+            <li>
+              <button class="sib" onclick={() => (servers.selectedId = sv.id)} title={sv.name}>
+                <span class="sname">{sv.name}</span>
+                <span class="smeta">{mapLabel(sv.map)} · {trustedPlayers(sv)}/{sv.maxPlayers}</span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+        {#if siblings.length > SIBLINGS_SHOWN}
+          <button class="link" onclick={() => (allSiblings = !allSiblings)}>{allSiblings ? "Show fewer" : `Show all ${siblings.length}`}</button>
+        {/if}
+      </section>
+    {/if}
+
     <section>
       <h3>Population, last 72 h</h3>
       <Sparkline {samples} maxPlayers={row.maxPlayers} />
@@ -346,6 +391,12 @@
   .desc { margin: 0; color: var(--fg-muted); white-space: pre-line; line-height: 1.4; }
   .desc.clamped { display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 
+  .sibs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+  .sib { all: unset; cursor: pointer; box-sizing: border-box; width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: baseline; padding: 2px 4px; border-radius: var(--radius); }
+  .sib:hover { background: var(--bg-row); }
+  .sib:focus-visible { outline: 2px solid var(--accent-ink); }
+  .sname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .smeta { color: var(--fg-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .mods { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
   .mods li { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 6px; align-items: center; }
   .mods li.missing { color: var(--warn); }

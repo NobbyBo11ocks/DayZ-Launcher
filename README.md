@@ -35,7 +35,9 @@
 
 DayZ's server list is full of servers that say they have forty players and have none. They do it because the list sorts by population, and an empty server nobody can see stays empty. Every launcher shows you that number.
 
-This one asks the server directly, counts the players itself, and compares the answer with Steam's authenticated session count. On this machine's last refresh that flagged **6 309 of 13 380 servers** — 47 % — and hid them by default.
+This one asks the server directly, counts the players itself, and compares the answer with Steam's authenticated session count. A full sweep of this machine's list flagged **6 309 of 13 380 servers** — 47 % — and hid them by default.
+
+That number is also why the automatic refresh asks Steam only for servers that have players: it arrives in about forty seconds and it skips the partitions where almost all of the fakes live. Of the 3 446 populated servers in the current cache, 25 are flagged. Press **Refresh** when you want the empty ones too — a server you can be first on, or your own at an off-hour — and the list will say so when they are missing.
 
 <table>
 <tr><td width="33%" align="center">
