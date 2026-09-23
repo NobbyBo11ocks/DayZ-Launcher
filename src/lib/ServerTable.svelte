@@ -188,18 +188,28 @@
 </script>
 
 <!-- Roving selection on the grid: the grid takes focus, arrow keys move the selected row. -->
-<div class="table" role="grid" aria-rowcount={rows.length} aria-label="Servers" tabindex="0" onkeydown={onKey}>
-  <div class="head" role="row">
+<!-- `aria-activedescendant` is what makes arrow-key movement audible: focus never
+     leaves the container, so without it the selection moved silently (D-224).
+     `aria-rowcount` counts the header, which is row 1, and an empty grid reports -1
+     (unknown) rather than an invalid 0. -->
+<div
+  class="table"
+  role="grid"
+  aria-rowcount={rows.length === 0 ? -1 : rows.length + 1}
+  aria-label="Servers"
+  aria-activedescendant={selectedId ? `row-${selectedId}` : undefined}
+  tabindex="0"
+  onkeydown={onKey}
+>
+  <div class="head" role="row" aria-rowindex="1">
     {#each columns as c (c.key)}
       <button class="th {c.cls}" role="columnheader" tabindex="-1" aria-sort={sort.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : "none"} onclick={() => onSort(c.key)}>
-        {c.label}{sortMark(c.key)}
+        {c.label}<span aria-hidden="true">{sortMark(c.key)}</span>
       </button>
     {/each}
   </div>
 
-  {#if rows.length === 0 && empty}
-    <p class="no-rows">{empty}</p>
-  {/if}
+
 
   <div class="body" bind:this={body} onscroll={onScroll} role="rowgroup">
     <!-- `presentation` on both wrappers: they exist to size and offset the window, and
@@ -221,7 +231,8 @@
             class:untrusted
             role="row"
             tabindex="-1"
-            aria-rowindex={start + i + 1}
+            id="row-{r.id}"
+            aria-rowindex={start + i + 2}
             aria-selected={r.id === selectedId}
             onclick={(e) => {
               // A click on the selected row clears the selection and collapses the
@@ -319,6 +330,14 @@
     </div>
   </div>
 </div>
+
+<!-- A sibling of the grid, not a child of it: `role="grid"` owns rows and rowgroups
+     only, so a bare paragraph inside was liable to be pruned from the accessibility
+     tree - and then filtering everything away left a screen-reader user with an empty
+     grid and no explanation, which is the failure D-189 set out to fix (D-224). -->
+{#if rows.length === 0 && empty}
+  <p class="no-rows" role="status">{empty}</p>
+{/if}
 
 <style>
   .table { display: flex; flex-direction: column; min-height: 0; height: 100%; font-size: 12.5px; outline: none; }

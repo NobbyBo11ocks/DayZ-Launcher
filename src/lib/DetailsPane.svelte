@@ -219,7 +219,7 @@
       </div>
       <div class="actions">
         <button class="join" onclick={() => (servers.joiningId = row.id)} title="Check mods, download what is missing, and start DayZ">Join</button>
-        <button class="star" class:on={servers.favourites.has(row.id)} onclick={() => servers.toggleFavourite(row.id)} aria-pressed={servers.favourites.has(row.id)} title="Favourite (F)">
+        <button class="star" aria-label={servers.favourites.has(row.id) ? "Remove from favourites" : "Add to favourites"} class:on={servers.favourites.has(row.id)} onclick={() => servers.toggleFavourite(row.id)} aria-pressed={servers.favourites.has(row.id)} title="Favourite (F)">
           {servers.favourites.has(row.id) ? "★" : "☆"}
         </button>
       </div>

@@ -18,6 +18,13 @@
   let connecting = $state(false);
   let connectOpen = $state(false);
   let connectInput = $state<HTMLInputElement | null>(null);
+  let connectBtn = $state<HTMLButtonElement | null>(null);
+
+  /** Closing destroys the focused input, so focus has to be handed back (D-224). */
+  function closeConnect() {
+    connectOpen = false;
+    connectBtn?.focus();
+  }
   const fmt = new Intl.NumberFormat();
 
   function toggleConnect() {
@@ -49,7 +56,7 @@
       e.preventDefault();
       filterBar?.focusSearch();
     } else if (e.key === "Escape" && connectOpen) {
-      connectOpen = false;
+      closeConnect();
     }
   }
 
@@ -75,6 +82,18 @@
     return "No servers yet. Press Refresh to ask Steam for the list; it takes about forty seconds.";
   });
 
+  // What the hidden live region says. Only the outcomes, and only when they land:
+  // the visible status line changes every 350 ms during a refresh, which is exactly
+  // what must not be announced (D-224).
+  const announcement = $derived.by(() => {
+    if (servers.error) return servers.error;
+    const v = servers.verifySummary;
+    if (v?.skipped) return "Verification deferred; a pass is already running.";
+    if (v) return `${fmt.format(v.verified)} verified, ${fmt.format(v.inflated + v.unverifiable + v.synthetic)} fake, ${v.offline} offline.`;
+    const d = servers.done;
+    if (d && !d.rejected) return `${fmt.format(d.responded)} servers listed.`;
+    return "";
+  });
   const status = $derived.by(() => {
     const s = servers.steam;
     const d = servers.done;
@@ -104,7 +123,7 @@
       <FilterBar bind:this={filterBar} part="primary" />
       <div class="actions">
         <div class="connect">
-          <button class="iconbtn" class:on={connectOpen} onclick={toggleConnect} aria-expanded={connectOpen} aria-label="Direct connect" title="Direct connect to an address">
+          <button class="iconbtn" bind:this={connectBtn} class:on={connectOpen} onclick={toggleConnect} aria-expanded={connectOpen} aria-label="Direct connect" title="Direct connect to an address">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3" /><circle cx="8" cy="8" r="3" /></svg>
           </button>
           {#if connectOpen}
@@ -129,9 +148,13 @@
     </div>
 
     <div class="statusline">
-      <!-- `polite`, so it waits for a pause: it changes several times a second
-           during a refresh and would otherwise talk over everything (D-198). -->
-      <span class="status" role="status" aria-live="polite">{status}</span>
+      <!-- Deliberately not a live region. `polite` defers, it does not coalesce, and
+           this sentence reads `rowsTick`, which bumps every 350 ms - so a refresh had
+           a screen reader reciting it about three times a second for forty seconds
+           with no way to interrupt. The announcement below carries the outcomes
+           instead, and only when they land (D-224). -->
+      <span class="status">{status}</span>
+      <span class="sr-only" role="status" aria-live="polite">{announcement}</span>
       <!-- The scan runs itself after a refresh, but until now there was no way to ask
            for it: a mod filter with unscanned servers was a dead end (D-160). -->
       {#if servers.unscannedModded > 0 && !servers.modScanning}
@@ -174,6 +197,8 @@
 </div>
 
 <style>
+  /* Read by assistive technology, never drawn. */
+  .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
   .servers { display: flex; flex-direction: column; height: 100%; min-height: 0; }
   .top { display: flex; flex-direction: column; gap: 6px; padding: 8px 16px 6px; border-bottom: 1px solid var(--border); background: var(--bg-elev); }
   /* The filter block wraps inside itself; the buttons at the right stay on the first line. */

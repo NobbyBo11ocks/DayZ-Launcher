@@ -41,8 +41,45 @@
   // The video open in the player, or null. `-nocookie` is YouTube's no-tracking host and
   // the only frame source the CSP allows (D-150).
   let playing = $state<{ id: string; title: string } | null>(null);
+  let playerEl = $state<HTMLDivElement | null>(null);
+  let closeBtn = $state<HTMLButtonElement | null>(null);
+  let returnFocus: HTMLElement | null = null;
+
+  /** Closes the player and hands focus back to whatever opened it (D-224). */
+  function closePlayer() {
+    playing = null;
+    returnFocus?.focus();
+    returnFocus = null;
+  }
+
+  $effect(() => {
+    if (!playing) return;
+    closeBtn?.focus();
+  });
+
+  /** Keeps Tab inside the overlay, the way Welcome and JoinDialog already do. */
+  function trap(e: KeyboardEvent) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closePlayer();
+      return;
+    }
+    if (e.key !== "Tab" || !playerEl) return;
+    const focusable = playerEl.querySelectorAll<HTMLElement>("button, iframe, [href], [tabindex]:not([tabindex='-1'])");
+    if (focusable.length === 0) return;
+    const first = focusable[0]!;
+    const last = focusable[focusable.length - 1]!;
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
   const embed = (id: string) => `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&modestbranding=1`;
   function play(n: NewsItem) {
+    returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (n.video) playing = { id: n.video, title: n.title };
   }
   function onPlayerKey(e: KeyboardEvent) {
@@ -128,20 +165,23 @@
 <!-- Player (D-150): the iframe exists only while a video is open, so an idle home page
      still carries no embedded player. Escape or the backdrop closes it. -->
 {#if playing}
-  <div
-    class="player-backdrop"
-    role="button"
-    tabindex="-1"
-    aria-label="Close the video"
-    onclick={() => (playing = null)}
-    onkeydown={(e) => (e.key === "Enter" || e.key === " " ? (playing = null) : undefined)}
-  >
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+  <div class="player-backdrop" role="presentation" onclick={closePlayer}>
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-    <div class="player" onclick={(e) => e.stopPropagation()}>
+    <div
+      class="player"
+      bind:this={playerEl}
+      role="dialog"
+      aria-modal="true"
+      tabindex="-1"
+      aria-label={playing.title}
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={trap}
+    >
       <div class="player-bar">
         <span class="player-title" title={playing.title}>{playing.title}</span>
         <button class="btn small secondary" onclick={() => open(`https://www.youtube.com/watch?v=${playing?.id}`)}>On YouTube</button>
-        <button class="btn small secondary" onclick={() => (playing = null)} aria-label="Close the video">Close</button>
+        <button class="btn small secondary" bind:this={closeBtn} onclick={closePlayer} aria-label="Close the video">Close</button>
       </div>
       <!-- `frame-src` says what may be framed, not what the frame may do: without
            a sandbox the player could navigate the whole window away on a click.

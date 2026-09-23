@@ -361,27 +361,37 @@
       </p>
 
       {#if phase === "syncing" && syncInfo}
-        <p class="status" role="status" aria-live="polite">Downloading via Steam… {syncInfo.installed}/{syncInfo.total} installed{#if totalBytes > 0} · {fmtBytes(downloadedBytes)} of {fmtBytes(totalBytes)}{/if}{#if rate > 0} · {fmtBytes(rate)}/s{#if etaText} · about {etaText} left{/if}{/if}</p>
+        <p class="status" role="status" aria-live="polite">
+          Downloading via Steam…
+          <span aria-hidden="true"
+            >{syncInfo.installed}/{syncInfo.total} installed{#if totalBytes > 0} · {fmtBytes(downloadedBytes)} of {fmtBytes(totalBytes)}{/if}{#if rate >
+              0} · {fmtBytes(rate)}/s{#if etaText} · about {etaText} left{/if}{/if}</span
+          >
+        </p>
       {:else if phase === "waiting"}
         <p class="status" role="status" aria-live="polite">
           {#if slotMisses >= 3}
-            The server has stopped answering — {slotMisses} checks in a row. Still trying · {mmss(waitedSecs)}
+            The server has stopped answering.
+            <span aria-hidden="true">{slotMisses} checks in a row. Still trying · {mmss(waitedSecs)}</span>
           {:else}
-            Waiting for a free slot… {#if slots}{slots.players}/{slots.maxPlayers}{#if slots.queue} · {slots.queue} in queue{/if} · {/if}{checks} check{checks === 1 ? "" : "s"} · {mmss(waitedSecs)}
+            Waiting for a free slot…
+            <span aria-hidden="true"
+              >{#if slots}{slots.players}/{slots.maxPlayers}{#if slots.queue} · {slots.queue} in queue{/if} · {/if}{checks} check{checks === 1 ? "" : "s"} · {mmss(waitedSecs)}</span
+            >
           {/if}
         </p>
         <p class="muted small">DayZ starts as soon as the server reports a free slot; the window will flash in the taskbar.</p>
       {:else if phase === "launching"}
         <p class="status" role="status" aria-live="polite">Starting DayZ through BattlEye…</p>
       {:else if phase === "running" && launched}
-        <p class="status ok">DayZ is running (pid {launched.pid}). You can close this window.</p>
+        <p class="status ok" role="status" aria-live="polite">DayZ is running (pid {launched.pid}). You can close this window.</p>
         <details class="cmd"><summary class="muted small">Command line</summary><code>{launched.commandLine}</code></details>
       {:else if phase === "exited" && exit}
         <p class="status" role="status" aria-live="polite" class:warn={exit.code !== 0}>DayZ exited{exit.code != null ? ` with code ${exit.code}` : ""}.</p>
       {/if}
     {/if}
 
-    {#if error}<p class="error">{error}</p>{/if}
+    {#if error}<p class="error" role="alert">{error}</p>{/if}
 
     <footer>
       {#if phase === "waiting"}

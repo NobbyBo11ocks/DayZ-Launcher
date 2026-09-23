@@ -116,7 +116,7 @@
       <span class="sub">Appearance, what the browser shows, how DayZ is started, and the launcher itself</span>
 
     </div>
-    <div class="state">
+    <div class="state" role="status" aria-live="polite">
       {#if saved}<span class="ok">Saved</span>{/if}
       {#if saveError}<span class="error">{saveError}</span>{/if}
     </div>
@@ -199,7 +199,7 @@
           </div>
           <div class="row wrap">
             <span class="label"></span>
-            <span class="inline wrap">
+            <span class="inline wrap" role="status" aria-live="polite">
               <button class="chip accent" onclick={() => updates.checkNow()} disabled={updates.state === "checking" || updates.state === "downloading"}>
                 {updates.state === "checking" ? "Checking…" : "Check for updates"}
               </button>
@@ -210,7 +210,7 @@
               {/if}
               {#if updates.state === "downloading"}<span class="muted">Downloading… {updates.progress}%</span>{/if}
               {#if updates.state === "ready"}<span class="ok">Installed, restarting…</span>{/if}
-              {#if updates.error}<span class="error">{updates.error}</span>{/if}
+              {#if updates.error}<span class="error" role="alert">{updates.error}</span>{/if}
             </span>
           </div>
           <p class="note">Updates install only when their signature matches this build's key.</p>

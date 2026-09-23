@@ -59,6 +59,7 @@
         onSelect={(id) => servers.select(id)}
         onSort={(k) => servers.setSort(k)}
         filterKey={servers.filterKey}
+        inert={servers.joiningId !== null}
       onVisible={(ids) => servers.verifyVisible(ids)}
         onActivate={(id) => (servers.joiningId = id)}
         onFavourite={(id) => servers.toggleFavourite(id)}
