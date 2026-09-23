@@ -190,7 +190,7 @@
         </div>
       </section>
 
-      <section class="card">
+      <section class="card tail">
         <h2>The launcher itself</h2>
         <div class="cbody">
           <div class="row">
@@ -291,6 +291,11 @@
      still looks like a control is a control (D-203). */
   .card { border: 0; background: none; }
   .card + .card { margin-top: 4px; }
+  /* The update check sits at the foot of the left column, away from the settings
+     above it: it is the one thing on this page that acts rather than configures, and
+     it was reading as a fifth setting (D-217). Ordered after the sibling rule above,
+     which has the same specificity. */
+  .card.tail { margin-top: 30px; }
   h2 { display: flex; align-items: center; margin: 0; font-size: 10.5px; font-weight: 600; color: var(--accent-ink); text-transform: uppercase; letter-spacing: 0.07em; }
   /* A second heading inside a group, for the one that has two halves. */
   h3 { margin: 8px 0 0; font-size: 10.5px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.07em; }
