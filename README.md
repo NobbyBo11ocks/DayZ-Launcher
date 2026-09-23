@@ -26,6 +26,7 @@
 <br>
 
 <img src="docs/screenshots/servers.png" width="900" alt="The server browser: country flags, verified player counts, filter bar, and a details pane with the server's mods and population history">
+<sub>Screenshots taken at v0.1.25 and due a retake: since then the filter bar gained the PVE/PVP/RP row and ping presets, the map column shows names rather than folder ids, and the details pane lists other servers at the same address.</sub>
 
 </div>
 
@@ -63,9 +64,9 @@ No accounts, no API keys, no telemetry. Every destination it contacts is listed 
 
 | Installer | Cold start to first frame | Refresh, then verify | Idle CPU | Memory, whole app |
 |:-:|:-:|:-:|:-:|:-:|
-| **4.7 MB** | **0.43 s** | **42 s + 19 s** | **0.2 %** of one core | **≈ 306 MB** |
+| **4.7 MB** | **0.43 s** | **≈ 35 s + ≈ 25 s** | **0.2 %** of one core | **≈ 306 MB** |
 
-<sub>Installer, memory and idle CPU measured at v0.1.23; cold start at v0.1.19 (D-136); the refresh figure is the list arriving, with verified counts following it — 2 187 servers verified in 18.9 s at v0.1.26. Budgets, method and history in [docs/05 §6](docs/05-architecture-and-optimisation.md).</sub>
+<sub>Installer measured at v0.1.37; memory and idle CPU at v0.1.23; cold start at v0.1.19 (D-136). The refresh figure is the list arriving, with verified counts following it: five real passes on 2026-09-23 ran 31.9–36.3 s for 2 273–2 619 servers, then 19.6–41.4 s to verify them. Budgets, method and history in [docs/05 §6](docs/05-architecture-and-optimisation.md).</sub>
 
 ---
 
@@ -107,16 +108,19 @@ No accounts, no API keys, no telemetry. Every destination it contacts is listed 
 
 - Steam's own matchmaking list — no API key, the same list the in-game browser sees
 - **Official or community hive**, perspective, map, country, mod, queue, password, daytime, version, ping and friends
+- **PVE, PVP or RP** — read out of what the server calls itself, and labelled as the claim it is (48 % of the list says PVE)
+- Search matches the description as well as the name, so "trader" finds servers whose name never says it
 - **Maps by the name people use** — "Livonia" finds `enoch`, "Frostline" finds `sakhal`
 - Country flags from an offline table, no lookups
 - A details pane with the server's mods and installed ticks, 72 h population history, and the other servers at the same address
 - Find every server running a given mod
+- **Other servers at this address** in the details pane — half the list has a sibling, and 478 of those groups span more than one map
 - Favourites, a clearable Recent list, and import of the official launcher's favourites
 - LAN discovery
 
 </td><td>
 
-- Missing mods subscribed, downloaded and linked automatically
+- Missing mods subscribed, downloaded and linked automatically, with **the rate and how long is left** — the median server needs 26 mods and the worst in this cache needs 139
 - **Wait for a free slot** on a full server, then start the moment one opens
 - Launch profiles: saved sets of launch options, picked in the join dialog
 - Direct connect by address; the game port is resolved to the query port

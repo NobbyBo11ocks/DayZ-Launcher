@@ -4,7 +4,7 @@ Goal: the fastest way from "open launcher" to "in game", in a dark, quiet, infor
 
 ## 1. Window and layout
 
-- Default 1280×800, minimum 960×600; size, position and maximised state are remembered between runs (`tauri-plugin-window-state`, D-098). Custom title bar (`decorations: false`, drag region) so the theme covers the whole window: 30 px high, no app name, an update notice when one is pending, and our own minimise/maximise/close buttons (D-091).
+- Default 1280×800, minimum 960×600; size, position and maximised state are remembered between runs (`tauri-plugin-window-state`, D-098). Custom title bar (`decorations: false`, drag region) so the theme covers the whole window: 30 px high, no app name, an update notice when one is pending, and our own minimise/maximise/close buttons (D-091). **Moved:** the update notice now sits at the foot of the section rail, not in the title bar (D-216).
 - Three regions:
 
 ```text
@@ -26,17 +26,17 @@ Goal: the fastest way from "open launcher" to "in game", in a dark, quiet, infor
 - News (D-099) sits first with an unread badge (③ above); it is a padded view of cards that scrolls inside, not a table.
 
 - Responsive: rail collapses to icons < 1100 px; details pane hidden < 1000 px. The third breakpoint specified here — dropping "time" and "version" below 900 px — was never built and is unreachable anyway: the window minimum is 960 px. D-189 did it: below 1240 px the pane is an overlay at small widths rather than hiding it, so Join is reachable at the minimum size.
-- Only the server list views scroll their table. Recent, Mods, Settings, Diagnostics and Friends fit the viewport (`.content.padded` is `overflow: hidden`); when the window is smaller than their content, a table or a column scrolls on its own, never the page (D-094).
+- Only the server list views scroll their table. Recent, Mods, Settings, Logs (the Diagnostics page was replaced by it in D-168) and Friends fit the viewport (`.content.padded` is `overflow: hidden`); when the window is smaller than their content, a table or a column scrolls on its own, never the page (D-094).
 
 ## 2. Server table
 
 | Column | Content |
 |---|---|
 | Flag + name | country flag (from offline GeoIP, Q5), server name, lock icon if password, shield if BattlEye, "1PP" pill for `no3rd`, DLC pill |
-| Map | short map name with colour dot per terrain |
+| Map | short map name with text label from `mapLabel` (D-195); no colour dot was ever built |
 | Mods | number of mods from the scanned list, blank when the server has not been scanned (D-146) |
 | Players | **Verified** head-count from A2S_PLAYER for every row on screen (`players/max`, `+queue` from `lqs`). The fill bars specified here were removed in v0.1.3 (D-069): at 36 px they read as noise behind the numbers. An unverified count is dimmed and marked "?" (D-160); an untrusted one gets a warning glyph. More than half of community servers spoof INFO (D-038) |
-| Ping | numeric with 3-band colour (green < 60, amber < 120, red) |
+| Ping | numeric with 3-band colour (green < 60, unstyled 60-119, amber >= 120) |
 | Time | in-game clock with sun/moon glyph; tooltip shows `etm`/`entm` acceleration |
 | Version | the server's build, amber when it differs from the local client |
 
@@ -58,7 +58,7 @@ Chips above the table: Perspective (1PP/3PP), Map, Country (D-073), Not full, No
 - Themes: **Slate** (default dark, neutral greys with a single accent) and **Light**. Twelve accents in colour-wheel order (amber, orange, red, rose, pink, violet, indigo, blue, sky, teal, green, lime), each with a vivid dark-theme tone and a deeper light-theme tone; picked as a row of dots in Settings (D-131). **Lime** is the default (D-132). Theme and accent switch instantly (attributes on `<html>`).
 - Typography: Segoe UI Variable / system-ui; 13 px table, 15 px headers, tabular numerals for ping/players.
 - Motion: 120 ms fades, no slides on lists; skeleton rows while the first batch streams; reduced-motion respected.
-- Iconography: single inline SVG sprite, stroke icons 16 px.
+- Iconography: per-component inline SVG; the shared sprite was specified here and never built (docs/05 §10), stroke icons 16 px.
 
 ## 6. States and copy
 
@@ -73,4 +73,4 @@ Chips above the table: Perspective (1PP/3PP), Map, Country (D-073), Not full, No
 
 ## 7. Accessibility
 
-Contrast ≥ 4.5:1 for text on all themes, visible focus rings, full keyboard operation of table and filters, `aria-sort` on headers, live region for "x servers, y online" updates, no information conveyed by colour alone (ping band also has a glyph).
+Contrast ≥ 4.5:1 for text on all themes, visible focus rings, full keyboard operation of table and filters, `aria-sort` on headers, live region for "x servers, y online" updates, no information conveyed by colour alone (ping band carries its quality in a tooltip (D-198), not a glyph).
