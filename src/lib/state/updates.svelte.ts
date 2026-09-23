@@ -12,7 +12,6 @@ const AUTO_CHECK_INTERVAL_MS = 24 * 3600 * 1000;
 class Updates {
   state = $state<"idle" | "checking" | "none" | "available" | "downloading" | "ready" | "error">("idle");
   version = $state<string | null>(null);
-  notes = $state<string | null>(null);
   error = $state<string | null>(null);
   progress = $state(0);
   #update: Update | null = null;
@@ -44,7 +43,6 @@ class Updates {
       if (u) {
         this.#update = u;
         this.version = u.version;
-        this.notes = u.body ?? null;
         this.state = "available";
         logInfo("update", `version ${u.version} is available`);
       } else {

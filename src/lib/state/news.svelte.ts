@@ -2,7 +2,6 @@
 // an instant first paint, refreshed every 30 minutes while the launcher runs.
 // Official update posts that arrive after the user last looked raise an in-app
 // toast and, when the window is not focused, a Windows notification. The store
-// also holds the signed-in user's avatar for the welcome header.
 // Every command through the logging wrapper: a failure is recorded with its
 // command name before it is rethrown (D-158).
 import { invokeLogged as invoke } from "../log";
@@ -35,7 +34,6 @@ class NewsStore {
   loading = $state(false);
   error = $state<string | null>(null);
   /** Unix seconds of the fetch behind `items`. */
-  fetchedAt = $state<number | null>(null);
   /** Unix seconds of the newest official post the user has looked at (settings.json). */
   seen = $state(0);
   /** The seen mark when the current visit to the tab began: newer posts keep their "New" pill. */
@@ -63,7 +61,6 @@ class NewsStore {
     try {
       const c = await invoke<NewsCached>("news_cached");
       this.items = c.items;
-      this.fetchedAt = c.fetchedAt;
     } catch {
       /* nothing cached yet */
     }
@@ -99,7 +96,6 @@ class NewsStore {
     try {
       const c = await invoke<NewsCached>("news_fetch");
       this.items = c.items;
-      this.fetchedAt = c.fetchedAt;
       this.error = null;
       if (before === 0) {
         // First run: the newest few are "new", not the whole archive.

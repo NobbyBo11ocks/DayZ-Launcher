@@ -39,7 +39,7 @@ const POPULATION_MAX_AGE_SECS: i64 = 7 * 24 * 3600;
 
 /// Elevation matching (D-119): DayZ inherits our level and must match Steam's, so
 /// when Steam is elevated and we are not, restart elevated before anything else.
-/// The result is kept for Diagnostics and the join plan.
+/// The result is kept for the join plan (the Diagnostics view went in D-168).
 static ELEVATION: OnceLock<proc::ElevationState> = OnceLock::new();
 
 pub fn elevation() -> proc::ElevationState {

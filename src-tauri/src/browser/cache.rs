@@ -438,11 +438,6 @@ impl Cache {
         )
     }
 
-    pub fn count(&self) -> rusqlite::Result<i64> {
-        self.conn
-            .query_row("SELECT COUNT(*) FROM servers", [], |r| r.get(0))
-    }
-
     fn row_from(r: &rusqlite::Row<'_>) -> rusqlite::Result<ServerRow> {
         let keywords: String = r.get(14)?;
         let server_version: i32 = r.get(12)?;
@@ -659,31 +654,6 @@ impl Cache {
 
     // ----- mod lists (D-080) ---------------------------------------------------
 
-    /// Replaces the stored mod list of one server (A2S_RULES DayZ payload).
-    pub fn replace_server_mods(
-        &mut self,
-        id: &str,
-        mods: &[(u64, String)],
-        now: i64,
-    ) -> rusqlite::Result<()> {
-        let tx = self.conn.transaction()?;
-        tx.execute("DELETE FROM server_mods WHERE server_id = ?1", params![id])?;
-        {
-            let mut ins = tx.prepare_cached(
-                "INSERT OR REPLACE INTO server_mods (server_id, mod_id, name) VALUES (?1, ?2, ?3)",
-            )?;
-            for (mid, name) in mods {
-                ins.execute(params![id, *mid as i64, name])?;
-            }
-        }
-        tx.execute(
-            "INSERT INTO server_mods_at (server_id, scanned_at, mod_count) VALUES (?1, ?2, ?3)
-             ON CONFLICT(server_id) DO UPDATE SET scanned_at = excluded.scanned_at, mod_count = excluded.mod_count",
-            params![id, now, mods.len() as i64],
-        )?;
-        tx.commit()
-    }
-
     /// The mod list last read from this server, newest scan wins. Used when a launch
     /// cannot reach the server for a fresh list (D-190).
     pub fn mods_for(&self, id: &str) -> rusqlite::Result<Vec<(u64, String)>> {
@@ -696,7 +666,7 @@ impl Cache {
         rows.collect()
     }
 
-    /// Same as [`Self::replace_server_mods`] for many servers in one transaction (DZSA import).
+    /// Replaces the stored mod lists of many servers in one transaction (DZSA import).
     pub fn replace_server_mods_many(
         &mut self,
         list: &[(String, Vec<(u64, String)>)],
@@ -876,7 +846,7 @@ mod tests {
             Some(SCHEMA_VERSION)
         );
         c.upsert(&[row(27017, 0), row(27018, 5)]).unwrap();
-        assert_eq!(c.count().unwrap(), 2);
+        assert_eq!(c.row_counts().unwrap().servers, 2);
         let loaded = c.load_all().unwrap();
         let w = loaded.iter().find(|r| r.query_port == 27017).unwrap();
         assert_eq!(w.version, "1.29.163709");
@@ -908,7 +878,7 @@ mod tests {
             2,
             "everything is older than 'now + 1 s'"
         );
-        assert_eq!(c.count().unwrap(), 0);
+        assert_eq!(c.row_counts().unwrap().servers, 0);
     }
 
     /// A favourite must survive the 30-day prune (D-159): losing the row empties the
@@ -922,7 +892,7 @@ mod tests {
         c.favourite_set(&keep.id, true).unwrap();
 
         assert_eq!(c.prune(-1).unwrap(), 1, "only the unfavourited row goes");
-        assert_eq!(c.count().unwrap(), 1);
+        assert_eq!(c.row_counts().unwrap().servers, 1);
         assert_eq!(c.favourites().unwrap().len(), 1);
     }
 

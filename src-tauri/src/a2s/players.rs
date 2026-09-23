@@ -1,5 +1,5 @@
 //! A2S_PLAYER response (`0x44`), docs/03 §5. DayZ answered the empty test server
-//! with count 0; whether names appear on populated servers is open question Q3.
+//! with count 0; whether names appear on populated servers is a question closed since (see docs/10).
 
 use serde::Serialize;
 

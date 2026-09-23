@@ -47,7 +47,6 @@
     { id: "steam", label: "Steam", hint: "The Steam session and server-list refreshes" },
     { id: "verify", label: "Verification", hint: "Player-count checks against the servers" },
     { id: "cache", label: "Cache", hint: "The local database: writes, prunes and failures" },
-    { id: "update", label: "Updates", hint: "Launcher update checks and installs" },
     { id: "settings", label: "Settings", hint: "Reading and writing the settings file" },
     { id: "app", label: "App", hint: "Start-up and anything the interface reports" },
   ];

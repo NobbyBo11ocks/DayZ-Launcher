@@ -323,10 +323,8 @@ export type NewsItem = {
   /** YouTube id of the first embedded video, if any (D-100). */
   video?: string;
 };
-export type NewsCached = { items: NewsItem[]; fetchedAt: number | null };
+export type NewsCached = { items: NewsItem[] };
 
-/** A Steam avatar as raw RGBA (D-100, D-115); drawn on a canvas. */
-export type Avatar = { width: number; height: number; rgba: number[] };
 
 /** A saved set of launch options (D-088). */
 export type LaunchProfile = {

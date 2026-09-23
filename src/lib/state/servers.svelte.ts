@@ -290,7 +290,6 @@ class ServersStore {
   selectedId = $state<string | null>(null);
   localVersion = $state<string | null>(null);
   error = $state<string | null>(null);
-  fromCache = $state(0);
   lastRefresh = $state<number | null>(null);
   verifying = $state(false);
   #verifyingSince = 0;
@@ -649,7 +648,6 @@ class ServersStore {
     this.#started = true;
     try {
       const cached = await invoke<CachedServers>("servers_cached");
-      this.fromCache = cached.rows.length;
       this.lastRefresh = cached.lastRefresh;
       for (const r of cached.rows) {
         this.rows.set(r.id, r);
@@ -1025,16 +1023,6 @@ class ServersStore {
 
   select(id: string | null) {
     this.selectedId = id;
-  }
-
-  /** Moves the selection within the current list; returns the new id. */
-  step(delta: number): string | null {
-    const list = this.list;
-    if (list.length === 0) return null;
-    const idx = this.selectedId ? list.findIndex((r) => r.id === this.selectedId) : -1;
-    const next = Math.min(list.length - 1, Math.max(0, idx + delta));
-    this.selectedId = list[next]?.id ?? null;
-    return this.selectedId;
   }
 
   saveFilters() {

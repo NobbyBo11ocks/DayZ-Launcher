@@ -300,7 +300,7 @@ h1 {
 
 /* Shared button base (D-160). Components override with their own scoped rules,
    which are more specific because Svelte adds a scoping class to them. */
-/* Three sizes, and no fourth. Every component used to redeclare `.btn` with its own
+/* One base and three modifiers, and no fourth. Every component used to redeclare `.btn` with its own
    padding, which produced eight heights across the app; the local blocks are gone
    and anything that needs a different size says so with a modifier (D-226). */
 .btn {
@@ -319,7 +319,6 @@ h1 {
   font-weight: 600;
   white-space: nowrap;
 }
-.btn.large { height: 32px; padding: 0 18px; font-size: 13px; }
 .btn.slim { height: 22px; padding: 0 8px; font-size: 12px; }
 .btn:hover { filter: brightness(1.08); }
 .btn:disabled { opacity: 0.5; cursor: default; filter: none; }

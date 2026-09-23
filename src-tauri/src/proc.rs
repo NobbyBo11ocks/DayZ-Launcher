@@ -125,9 +125,8 @@ pub fn relaunch_elevated() -> bool {
     (r as usize) > 32
 }
 
-/// What elevation matching decided at start-up, for Diagnostics and the join plan.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
+/// What elevation matching decided at start-up, for the join plan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ElevationState {
     /// Same level as Steam (or Steam is not running).
     Matched,

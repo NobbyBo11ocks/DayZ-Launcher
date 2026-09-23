@@ -1,5 +1,5 @@
 //! One-shot inventory of Steam, libraries, the DayZ install, Workshop items and
-//! `!Workshop` junctions. Serialised straight to the Diagnostics view.
+//! `!Workshop` junctions. Serialised to the join plan and the Mods page; the Diagnostics view it was written for went in D-168.
 
 use std::path::Path;
 use std::time::Instant;

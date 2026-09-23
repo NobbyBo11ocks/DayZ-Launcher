@@ -64,7 +64,7 @@ pub struct AppInfo {
     os: &'static str,
 }
 
-/// Static build information for the About/Diagnostics views and the M0 smoke test.
+/// Static build information for the Settings page (the Diagnostics view went in D-168) and the M0 smoke test.
 #[tauri::command]
 pub fn app_info() -> AppInfo {
     #[cfg(debug_assertions)]
@@ -1679,7 +1679,6 @@ pub async fn launch_game(
         links.iter().filter(|l| l.created).count(),
         launched.command_line
     );
-    let _ = app.emit("launch:started", &launched);
     let pid = launched.pid;
     tauri::async_runtime::spawn_blocking(move || {
         let code = child.wait().ok().and_then(|s| s.code());

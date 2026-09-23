@@ -83,7 +83,7 @@ pub struct Entry {
     /// Unix milliseconds.
     pub at: u64,
     pub level: Level,
-    /// Area: "steam", "a2s", "cache", "launch", "news", "ui", …
+    /// Area: "steam", "verify", "cache", "launch", "news", "ui", …
     pub target: String,
     pub message: String,
 }

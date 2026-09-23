@@ -299,13 +299,11 @@ enum Cmd {
     Shutdown,
 }
 
-/// The local user's medium (64×64) Steam avatar as raw RGBA (D-100); the WebView
-/// draws it on a canvas, so no image codec is needed on either side.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+/// A friend's 32×32 Steam avatar as raw RGBA. It crosses IPC as bytes rather than
+/// JSON decimals (D-181), so it is never serialised and carries no dimensions - the
+/// WebView knows the size it asked for and draws it straight onto a canvas.
+#[derive(Debug, Clone)]
 pub struct Avatar {
-    pub width: u32,
-    pub height: u32,
     pub rgba: Vec<u8>,
 }
 
@@ -979,11 +977,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                         .get_friend(steamworks::SteamId::from_raw(steam_id))
                         .small_avatar()
                         .filter(|rgba| rgba.len() == 32 * 32 * 4)
-                        .map(|rgba| Avatar {
-                            width: 32,
-                            height: 32,
-                            rgba,
-                        });
+                        .map(|rgba| Avatar { rgba });
                     let _ = reply.send(avatar);
                 }
                 // `refresh()` guards on `status.refreshing`, which the worker only
