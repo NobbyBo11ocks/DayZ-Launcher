@@ -282,7 +282,7 @@
   .sub { color: var(--fg-muted); font-size: 12px; }
   .state { margin-left: auto; font-size: 12px; }
 
-  .cols { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; overflow: auto; align-content: start; }
+  .cols { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; overflow: auto; align-content: stretch; }
   .col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 
   /* No panels. The page is a list of settings, not a set of boxes — the borders,
@@ -291,11 +291,13 @@
      still looks like a control is a control (D-203). */
   .card { border: 0; background: none; }
   .card + .card { margin-top: 4px; }
-  /* The update check sits at the foot of the left column, away from the settings
+  /* The update check sits at the very foot of the left column, away from the settings
      above it: it is the one thing on this page that acts rather than configures, and
-     it was reading as a fifth setting (D-217). Ordered after the sibling rule above,
-     which has the same specificity. */
-  .card.tail { margin-top: 30px; }
+     flush under the Steam card it read as a fifth setting (D-217, D-218). `auto`, so
+     it stays on the bottom edge at any window height; with no free space to take it
+     resolves to 0 and the card simply follows the one above. Ordered after the sibling
+     rule above, which has the same specificity. */
+  .card.tail { margin-top: auto; }
   h2 { display: flex; align-items: center; margin: 0; font-size: 10.5px; font-weight: 600; color: var(--accent-ink); text-transform: uppercase; letter-spacing: 0.07em; }
   /* A second heading inside a group, for the one that has two halves. */
   h3 { margin: 8px 0 0; font-size: 10.5px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.07em; }
