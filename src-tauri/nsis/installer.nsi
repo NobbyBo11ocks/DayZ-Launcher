@@ -1,12 +1,13 @@
 ; DayZ Launcher installer template (docs/09 D-067).
 ; Verbatim copy of Tauri's installer.nsi at tag tauri-cli-v2.11.5
 ;   https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.11.5/crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi
-; with ONE change: the currentUser default install directory is
-;   $LOCALAPPDATA\Programs\${PRODUCTNAME}
-; instead of $LOCALAPPDATA\${PRODUCTNAME}, because the latter is the official
-; DayZ Launcher's data folder (S-56, D-064, Q19).
+; with the changes marked below by `; >>> dzl-change:` … `; <<< dzl-change`, each one
+; carrying the upstream line it replaces so the checker can put them all back and
+; compare against the real thing (D-205). Today that is three: the per-user install
+; directory (D-067, S-56, Q19), the flags passed to the uninstaller an upgrade runs
+; (D-205), and refusing to skip a locked binary (D-205).
 ; When @tauri-apps/cli is upgraded, run `node tools/nsis_template_check.js --write`,
-; which re-fetches the template at the new tag and re-applies the change.
+; which re-fetches the template at the new tag and re-applies every marked change.
 ; --- end of DayZ Launcher header; everything below is upstream ---
 Unicode true
 ManifestDPIAware true
@@ -364,7 +365,21 @@ Function PageLeaveReinstall
     ${Else}
       ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
       ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
-      ${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 "$R1 /UPDATE" ${|} ; append /UPDATE
+      ; >>> dzl-change:       ${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 "$R1 /UPDATE" ${|} ; append /UPDATE
+      ; Upstream appends /UPDATE only
+      ; when the *installer* was given it, so a plain GUI upgrade launches the previous
+      ; uninstaller with no flags at all — and the user, halfway through installing, is
+      ; shown the uninstaller's own confirm page, "Delete application data" checkbox
+      ; included. A tick there wipes favourites, join history, population and settings,
+      ; and the same run removes the Start Menu and Desktop shortcuts and unpins them,
+      ; because every one of those is gated on `$UpdateMode <> 1`.
+      ;
+      ; This uninstall is not the user's; it is a step inside an install. /UPDATE says
+      ; so and /S stops an uninstaller window appearing in the middle of one. Fixing it
+      ; on the installer side is what reaches people already on an older build: theirs
+      ; is the uninstaller that runs, and it already honours /UPDATE.
+      StrCpy $R1 "$R1 /UPDATE /S"
+      ; <<< dzl-change
       ${IfThen} $PassiveMode = 1 ${|} StrCpy $R1 "$R1 /P" ${|} ; append /P
       StrCpy $R1 "$R1 _?=$4" ; append uninstall directory
       ExecWait '$R1' $0
@@ -408,8 +423,47 @@ Var AppStartMenuFolder
 !endif
 !insertmacro MUI_PAGE_STARTMENU Application $AppStartMenuFolder
 
+; >>> dzl-change: ; 7. Installation page\n!insertmacro MUI_PAGE_INSTFILES
+; An options page before anything is written, so a choice about what the launcher
+; does is made before it has ever run (D-206). One option today; the page exists so
+; the next one has somewhere to go. Skipped for silent and passive installs, which
+; take /NONEWS instead.
+Var OptNewsCheckbox
+Var OptNewsState
+Page custom PageOptions PageLeaveOptions
+Function PageOptions
+  ${If} $PassiveMode = 1
+  ${OrIf} ${Silent}
+    Abort
+  ${EndIf}
+  !insertmacro MUI_HEADER_TEXT "Options" "Choose what the launcher does on its first start."
+  nsDialogs::Create 1018
+  Pop $0
+  ${If} $0 == error
+    Abort
+  ${EndIf}
+  ${NSD_CreateCheckbox} 0 8u 100% 12u "Do not show the DayZ news page"
+  Pop $OptNewsCheckbox
+  ${If} $OptNewsState = 1
+    ${NSD_Check} $OptNewsCheckbox
+  ${EndIf}
+  ${NSD_CreateLabel} 12u 24u 96% 26u "With the news page off, the launcher never contacts Steam${\}s news feed, its picture CDN or YouTube. It can be turned back on at any time in Settings."
+  Pop $0
+  nsDialogs::Show
+FunctionEnd
+Function PageLeaveOptions
+  ${NSD_GetState} $OptNewsCheckbox $OptNewsState
+FunctionEnd
+; Applied after everything is installed, so the uninstall step an upgrade runs
+; cannot take the answer with it. The launcher reads this once, applies it to
+; settings.json and deletes it.
+Function DisableNews
+  WriteRegDWORD HKCU "${MANUPRODUCTKEY}" "DisableNews" 1
+FunctionEnd
+
 ; 7. Installation page
 !insertmacro MUI_PAGE_INSTFILES
+; <<< dzl-change
 
 ; 8. Finish page
 ;
@@ -495,10 +549,19 @@ Function .onInit
     StrCpy $NoShortcutMode 1
   ${EndIf}
 
+; >>> dzl-change:   ${GetOptions} $CMDLINE "/UPDATE" $UpdateMode\n  ${IfNot} ${Errors}\n    StrCpy $UpdateMode 1\n  ${EndIf}
+  ; /NONEWS is the silent-install equivalent of the options page (D-206). It only
+  ; records the answer; the write happens from NSIS_HOOK_POSTINSTALL, after the
+  ; uninstall step an upgrade runs, which would otherwise delete the key underneath it.
+  ${GetOptions} $CMDLINE "/NONEWS" $0
+  ${IfNot} ${Errors}
+    StrCpy $OptNewsState 1
+  ${EndIf}
   ${GetOptions} $CMDLINE "/UPDATE" $UpdateMode
   ${IfNot} ${Errors}
     StrCpy $UpdateMode 1
   ${EndIf}
+; <<< dzl-change
 
   !if "${DISPLAYLANGUAGESELECTOR}" == "true"
     !insertmacro MUI_LANGDLL_DISPLAY
@@ -521,7 +584,12 @@ Function .onInit
         StrCpy $INSTDIR "$PROGRAMFILES\${PRODUCTNAME}"
       ${EndIf}
     !else if "${INSTALLMODE}" == "currentUser"
+      ; >>> dzl-change:       StrCpy $INSTDIR "$LOCALAPPDATA\${PRODUCTNAME}"
+      ; Per-user installs go under Programs, because that is where a program belongs
+      ; and the stock default collided with the official DayZ Launcher's data folder
+      ; under this app's original name (D-067).
       StrCpy $INSTDIR "$LOCALAPPDATA\Programs\${PRODUCTNAME}"
+      ; <<< dzl-change
     !endif
 
     Call RestorePreviousInstallLocation
@@ -645,7 +713,16 @@ Section WebView2
   ${EndIf}
 SectionEnd
 
+; >>> dzl-change: Section Install
+; A locked binary must fail the install,
+; not be skipped: with NSIS's default `AllowSkipFiles on` the internal
+; Abort/Retry/Ignore box takes its silent default, so `/S` exited 0 with the old exe
+; still in place and the new version written to Add/Remove Programs. WebView2's child
+; processes outlive the host long enough to hold it (D-196), so an auto-update could
+; report success and change nothing, then offer the same update for ever.
+AllowSkipFiles off
 Section Install
+; <<< dzl-change
   SetOutPath $INSTDIR
 
   !ifmacrodef NSIS_HOOK_PREINSTALL

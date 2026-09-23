@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "DZSA CrayZ Launcher",
-  "version": "0.1.29",
+  "version": "0.1.30",
   "identifier": "com.dayzlauncher.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -70,7 +70,8 @@
         "template": "nsis/installer.nsi",
         "headerImage": "nsis/header.bmp",
         "sidebarImage": "nsis/sidebar.bmp",
-        "installerIcon": "icons/icon.ico"
+        "installerIcon": "icons/icon.ico",
+        "installerHooks": "nsis/hooks.nsh"
       }
     }
   }

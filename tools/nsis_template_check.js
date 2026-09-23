@@ -1,7 +1,20 @@
 // Checks that src-tauri/nsis/installer.nsi is Tauri's stock template for the installed
-// @tauri-apps/cli version plus exactly our one change (the per-user default install
-// directory, D-067). Run after every CLI upgrade; `--write` refreshes the file from the
-// new tag and re-applies the change so the diff can be reviewed.
+// @tauri-apps/cli version plus exactly the changes the file marks as its own.
+//
+// Each deviation is wrapped in the template itself:
+//
+//   ; >>> dzl-change: <the upstream line(s) it replaces, backslash-n between them>
+//   ; why we changed it
+//   <our lines>
+//   ; <<< dzl-change
+//
+// so the check is simply "put every upstream line back and see whether the result is
+// upstream". Nothing here carries a second copy of what we wrote — the earlier version
+// did, and keeping a twelve-line comment in step across two files is a job nobody will
+// remember to do (D-205).
+//
+// Run after every CLI upgrade; `--write` refreshes the file from the new tag with the
+// marked blocks re-applied, so the diff can be reviewed.
 // Usage: node tools/nsis_template_check.js [--write]
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -10,11 +23,40 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const localPath = path.join(root, "src-tauri", "nsis", "installer.nsi");
 const MARKER = "; --- end of DayZ Launcher header; everything below is upstream ---\n";
-const BEFORE = 'StrCpy $INSTDIR "$LOCALAPPDATA\\${PRODUCTNAME}"';
-const AFTER = 'StrCpy $INSTDIR "$LOCALAPPDATA\\Programs\\${PRODUCTNAME}"';
+const OPEN = "; >>> dzl-change: ";
+const CLOSE = "; <<< dzl-change";
 
 // process.exit() right after a fetch trips a libuv assertion on Windows; set exitCode instead.
 process.exitCode = await main(process.argv.includes("--write"));
+
+/**
+ * Splits a marked body into the blocks we changed and the upstream text each replaces.
+ * `restored` is what upstream should look like once ours are put back.
+ */
+function unmark(body) {
+  const lines = body.split("\n");
+  const out = [];
+  const blocks = [];
+  for (let i = 0; i < lines.length; i++) {
+    const at = lines[i].indexOf(OPEN);
+    if (at < 0) {
+      out.push(lines[i]);
+      continue;
+    }
+    // A block may replace more than one upstream line. The sentinel has to fit on one
+    // line itself, so it writes those as a literal backslash-n.
+    const upstream = lines[i]
+      .slice(at + OPEN.length)
+      .split(String.raw`\n`)
+      .join("\n");
+    const start = i;
+    while (i < lines.length && !lines[i].includes(CLOSE)) i++;
+    if (i >= lines.length) throw new Error(`unclosed ${OPEN.trim()} at line ${start + 1}`);
+    blocks.push({ upstream, ours: lines.slice(start, i + 1).join("\n") });
+    out.push(upstream);
+  }
+  return { restored: out.join("\n"), blocks };
+}
 
 async function main(write) {
   const cliVersion = JSON.parse(readFileSync(path.join(root, "node_modules/@tauri-apps/cli/package.json"), "utf8")).version;
@@ -24,8 +66,6 @@ async function main(write) {
   const res = await fetch(url);
   if (!res.ok) return fail(`${url} → HTTP ${res.status}`);
   const upstream = (await res.text()).replace(/\r\n/g, "\n");
-  if (upstream.split(BEFORE).length !== 2) return fail("upstream no longer has the expected currentUser default line; review it by hand");
-  const expectedBody = upstream.replace(BEFORE, AFTER);
 
   const local = readFileSync(localPath, "utf8").replace(/\r\n/g, "\n");
   const cut = local.indexOf(MARKER);
@@ -33,17 +73,46 @@ async function main(write) {
   const header = local.slice(0, cut + MARKER.length);
   const body = local.slice(cut + MARKER.length).replace(/^\n/, "");
 
-  if (body === expectedBody && header.includes(tag)) {
-    console.log(`ok: src-tauri/nsis/installer.nsi = upstream ${tag} + Programs default (${body.split("\n").length} lines)`);
+  let restored;
+  let blocks;
+  try {
+    ({ restored, blocks } = unmark(body));
+  } catch (e) {
+    return fail(String(e?.message ?? e));
+  }
+  if (blocks.length === 0) return fail("no `; >>> dzl-change:` blocks found; the template claims no deviations");
+
+  if (restored === upstream && header.includes(tag)) {
+    console.log(`ok: upstream ${tag} + ${blocks.length} marked changes (${body.split("\n").length} lines)`);
+    for (const b of blocks) console.log(`     · ${b.upstream.trim().slice(0, 78)}`);
     return 0;
   }
   if (!write) {
-    const why = header.includes(tag) ? "body differs from upstream + our change" : `header names another tag than ${tag}`;
-    console.error(`mismatch: ${why}; run with --write to refresh, then review the diff`);
+    if (!header.includes(tag)) {
+      console.error(`mismatch: the header names another tag than ${tag}; run with --write`);
+      return 1;
+    }
+    const a = restored.split("\n");
+    const b = upstream.split("\n");
+    const at = a.findIndex((l, i) => l !== b[i]);
+    console.error(
+      `mismatch: with our ${blocks.length} marked changes put back, the body still differs from upstream ` +
+        `(first at line ${at + 1}):\n  ours:     ${a[at] ?? "<end of file>"}\n  upstream: ${b[at] ?? "<end of file>"}\n` +
+        "run with --write to refresh, then review the diff",
+    );
     return 1;
   }
-  writeFileSync(localPath, header.replace(/tauri-cli-v[\d.]+/g, tag) + "\n" + expectedBody);
-  console.log(`refreshed src-tauri/nsis/installer.nsi from upstream ${tag}; review the diff`);
+
+  // Re-apply each marked block to the freshly fetched upstream.
+  let rebuilt = upstream;
+  for (const b of blocks) {
+    if (rebuilt.split(b.upstream).length !== 2) {
+      return fail(`upstream no longer has the line this change anchors on: ${b.upstream.trim()}`);
+    }
+    rebuilt = rebuilt.replace(b.upstream, b.ours);
+  }
+  writeFileSync(localPath, header.replace(/tauri-cli-v[\d.]+/g, tag) + "\n" + rebuilt);
+  console.log(`refreshed from upstream ${tag} with ${blocks.length} marked changes; review the diff`);
   return 0;
 }
 

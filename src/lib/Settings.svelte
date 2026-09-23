@@ -104,6 +104,7 @@
     <div class="title">
       <h1>Settings</h1>
       <span class="sub">Appearance, what the browser shows, how DayZ is started, and the launcher itself</span>
+
     </div>
     <div class="state">
       {#if saved}<span class="ok">Saved</span>{/if}
@@ -137,25 +138,18 @@
       </section>
 
       <section class="card">
-        <h2>Server browser</h2>
+        <h2>What the launcher shows</h2>
         <div class="cbody">
           <label class="check">
             <input type="checkbox" bind:checked={servers.filters.hideUntrusted} onchange={() => servers.saveFilters()} />
             <span>Hide servers with inflated or unverifiable player counts</span>
           </label>
-          <p class="note">Counts are checked with each server directly (A2S_PLAYER) and cross-checked against Steam's authenticated players. The rules are in docs/11.</p>
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>News</h2>
-        <div class="cbody">
           <!-- Off removes the page and stops the feed being fetched at all (D-174). -->
           <label class="check">
             <input type="checkbox" checked={prefs.news} onchange={(e) => prefs.setNews(e.currentTarget.checked)} />
             <span>Show DayZ news on a page of its own</span>
           </label>
-          <p class="note">With it off the sidebar starts at Servers, and the launcher never contacts Steam's news feed, its picture CDN or YouTube.</p>
+          <p class="note">Off means the launcher never contacts Steam's news feed, its picture CDN or YouTube.</p>
         </div>
       </section>
 
@@ -181,64 +175,13 @@
                 <span class="muted">0 = stay connected</span>
               </span>
             </label>
-            <p class="note">While connected, Steam shows you as playing DayZ and counts playtime, like the official launcher. Releasing the session stops that; it reconnects by itself for the next refresh, join or friends lookup.</p>
-          {/if}
-        </div>
-      </section>
-    </div>
-
-    <div class="col">
-      <section class="card">
-        <h2>Launch options</h2>
-        <div class="cbody">
-          {#if launch}
-            <label class="row">
-              <span class="label">Profile name</span>
-              <input class="text" type="text" bind:value={launch.profileName} oninput={scheduleSave} placeholder={servers.steam?.persona ?? "Steam persona"} aria-label="In-game profile name" />
-            </label>
-            <label class="check"><input type="checkbox" bind:checked={launch.skipIntro} onchange={scheduleSave} /> <span>Skip intro <code>-skipintro</code></span></label>
-            <label class="check"><input type="checkbox" bind:checked={launch.noSplash} onchange={scheduleSave} /> <span>No splash screen <code>-nosplash</code></span></label>
-            <label class="check"><input type="checkbox" bind:checked={launch.noPause} onchange={scheduleSave} /> <span>Keep running when unfocused <code>-noPause</code></span></label>
-            <label class="row">
-              <span class="label">Extra args</span>
-              <input class="text mono" type="text" bind:value={launch.extraArgs} oninput={scheduleSave} placeholder="-cpuCount=8 -profiles=&quot;D:\Profiles&quot;" aria-label="Extra launch arguments" />
-            </label>
-            <p class="note">Passed to DayZ after the server, mod and profile arguments (docs/02 §5).</p>
-          {:else}
-            <p class="note">Loading…</p>
+            <p class="note">Steam counts playtime while connected. Releasing stops that; it reconnects by itself when needed.</p>
           {/if}
         </div>
       </section>
 
-      {#if launch}
-        <section class="card">
-          <h2>Launch profiles</h2>
-          <div class="cbody">
-            <div class="row">
-              <span class="label">Saved</span>
-              <span class="inline wrap">
-                <select class="text" bind:value={pick} aria-label="Saved launch profiles">
-                  <option value="">Saved profiles…</option>
-                  {#each launch.launchProfiles as p (p.name)}<option value={p.name}>{p.name}</option>{/each}
-                </select>
-                <button class="chip" onclick={loadProfile} disabled={!pick} title="Copy this profile into the launch options above">Load</button>
-                <button class="chip" onclick={deleteProfile} disabled={!pick}>Delete</button>
-              </span>
-            </div>
-            <div class="row">
-              <span class="label">New</span>
-              <span class="inline wrap">
-                <input class="text" type="text" placeholder="Profile name" bind:value={newName} aria-label="New profile name" />
-                <button class="chip" onclick={saveProfile} disabled={!newName.trim()} title="Save the launch options above under this name">Save as profile</button>
-              </span>
-            </div>
-            <p class="note">Presets of the options above; the join dialog can start a server with any of them.</p>
-          </div>
-        </section>
-      {/if}
-
       <section class="card">
-        <h2>Updates</h2>
+        <h2>The launcher itself</h2>
         <div class="cbody">
           <div class="row">
             <span class="label">Version</span>
@@ -260,20 +203,58 @@
               {#if updates.error}<span class="error">{updates.error}</span>{/if}
             </span>
           </div>
-          <p class="note">Signed: the launcher installs a package only when its signature matches the key built into this build.</p>
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>About</h2>
-        <div class="cbody">
-          <p class="note">
+          <p class="note">Updates install only when their signature matches this build's key.</p>
+          <p class="note credits">
             IP geolocation by <a href="https://db-ip.com" onclick={external}>DB-IP</a> (IP to Country Lite, CC BY 4.0).
             Flags by <a href="https://github.com/lipis/flag-icons" onclick={external}>flag-icons</a> (MIT).
             Server data comes from Steam and the servers themselves; nothing is sent anywhere else.
           </p>
         </div>
       </section>
+    </div>
+
+    <div class="col">
+      <section class="card">
+        <h2>How DayZ starts</h2>
+        <div class="cbody">
+          {#if launch}
+            <label class="row">
+              <span class="label">Profile name</span>
+              <input class="text" type="text" bind:value={launch.profileName} oninput={scheduleSave} placeholder={servers.steam?.persona ?? "Steam persona"} aria-label="In-game profile name" />
+            </label>
+            <label class="check"><input type="checkbox" bind:checked={launch.skipIntro} onchange={scheduleSave} /> <span>Skip intro <code>-skipintro</code></span></label>
+            <label class="check"><input type="checkbox" bind:checked={launch.noSplash} onchange={scheduleSave} /> <span>No splash screen <code>-nosplash</code></span></label>
+            <label class="check"><input type="checkbox" bind:checked={launch.noPause} onchange={scheduleSave} /> <span>Keep running when unfocused <code>-noPause</code></span></label>
+            <label class="row">
+              <span class="label">Extra args</span>
+              <input class="text mono" type="text" bind:value={launch.extraArgs} oninput={scheduleSave} placeholder="-cpuCount=8 -profiles=&quot;D:\Profiles&quot;" aria-label="Extra launch arguments" />
+            </label>
+
+            <h3>Saved profiles</h3>
+            <div class="row">
+              <span class="label">Saved</span>
+              <span class="inline wrap">
+                <select class="text" bind:value={pick} aria-label="Saved launch profiles">
+                  <option value="">Saved profiles…</option>
+                  {#each launch.launchProfiles as p (p.name)}<option value={p.name}>{p.name}</option>{/each}
+                </select>
+                <button class="chip" onclick={loadProfile} disabled={!pick} title="Copy this profile into the launch options above">Load</button>
+                <button class="chip" onclick={deleteProfile} disabled={!pick}>Delete</button>
+              </span>
+            </div>
+            <div class="row">
+              <span class="label">New</span>
+              <span class="inline wrap">
+                <input class="text" type="text" placeholder="Profile name" bind:value={newName} aria-label="New profile name" />
+                <button class="chip" onclick={saveProfile} disabled={!newName.trim()} title="Save the launch options above under this name">Save as profile</button>
+              </span>
+            </div>
+          {:else}
+            <p class="note">Loading…</p>
+          {/if}
+        </div>
+      </section>
+
     </div>
   </div>
 </section>
@@ -294,9 +275,17 @@
   .cols { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; overflow: auto; align-content: start; }
   .col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 
-  .card { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); }
-  h2 { display: flex; align-items: center; margin: 0; padding: 0 12px; height: 28px; border-bottom: 1px solid var(--border); font-size: 10.5px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.07em; }
-  .cbody { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; }
+  /* No panels. The page is a list of settings, not a set of boxes — the borders,
+     fills and header strips were most of what it looked like and none of them carried
+     meaning. A heading and the space under it separate the groups; the only thing that
+     still looks like a control is a control (D-203). */
+  .card { border: 0; background: none; }
+  .card + .card { margin-top: 4px; }
+  h2 { display: flex; align-items: center; margin: 0; font-size: 10.5px; font-weight: 600; color: var(--accent-ink); text-transform: uppercase; letter-spacing: 0.07em; }
+  /* A second heading inside a group, for the one that has two halves. */
+  h3 { margin: 8px 0 0; font-size: 10.5px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.07em; }
+  .cbody { display: flex; flex-direction: column; gap: 8px; padding: 6px 0 16px; }
+  .credits { margin-top: 2px; padding-top: 8px; border-top: 1px solid var(--border); }
 
   .row { display: flex; align-items: center; gap: 12px; min-width: 0; }
   .row.wrap { flex-wrap: wrap; }

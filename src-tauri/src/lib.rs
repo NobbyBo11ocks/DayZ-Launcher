@@ -356,7 +356,19 @@ pub fn run() {
                                 }
                             })
                             .await;
-                            let targets = std::mem::take(&mut populated);
+                            // A rejected `Done` is an answer, not a result: the refresh
+                            // it refers to either never reached Steam (D-160) or is still
+                            // running (D-197's busy reply). Taking `populated` there stole
+                            // the live refresh's partial rows and spent the one-pass guard
+                            // on them, so the real completion a minute later found the
+                            // guard held, skipped, and left the UI reading "verifying
+                            // player counts…" until the five-minute watchdog invented an
+                            // error (D-204).
+                            let targets = if d.rejected {
+                                Vec::new()
+                            } else {
+                                std::mem::take(&mut populated)
+                            };
                             if !targets.is_empty() {
                                 #[cfg(debug_assertions)]
                                 eprintln!("[verify] start: {} populated servers", targets.len());
@@ -367,16 +379,24 @@ pub fn run() {
                                 // pacer, so overlapping passes multiply what an
                                 // interactive query waits for its first datagram —
                                 // measured 0.29 s for one, 2.53 s for eight (D-197).
-                                let guard = handle
-                                    .try_state::<AppState>()
+                                let state = handle.try_state::<AppState>();
+                                let scanning = state.as_ref().map(|s| Arc::clone(&s.scanning));
+                                let guard = state
+                                    .as_ref()
                                     .and_then(|s| commands::InFlight::claim(&s.verifying));
                                 let Some(guard) = guard else {
+                                    // The UI arms "verifying" on every refresh and only
+                                    // `servers:verify-done` disarms it, so skipping has to
+                                    // say so rather than go quiet (D-204).
                                     log_info!("verify", "a pass is already running; skipped");
+                                    let _ = handle.emit(
+                                        "servers:verify-done",
+                                        &commands::VerifySummary::default(),
+                                    );
                                     continue;
                                 };
                                 let (h, c, client) = (handle.clone(), Arc::clone(&cache), a2s.clone());
                                 tauri::async_runtime::spawn(async move {
-                                    let _guard = guard;
                                     commands::run_verification(
                                         h.clone(),
                                         Arc::clone(&c),
@@ -385,7 +405,14 @@ pub fn run() {
                                         true,
                                     )
                                     .await;
-                                    commands::run_mod_scan(h, c, client, false).await;
+                                    // Released before the scan, which takes its own flag:
+                                    // holding it across both kept the door shut for ~69 s
+                                    // at the measured v0.1.26 timings, and a second Refresh
+                                    // inside that window was simply lost (D-204).
+                                    drop(guard);
+                                    if let Some(scanning) = scanning {
+                                        commands::run_mod_scan(h, c, client, scanning, false).await;
+                                    }
                                 });
                             } else if full_list {
                                 // Nothing to verify still has to close the pass (D-151):

@@ -10,6 +10,10 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Where the installer leaves its one-shot choices: `${MANUPRODUCTKEY}` in the NSIS
+/// template, which is `HKCUSoftware<manufacturer><product name>` (D-206).
+const INSTALL_CHOICES_KEY: &str = r"Software\dayzlauncher\DZSA CrayZ Launcher";
+
 const THEMES: [&str; 2] = ["slate", "light"];
 // Keep in step with `ACCENTS` in src/lib/state/prefs.svelte.ts and the tokens in src/app.css.
 const ACCENTS: [&str; 12] = [
@@ -207,10 +211,46 @@ impl SettingsStore {
             }
         };
         current.ui.normalise();
-        Self {
+        let store = Self {
             path: path.to_path_buf(),
             current: Mutex::new(current),
+        };
+        store.apply_install_choices();
+        store
+    }
+
+    /// One-shot instructions the installer left behind (D-206).
+    ///
+    /// The setup wizard offers "Do not show the DayZ news page", and `/NONEWS` does the
+    /// same for a silent install. It cannot write `settings.json` itself without risking
+    /// the rest of the file on an upgrade, so it leaves a registry value and the
+    /// launcher applies it on the next start — then deletes it, so it stays an
+    /// instruction rather than becoming a second source of truth the user cannot see.
+    fn apply_install_choices(&self) {
+        use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE};
+        use winreg::RegKey;
+
+        let Ok(key) = RegKey::predef(HKEY_CURRENT_USER)
+            .open_subkey_with_flags(INSTALL_CHOICES_KEY, KEY_READ | KEY_SET_VALUE)
+        else {
+            return;
+        };
+        if key.get_value::<u32, _>("DisableNews").unwrap_or(0) != 1 {
+            return;
         }
+        let _ = key.delete_value("DisableNews");
+        let snapshot = {
+            let Ok(mut cur) = self.current.lock() else {
+                return;
+            };
+            if !cur.ui.news {
+                return;
+            }
+            cur.ui.news = false;
+            cur.clone()
+        };
+        crate::log_info!("settings", "news page switched off by the installer");
+        let _ = self.persist(&snapshot);
     }
 
     pub fn get(&self) -> Settings {

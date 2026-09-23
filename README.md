@@ -1,40 +1,67 @@
 <div align="center">
 
-<img src="src-tauri/icons/128x128@2x.png" width="96" alt="">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/art/banner-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/art/banner-light.png">
+  <img src="docs/art/banner-dark.png" width="880" alt="DZSA CrayZ Launcher — a fast, honest server browser for DayZ Standalone. Player counts verified against the servers themselves; Workshop mods synced and the game started in one click; no accounts, no API keys, no telemetry.">
+</picture>
 
-# DZSA CrayZ Launcher
+<br><br>
 
-**A fast, honest server browser and one-click launcher for DayZ Standalone on Windows.**
+[![Latest release](https://img.shields.io/github/v/release/NobbyBo11ocks/dayz-launcher?display_name=tag&label=release&color=a3e635&labelColor=1d2530)](https://github.com/NobbyBo11ocks/dayz-launcher/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/NobbyBo11ocks/dayz-launcher/ci.yml?branch=main&label=CI&labelColor=1d2530)](https://github.com/NobbyBo11ocks/dayz-launcher/actions/workflows/ci.yml)
+[![Downloads](https://img.shields.io/github/downloads/NobbyBo11ocks/dayz-launcher/total?color=2ea44f&labelColor=1d2530)](https://github.com/NobbyBo11ocks/dayz-launcher/releases)
+[![Platform](https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-0078d4?labelColor=1d2530)](#install)
+[![Installer](https://img.shields.io/badge/installer-4.7%20MB-8957e5?labelColor=1d2530)](#install)
+[![Telemetry](https://img.shields.io/badge/telemetry-none-2ea44f?labelColor=1d2530)](#what-it-talks-to)
 
-Key-free server list straight from Steam · player counts verified with every server · Workshop mods synced and the game started through BattlEye in one click.
+### [⬇ Download for Windows](https://github.com/NobbyBo11ocks/dayz-launcher/releases/latest)
 
-[![Latest release](https://img.shields.io/github/v/release/NobbyBo11ocks/dayz-launcher?display_name=tag&label=release&color=a3e635)](https://github.com/NobbyBo11ocks/dayz-launcher/releases/latest)
-[![CI](https://img.shields.io/github/actions/workflow/status/NobbyBo11ocks/dayz-launcher/ci.yml?branch=main&label=CI)](https://github.com/NobbyBo11ocks/dayz-launcher/actions/workflows/ci.yml)
-[![Downloads](https://img.shields.io/github/downloads/NobbyBo11ocks/dayz-launcher/total?color=2ea44f)](https://github.com/NobbyBo11ocks/dayz-launcher/releases)
-[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078d4)](#install)
-[![Installer](https://img.shields.io/badge/installer-4.7%20MB-8957e5)](#install)
-[![License](https://img.shields.io/badge/license-all%20rights%20reserved-lightgrey)](LICENSE)
+<sub>
 
-[**⬇ Download**](https://github.com/NobbyBo11ocks/dayz-launcher/releases/latest) · [Screens](#a-look-around) · [What it does](#what-it-does) · [How it works](#how-it-works) · [Install](#install) · [Privacy](#privacy) · [Build](#build-from-source) · [Docs](docs/00-README.md)
+[Screens](#a-look-around) · [What it does](#what-it-does) · [How it works](#how-it-works) · [Install](#install) · [Privacy](#what-it-talks-to) · [Build](#build-from-source) · [Docs](docs/00-README.md)
 
-<img src="docs/screenshots/servers.png" width="920" alt="The server browser: country flags, verified player counts, filter bar, and a details pane with the server's mods, population history and past sessions">
+</sub>
+
+<br>
+
+<img src="docs/screenshots/servers.png" width="900" alt="The server browser: country flags, verified player counts, filter bar, and a details pane with the server's mods, population history and past sessions">
 
 </div>
 
 ---
 
-## Why this launcher
+## The problem it solves
 
-|  |  |
-|---|---|
-| **Counts you can trust** | Every populated server is queried directly and cross-checked against Steam. Inflated and fabricated counts are flagged, and hidden by default. |
-| **Fast and light** | A Rust host, a plain Svelte 5 front end, a virtualised table and a SQLite cache. The first screen is up well under a second after launch, the cached list with it, and the installer is under 5 MB. |
-| **One click to the game** | Missing Workshop mods are subscribed and downloaded through Steam, the `!Workshop` junctions are created the way the official launcher does it, and DayZ starts through BattlEye with the official argument form. |
-| **Nothing to sign up for** | No accounts, no API keys, no telemetry. It talks to Steam, to the game servers, to GitHub for updates, and to YouTube for the previews on the home page — which can be switched off. |
+DayZ's server list is full of servers that say they have forty players and have none. They do it because the list sorts by population, and an empty server nobody can see stays empty. Every launcher shows you that number.
+
+This one asks the server directly, counts the players itself, and compares the answer with Steam's authenticated session count. On this machine's last refresh that flagged **6 309 of 13 380 servers** — 47 % — and hid them by default.
+
+<table>
+<tr><td width="33%" align="center">
+
+### ✓ Verified
+
+Every populated server queried directly with A2S and cross-checked against Steam. Inflated and fabricated counts are flagged and hidden.
+
+</td><td width="33%" align="center">
+
+### ⚡ Quick
+
+Rust host, plain Svelte 5, a virtualised table and a SQLite cache. First screen under half a second, installer under 5 MB.
+
+</td><td width="33%" align="center">
+
+### ⊘ Quiet
+
+No accounts, no API keys, no telemetry. Every destination it contacts is listed below, and the news page can be switched off entirely.
+
+</td></tr>
+</table>
 
 | Installer | Cold start to first frame | Refresh, then verify | Idle CPU | Memory, whole app |
 |:-:|:-:|:-:|:-:|:-:|
-| 4.7 MB | 0.43 s | 42 s + 19 s | 0.2 % of one core | ≈ 306 MB |
+| **4.7 MB** | **0.43 s** | **42 s + 19 s** | **0.2 %** of one core | **≈ 306 MB** |
 
 <sub>Installer, memory and idle CPU measured at v0.1.23; cold start at v0.1.19 (D-136); the refresh figure is the list arriving, with verified counts following it — 2 187 servers verified in 18.9 s at v0.1.26. Budgets, method and history in [docs/05 §6](docs/05-architecture-and-optimisation.md).</sub>
 
@@ -55,7 +82,7 @@ Key-free server list straight from Steam · player counts verified with every se
 
 <img src="docs/screenshots/settings.png" alt="Settings: appearance, server browser, news, Steam, launch options, launch profiles and updates">
 
-**Settings** — a dark and a light theme, twelve accents, what the browser hides, how DayZ is started, saved launch profiles, and the Steam session with its idle release. One screen, no scrolling.
+**Settings** — a dark and a light theme, twelve accents, what the browser hides, how DayZ is started, saved launch profiles, and the Steam session with its idle release.
 
 </td>
 <td width="33%" valign="top">
@@ -77,8 +104,8 @@ Key-free server list straight from Steam · player counts verified with every se
 <tr valign="top"><td>
 
 - Steam's own matchmaking list — no API key, the same list the in-game browser sees
-- Filters for perspective, official or community hive, map, country, mod, queue, password, daytime, version, ping and friends
-- Maps by the name people use — searching "Livonia" finds `enoch`, "Frostline" finds `sakhal`
+- **Official or community hive**, perspective, map, country, mod, queue, password, daytime, version, ping and friends
+- **Maps by the name people use** — "Livonia" finds `enoch`, "Frostline" finds `sakhal`
 - Country flags from an offline table, no lookups
 - A details pane with the server's mods and installed ticks, 72 h population history, and your past sessions there
 - Find every server running a given mod
@@ -88,10 +115,10 @@ Key-free server list straight from Steam · player counts verified with every se
 </td><td>
 
 - Missing mods subscribed, downloaded and linked automatically
-- Wait for a free slot on a full server
+- **Wait for a free slot** on a full server, then start the moment one opens
 - Launch profiles: saved sets of launch options, picked in the join dialog
 - Direct connect by address; the game port is resolved to the query port
-- A Workshop update is noticed from the running Steam client, not from a file it refreshes when it feels like it
+- Workshop updates read from the **running Steam client**, not from a file it refreshes when it feels like it
 - Joins that would be rejected are stopped before the game starts
 
 </td></tr>
@@ -107,10 +134,10 @@ Key-free server list straight from Steam · player counts verified with every se
 
 - Signed automatic updates
 - Per-user installer; the launcher runs at the same elevation as Steam
-- Steam idle release, so it does not count as playtime while it sits open
+- **Steam idle release**, so it does not count as playtime while it sits open
 - A Logs page with per-area mutes and an off switch
 - Confirmed clean-up of dangling `!Workshop` junctions
-- A slim frameless window that remembers where it was, a dark and a light theme, twelve accent colours; the views that can fit do, and only their tables scroll
+- A slim frameless window that remembers where it was, a dark and a light theme, twelve accent colours
 - DZSA list fallback when Steam is unavailable
 
 </td></tr>
@@ -122,18 +149,25 @@ Key-free server list straight from Steam · player counts verified with every se
 
 ```mermaid
 flowchart LR
-  Steam[(Steam client)] -- matchmaking list --> Cache[(SQLite cache)]
-  Servers[Game servers] -- "A2S info · rules · players" --> Verify[Trust rules]
-  Verify --> Cache --> UI[Server browser]
-  UI -- Join --> Sync[Workshop sync + junctions] --> BE[DayZ_BE.exe]
+  Steam[("Steam client")] -- matchmaking list --> Cache[("SQLite cache")]
+  Servers["Game servers"] -- "A2S info · rules · players" --> Verify{"Trust rules<br/>R0–R5"}
+  Verify -- verified --> Cache
+  Verify -- inflated / fake --> Hidden["Hidden by default"]
+  Cache --> UI["Server browser"]
+  UI -- Join --> Sync["Workshop sync<br/>+ junctions"] --> BE["DayZ_BE.exe"]
+
+  style Verify fill:#1d2530,stroke:#a3e635,color:#e6e9ee
+  style Hidden fill:#1d2530,stroke:#f85149,color:#e6e9ee
+  style BE fill:#1d2530,stroke:#a3e635,color:#e6e9ee
 ```
 
 1. **List.** The Steamworks matchmaking API supplies the server list with pings, the same list the in-game browser sees. It is cached in SQLite so the previous list appears instantly and is refreshed in the background.
-2. **Verify.** Populated servers are queried directly with A2S (INFO, RULES, PLAYER). The advertised count is checked against the player list and against Steam; servers that fail the trust rules are marked inflated or fake.
+2. **Verify.** Populated servers are queried directly with A2S (INFO, RULES, PLAYER). The advertised count is checked against the player list and against Steam; servers that fail the trust rules are marked inflated or fake. The rules, and what each one caught, are in [docs/11](docs/11-fake-population-detection.md).
 3. **Join.** The join plan compares the server's mod list with your Workshop items, subscribes and downloads what is missing, creates `!Workshop\@<mod>` junctions matched by Workshop ID, and starts `DayZ_BE.exe` with the official argument form.
 4. **Friends and news.** Friends' servers come from Steam's game info and rich presence. News comes from Steam's news feed for DayZ; pictures are shrunk on the host — 360 px for the cards, 640 for the featured one — so the window stays light.
 
-Every protocol and launch fact is tied to a source in [docs/08](docs/08-sources.md), and every design choice to [docs/09](docs/09-decisions-log.md).
+> [!NOTE]
+> Every protocol and launch fact is tied to a primary source in [docs/08](docs/08-sources.md), and every design decision to [docs/09](docs/09-decisions-log.md) — including the ones that turned out to be wrong and what replaced them.
 
 ---
 
@@ -143,24 +177,27 @@ Every protocol and launch fact is tied to a source in [docs/08](docs/08-sources.
 2. Run it. It installs per user to `%LOCALAPPDATA%\Programs\DZSA CrayZ Launcher` and adds a Start menu entry. WebView2 is installed silently if Windows does not have it.
 3. Start Steam, then the launcher. Updates are automatic: each release is signed with a minisign key and the app verifies the signature before installing.
 
-> [!NOTE]
+> [!WARNING]
 > **SmartScreen.** The installer is not code-signed yet, so Windows shows "Windows protected your PC" on first run. Click **More info**, then **Run anyway**. Code signing is tracked in [docs/12](docs/12-code-signing.md).
 
-Requirements: Windows 10 or 11, 64-bit; Steam running and signed in; DayZ installed through Steam.
+**Requirements:** Windows 10 or 11, 64-bit · Steam running and signed in · DayZ installed through Steam.
 
 ---
 
-## Privacy
+## What it talks to
 
-No accounts, no telemetry, no third-party analytics. The launcher talks to:
+No accounts, no telemetry, no third-party analytics. In full:
 
-- **Steam** — the local client for the server list, Workshop and friends; Steam's news feed and image CDN for the home page.
-- **The game servers** — direct A2S queries for ping, mods and players.
-- **GitHub** — the update manifest and installer.
-- **YouTube** — preview images for posts with a video, and `youtube-nocookie.com` while a video is playing. Only the News page does this, and it can be turned off in Settings; nothing else in the app contacts Google.
-- **DZSA's public list** — only when Steam is unavailable and you choose to load it.
+| Destination | What for | When |
+|---|---|---|
+| **Steam, on your machine** | The server list, the Workshop, your friends | Always |
+| **The game servers** | A2S queries for ping, mods and who is really on them | Refresh and verification |
+| **GitHub** | The update manifest and the installer | Update checks |
+| **Steam's news feed and image CDN** | The home page | Only with the News page on |
+| **YouTube** | Preview images, and `youtube-nocookie.com` while a video plays | Only with the News page on |
+| **DZSA's public list** | A fallback server list | Only when Steam is unavailable and you ask |
 
-Its cache, favourites, history and settings stay in your local app-data folder.
+Your cache, favourites, history and settings stay in your own app-data folder. The Logs page shows exactly what the launcher has been doing, and you can copy it, mute it by area, or switch it off.
 
 ---
 
@@ -211,7 +248,14 @@ npm run tauri build
 
 Output: `src-tauri/target/release/bundle/nsis/` (`DZSA CrayZ Launcher_<version>_x64-setup.exe` plus a `.sig` for the updater).
 
-The per-user installer defaults to `%LOCALAPPDATA%\Programs\<product>`. `src-tauri/nsis/installer.nsi` is a copy of Tauri's stock template with that one line changed: the stock default is `%LOCALAPPDATA%\<product>`, which collided with the official DayZ Launcher's data folder under the app's original name, and the copy is kept because a program folder is where a program belongs. After upgrading `@tauri-apps/cli`, run `node tools/nsis_template_check.js` (add `--write` to refresh the copy from the new tag).
+`src-tauri/nsis/installer.nsi` is a copy of Tauri's stock template with exactly two lines changed, and `node tools/nsis_template_check.js` fails if that stops being true:
+
+1. The per-user default install directory is `%LOCALAPPDATA%\Programs\<product>` rather than `%LOCALAPPDATA%\<product>`, which collided with the official DayZ Launcher's data folder under this app's original name (D-067).
+2. `un.onInit` initialises the "delete app data" state to 0. The stock template reads it only in `un.ConfirmLeave`, which never runs in a silent uninstall — and installing over a *different* version runs the old uninstaller silently, which deleted favourites, join history, population and settings (D-200). Auto-updates were never affected, because the updater passes `/UPDATE`.
+
+After upgrading `@tauri-apps/cli`, run the check (add `--write` to refresh the copy from the new tag and re-apply both changes).
+
+The installer's header and sidebar artwork comes from `node tools/nsis_art.js`, and the README banner from `node tools/readme_banner.js` — both drawn from the same mark as the app icon, so the three cannot drift apart.
 
 Updater artifacts are signed with a minisign key. The private key lives outside the repository (`%USERPROFILE%\.tauri\dayz-launcher.key`); set it before building:
 

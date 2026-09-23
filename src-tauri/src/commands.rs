@@ -549,9 +549,18 @@ pub async fn run_mod_scan(
     app: AppHandle,
     cache: Arc<Mutex<Cache>>,
     client: Client,
+    scanning: Arc<AtomicBool>,
     force: bool,
 ) -> ModScanSummary {
     use crate::browser::ServerMods;
+
+    // One scan at a time, claimed here rather than at a call site so both callers are
+    // covered: the button went through `mods_scan`, which guarded, and the automatic
+    // scan after a refresh called this directly, which did not (D-204).
+    let Some(_guard) = InFlight::claim(&scanning) else {
+        crate::log_info!("mods", "scan already running; ignored");
+        return ModScanSummary::default();
+    };
     let t0 = Instant::now();
     let now = ServerRow::now_unix();
     let targets: Vec<(String, SocketAddr)> = {
@@ -698,18 +707,16 @@ pub async fn mods_index(state: State<'_, AppState>) -> AppResult<crate::browser:
 /// Starts a mod scan now; `force` ignores the one-day freshness. Returns the target count.
 #[tauri::command]
 pub async fn mods_scan(app: AppHandle, state: State<'_, AppState>, force: bool) -> AppResult<()> {
-    let Some(guard) = InFlight::claim(&state.scanning) else {
-        // Two scans at once put twice the datagrams on the wire that D-037 measured as
-        // the point where answers start going missing, and the second one rescans what
-        // the first is already doing (D-197).
-        crate::log_info!("mods", "scan already running; ignored");
-        return Ok(());
-    };
-    let (app2, cache, client) = (app, Arc::clone(&state.cache), state.a2s.clone());
-    tauri::async_runtime::spawn(async move {
-        let _guard = guard;
-        run_mod_scan(app2, cache, client, force).await;
-    });
+    // The claim lives inside `run_mod_scan` so that the automatic scan after a refresh
+    // is covered too — it calls the function directly and took no flag at all, which is
+    // two scans at 200 pps over the same chunks (D-204).
+    let (app2, cache, client, scanning) = (
+        app,
+        Arc::clone(&state.cache),
+        state.a2s.clone(),
+        Arc::clone(&state.scanning),
+    );
+    tauri::async_runtime::spawn(run_mod_scan(app2, cache, client, scanning, force));
     Ok(())
 }
 
