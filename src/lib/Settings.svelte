@@ -310,7 +310,7 @@
   .group { display: inline-flex; gap: 6px; flex-wrap: wrap; align-items: center; }
   .swatch { margin-left: 4px; font-size: 12px; }
 
-  .chip { all: unset; cursor: pointer; padding: 5px 11px; border-radius: var(--radius); border: 1px solid var(--border); color: var(--fg-muted); font-size: 12.5px; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .chip { all: unset; cursor: pointer; padding: 5px 11px; border-radius: var(--radius); border: 1px solid var(--border-control); color: var(--fg-muted); font-size: 12.5px; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
   .chip:hover { border-color: var(--accent); color: var(--fg); }
   .chip.on { background: color-mix(in srgb, var(--accent) 22%, var(--bg-row)); color: var(--fg); border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
   /* The primary action of its card, so it wears the accent (user request, D-180). */
@@ -325,12 +325,12 @@
   .dot { all: unset; box-sizing: border-box; cursor: pointer; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.25); transition: transform 120ms ease; }
   .dot:hover { transform: scale(1.15); }
   .dot.on { box-shadow: 0 0 0 2px var(--bg-elev), 0 0 0 4px var(--accent); }
-  .dot:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
+  .dot:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 3px; }
 
   .check { display: flex; align-items: center; gap: 9px; cursor: pointer; font-size: 12.5px; }
   .check input { accent-color: var(--accent); flex: none; }
 
-  .text { flex: 1; min-width: 0; max-width: 420px; padding: 5px 10px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg); font-size: 12.5px; }
+  .text { flex: 1; min-width: 0; max-width: 420px; padding: 5px 10px; border-radius: var(--radius); border: 1px solid var(--border-control); background: var(--bg-row); color: var(--fg); font-size: 12.5px; }
   .text:focus-visible { outline: 2px solid var(--accent-ink); }
   .text.num { width: 62px; flex: none; }
   .inline { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 12.5px; }

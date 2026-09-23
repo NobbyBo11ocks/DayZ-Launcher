@@ -430,7 +430,7 @@
   .pbar { grid-area: bar; height: 3px; background: var(--bg-row); border-radius: 2px; overflow: hidden; }
   .pfill { display: block; height: 100%; background: var(--accent); transition: width 200ms; }
   .field { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--fg-muted); }
-  .field input { padding: 6px 10px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg); }
+  .field input { padding: 6px 10px; border-radius: var(--radius); border: 1px solid var(--border-control); background: var(--bg-row); color: var(--fg); }
   .wait { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: var(--radius); border: 1px solid color-mix(in srgb, var(--warn) 50%, var(--border)); font-size: 12.5px; color: var(--fg-muted); cursor: pointer; }
   .wait input { margin-top: 2px; }
   .wait strong { color: var(--fg); }
@@ -442,6 +442,4 @@
   .warn { color: var(--warn); }
   .error { color: var(--danger); margin: 0; font-size: 12.5px; }
   footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
-  .btn { all: unset; cursor: pointer; padding: 7px 16px; border-radius: var(--radius); background: var(--accent); color: var(--accent-fg); font-weight: 600; }
-  .btn:disabled { opacity: 0.45; cursor: default; }
 </style>

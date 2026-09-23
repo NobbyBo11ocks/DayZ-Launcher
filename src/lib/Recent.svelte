@@ -107,7 +107,5 @@
   .empty { margin: auto; text-align: center; max-width: 440px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
   .empty p { margin: 0; }
   .empty .btn { margin-top: 6px; }
-  .btn { all: unset; cursor: pointer; padding: 4px 10px; border-radius: var(--radius); background: var(--accent); color: var(--accent-fg); font-weight: 600; font-size: 12px; }
-  .btn.danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); }
   .error { color: var(--danger); }
 </style>

@@ -153,7 +153,7 @@
            a screen reader reciting it about three times a second for forty seconds
            with no way to interrupt. The announcement below carries the outcomes
            instead, and only when they land (D-224). -->
-      <span class="status">{status}</span>
+      <span class="status" title={status}>{status}</span>
       <span class="sr-only" role="status" aria-live="polite">{announcement}</span>
       <!-- The scan runs itself after a refresh, but until now there was no way to ask
            for it: a mod filter with unscanned servers was a dead end (D-160). -->
@@ -206,9 +206,8 @@
   .row > :global(.filters) { flex: 1 1 0; min-width: 0; }
   .actions { display: flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
 
-  .btn { all: unset; cursor: pointer; box-sizing: border-box; height: 28px; padding: 0 14px; display: inline-flex; align-items: center; border-radius: var(--radius); background: var(--accent); color: var(--accent-fg); font-weight: 600; font-size: 12.5px; white-space: nowrap; }
 
-  .iconbtn { all: unset; cursor: pointer; box-sizing: border-box; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg-muted); }
+  .iconbtn { all: unset; cursor: pointer; box-sizing: border-box; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); border: 1px solid var(--border-control); background: var(--bg-row); color: var(--fg-muted); }
   .iconbtn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; }
   .iconbtn:hover, .iconbtn.on { color: var(--fg); border-color: var(--accent-ink); }
   .iconbtn:focus-visible { outline: 2px solid var(--accent-ink); }
@@ -216,7 +215,7 @@
   .connect { position: relative; }
   .pop { position: absolute; top: 34px; right: 0; z-index: 20; display: flex; align-items: center; gap: 6px; padding: 8px; border-radius: 10px; background: var(--bg-elev); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); }
   .poptitle { font-size: 11.5px; color: var(--fg-muted); white-space: nowrap; padding-right: 2px; }
-  .pop input { box-sizing: border-box; width: 190px; height: 28px; padding: 0 10px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg); font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
+  .pop input { box-sizing: border-box; width: 190px; height: 28px; padding: 0 10px; border-radius: var(--radius); border: 1px solid var(--border-control); background: var(--bg-row); color: var(--fg); font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
   .pop input:focus-visible { outline: 2px solid var(--accent-ink); }
 
   .statusline { display: flex; align-items: center; gap: 10px; min-height: 16px; font-size: 11px; color: var(--fg-muted); }
@@ -224,7 +223,7 @@
   .link { all: unset; cursor: pointer; color: var(--accent-ink); text-decoration: underline; }
   .link:hover { filter: brightness(1.15); }
   .link:disabled { opacity: 0.6; cursor: default; text-decoration: none; }
-  .link:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+  .link:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
 
   /* The details pane only exists while a row is selected; the table takes the full width otherwise. */
   .main { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr; }

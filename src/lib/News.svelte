@@ -205,8 +205,6 @@
 
   /* Welcome band: accent glow from the top-left corner, persona and quick facts. */
 
-  .btn { all: unset; cursor: pointer; padding: 8px 14px; border-radius: 10px; background: var(--accent); color: var(--accent-fg); font-weight: 600; white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
-  .btn.small { padding: 4px 10px; font-size: 12px; border-radius: var(--radius); }
 
   /* Video player (D-150). */
   .player-backdrop { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 24px; background: rgb(0 0 0 / 0.72); }
@@ -214,12 +212,10 @@
   .player-bar { display: flex; align-items: center; gap: 8px; }
   .player-title { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .player iframe { width: 100%; aspect-ratio: 16 / 9; max-height: 74vh; border: 0; border-radius: 12px; background: #000; box-shadow: 0 24px 60px rgb(0 0 0 / 0.5); }
-  .btn:disabled { opacity: 0.6; cursor: default; }
-  .btn:focus-visible { outline: 2px solid var(--fg); }
 
   .bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12.5px; }
   .bar h2 { margin: 0 4px 0 0; font-size: 12px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.06em; }
-  .seg { display: inline-flex; padding: 2px; border-radius: 10px; background: var(--bg-row); border: 1px solid var(--border); }
+  .seg { display: inline-flex; padding: 2px; border-radius: var(--radius); background: var(--bg-row); border: 1px solid var(--border-control); }
   .segbtn { all: unset; cursor: pointer; padding: 4px 11px; border-radius: 8px; color: var(--fg-muted); font-size: 12px; font-weight: 500; }
   .segbtn:hover { color: var(--fg); }
   .segbtn.on { background: var(--accent); color: var(--accent-fg); font-weight: 600; }

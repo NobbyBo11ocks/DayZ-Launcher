@@ -238,9 +238,9 @@
       {#if confirmClean}
         <span class="muted">Remove {dangling} stale junction{dangling === 1 ? "" : "s"}? Only ones whose target folder is gone.</span>
         <button class="btn danger" onclick={cleanJunctions}>Yes</button>
-        <button class="btn" onclick={() => (confirmClean = false)}>No</button>
+        <button class="btn secondary" onclick={() => (confirmClean = false)}>No</button>
       {:else}
-        <button class="btn" onclick={() => (confirmClean = true)} disabled={cleaning || !!updating} title="Delete the !Workshop junctions whose target folder no longer exists">
+        <button class="btn secondary" onclick={() => (confirmClean = true)} disabled={cleaning || !!updating} title="Delete the !Workshop junctions whose target folder no longer exists">
           {cleaning ? "Removing…" : `Clean ${dangling} stale`}
         </button>
       {/if}
@@ -249,11 +249,11 @@
       <span class="muted">Downloading for a join… {updating.installed}/{updating.total}</span>
     {/if}
     {#if stale.length}
-      <button class="btn accent" onclick={() => update(stale.map((i) => i.id))} disabled={!!updating}>
+      <button class="btn" onclick={() => update(stale.map((i) => i.id))} disabled={!!updating}>
         {updating && !fromJoin ? `Updating… ${updating.installed}/${updating.total}` : `Update all ${stale.length}`}
       </button>
     {/if}
-    <button class="btn" onclick={load} disabled={!!updating}>Rescan</button>
+    <button class="btn secondary" onclick={load} disabled={!!updating}>Rescan</button>
   </header>
 
   {#if all.length}
@@ -273,10 +273,10 @@
         {#if confirming?.kind === "bulk"}
           <span class="muted">Unsubscribe {selected.size}?</span>
           <button class="btn danger" onclick={() => unsubscribe(pickedItems.map((i) => ({ id: i.id, name: nameOf(i) })))}>Yes</button>
-          <button class="btn" onclick={() => (confirming = null)}>No</button>
+          <button class="btn secondary" onclick={() => (confirming = null)}>No</button>
         {:else}
           {#if pickedStale.length}
-            <button class="btn" onclick={() => update(pickedStale.map((i) => i.id))} disabled={!!updating}>Update {pickedStale.length}</button>
+            <button class="btn secondary" onclick={() => update(pickedStale.map((i) => i.id))} disabled={!!updating}>Update {pickedStale.length}</button>
           {/if}
           <button class="btn danger" onclick={() => (confirming = { kind: "bulk" })}>Unsubscribe</button>
           <button class="btn ghost" onclick={() => selected.clear()}>Clear</button>
@@ -294,7 +294,7 @@
     <div class="empty">
       <p>No Workshop mods installed.</p>
       <p class="muted">Join a modded server and the launcher subscribes to and downloads what it needs, then lists it here.</p>
-      <button class="btn accent" onclick={() => (servers.navigate = "servers")}>Browse servers</button>
+      <button class="btn" onclick={() => (servers.navigate = "servers")}>Browse servers</button>
     </div>
   {:else if all.length && items.length === 0}
     <p class="muted">No mod matches this filter.</p>
@@ -340,9 +340,9 @@
                 {:else if confirming?.kind === "one" && confirming.id === it.id}
                   <span class="muted">Unsubscribe?</span>
                   <button class="btn danger" onclick={() => unsubscribe([{ id: it.id, name }])}>Yes</button>
-                  <button class="btn" onclick={() => (confirming = null)}>No</button>
+                  <button class="btn secondary" onclick={() => (confirming = null)}>No</button>
                 {:else}
-                  {#if it.needsUpdate}<button class="btn" onclick={() => update([it.id])} disabled={!!updating} title="Download the new version through Steam">Update</button>{/if}
+                  {#if it.needsUpdate}<button class="btn secondary" onclick={() => update([it.id])} disabled={!!updating} title="Download the new version through Steam">Update</button>{/if}
                   {#if it.folder}<button class="btn ghost" onclick={() => openFolder(it.folder as string)} title="Show the mod folder">Folder</button>{/if}
                   <button class="btn ghost" onclick={() => (confirming = { kind: "one", id: it.id, name })} title="Unsubscribe on Steam; the files are removed by Steam">Unsubscribe</button>
                 {/if}
@@ -363,16 +363,19 @@
   /* Fits the viewport; only the table scrolls when the inventory is long (D-094). */
   .mods { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
   .bar { display: flex; align-items: center; gap: 10px; flex: none; }
-  .tools { gap: 8px; flex-wrap: nowrap; }
+  /* ~965 px of min-content inside 908 px of content width at the 960 px window
+     minimum, and the page clips its overflow - so Unsubscribe and Clear were cut off.
+     The selection group drops to a second line instead (D-226). */
+  .tools { gap: 8px; flex-wrap: wrap; }
   .spacer { flex: 1; }
   h1 { margin: 0; }
   .scroll { flex: 1; min-height: 0; overflow: auto; }
 
-  .search { flex: 0 1 240px; min-width: 120px; box-sizing: border-box; height: 26px; padding: 0 9px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg); font-size: 12.5px; }
+  .search { flex: 0 1 240px; min-width: 120px; box-sizing: border-box; height: 26px; padding: 0 9px; border-radius: var(--radius); border: 1px solid var(--border-control); background: var(--bg-row); color: var(--fg); font-size: 12.5px; }
   .search:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
 
   .chips { display: inline-flex; gap: 5px; }
-  .chip { all: unset; cursor: pointer; box-sizing: border-box; height: 26px; padding: 0 10px; display: inline-flex; align-items: center; gap: 5px; border-radius: var(--radius); border: 1px solid var(--border); color: var(--fg-muted); font-size: 12.5px; white-space: nowrap; }
+  .chip { all: unset; cursor: pointer; box-sizing: border-box; height: 26px; padding: 0 10px; display: inline-flex; align-items: center; gap: 5px; border-radius: var(--radius); border: 1px solid var(--border-control); color: var(--fg-muted); font-size: 12.5px; white-space: nowrap; }
   .chip.on { background: color-mix(in srgb, var(--accent) 22%, var(--bg-row)); color: var(--fg); border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
   .chip:disabled { opacity: 0.45; cursor: default; }
   .chip .n { color: var(--fg-muted); font-variant-numeric: tabular-nums; }
@@ -380,11 +383,6 @@
 
   .picked { color: var(--fg); font-weight: 600; font-size: 12.5px; white-space: nowrap; }
 
-  .btn { all: unset; cursor: pointer; box-sizing: border-box; height: 26px; padding: 0 10px; display: inline-flex; align-items: center; border-radius: var(--radius); background: var(--bg-row); border: 1px solid var(--border); font-size: 12.5px; white-space: nowrap; }
-  .btn:hover { border-color: var(--accent); }
-  .btn:disabled { opacity: 0.5; cursor: default; }
-  .btn.accent { background: var(--accent); color: var(--accent-fg); font-weight: 600; border-color: transparent; }
-  .btn.slim { height: 22px; padding: 0 8px; }
   .th { all: unset; cursor: pointer; }
   .th:hover { color: var(--fg); }
 
@@ -403,6 +401,11 @@
   .ok { color: var(--ok); }
   .warn { color: var(--warn); }
   .stale td:not(.pick) { color: var(--warn); }
+  /* On a selected row the accent tint lifts the background under the amber and all
+     twelve light accents fall under 4.5:1 (3.83 worst, rose). The Updated column
+     already says the mod is stale, so the selected row keeps the ordinary ink - the
+     same trade D-198 made for the selected server row (D-226). */
+  tr.picked.stale td:not(.pick) { color: var(--fg); }
   .small { font-size: 12px; }
   p.small { margin: 0; }
   .empty { margin: auto; text-align: center; max-width: 440px; display: flex; flex-direction: column; align-items: center; gap: 6px; }

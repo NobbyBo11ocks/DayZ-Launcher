@@ -227,22 +227,22 @@
 
   .searchwrap { position: relative; display: inline-flex; align-items: center; flex: 1 1 180px; min-width: 150px; max-width: 300px; }
   .searchwrap .icon { position: absolute; left: 9px; width: 14px; height: 14px; fill: none; stroke: var(--fg-muted); stroke-width: 1.5; stroke-linecap: round; pointer-events: none; }
-  .search { width: 100%; box-sizing: border-box; height: 28px; padding: 0 28px 0 28px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg); font-size: 12.5px; }
+  .search { width: 100%; box-sizing: border-box; height: 28px; padding: 0 28px 0 28px; border-radius: var(--radius); border: 1px solid var(--border-control); background: var(--bg-row); color: var(--fg); font-size: 12.5px; }
   .search:focus-visible { outline: 2px solid var(--accent-ink); }
   .searchwrap kbd { position: absolute; right: 7px; padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; font-size: 10.5px; line-height: 15px; color: var(--fg-muted); background: var(--bg-elev); pointer-events: none; }
 
-  .seg { display: inline-flex; box-sizing: border-box; height: 28px; padding: 2px; border-radius: var(--radius); background: var(--bg-row); border: 1px solid var(--border); flex: none; }
+  .seg { display: inline-flex; box-sizing: border-box; height: 28px; padding: 2px; border-radius: var(--radius); background: var(--bg-row); border: 1px solid var(--border-control); flex: none; }
   .segbtn { all: unset; cursor: pointer; display: inline-flex; align-items: center; padding: 0 9px; border-radius: 6px; color: var(--fg-muted); font-size: 12px; font-weight: 500; white-space: nowrap; }
   .segbtn:hover { color: var(--fg); }
   .segbtn.on { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
   .segbtn:focus-visible { outline: 2px solid var(--accent-ink); }
 
-  .select { box-sizing: border-box; height: 28px; padding: 0 6px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg); font-size: 12.5px; max-width: 150px; }
+  .select { box-sizing: border-box; height: 28px; padding: 0 6px; border-radius: var(--radius); border: 1px solid var(--border-control); background: var(--bg-row); color: var(--fg); font-size: 12.5px; max-width: 150px; }
   .select:focus-visible { outline: 2px solid var(--accent-ink); }
   .select.small { height: 26px; font-size: 11.5px; max-width: 150px; }
   .select.on { border-color: color-mix(in srgb, var(--accent) 65%, var(--border)); }
 
-  .chip { all: unset; cursor: pointer; box-sizing: border-box; height: 26px; padding: 0 9px; display: inline-flex; align-items: center; gap: 6px; border-radius: 7px; border: 1px solid var(--border); background: var(--bg-row); color: var(--fg-muted); font-size: 11.5px; line-height: 1; white-space: nowrap; transition: border-color 120ms, color 120ms, background-color 120ms; }
+  .chip { all: unset; cursor: pointer; box-sizing: border-box; height: 26px; padding: 0 9px; display: inline-flex; align-items: center; gap: 6px; border-radius: var(--radius); border: 1px solid var(--border-control); background: var(--bg-row); color: var(--fg-muted); font-size: 11.5px; line-height: 1; white-space: nowrap; transition: border-color 120ms, color 120ms, background-color 120ms; }
   .chip:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg) 25%, var(--border)); }
   .chip.on { background: color-mix(in srgb, var(--accent) 20%, var(--bg-row)); color: var(--fg); border-color: color-mix(in srgb, var(--accent) 65%, var(--border)); }
   .chip.on::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
@@ -255,9 +255,9 @@
   .chip.reset { border-style: dashed; background: transparent; }
 
   .modf { display: inline-flex; gap: 4px; }
-  .modsearch { box-sizing: border-box; width: 96px; height: 26px; padding: 0 8px; border-radius: 7px; border: 1px solid var(--border); background: var(--bg-row); color: var(--fg); font-size: 11.5px; }
+  .modsearch { box-sizing: border-box; width: 96px; height: 26px; padding: 0 8px; border-radius: var(--radius); border: 1px solid var(--border-control); background: var(--bg-row); color: var(--fg); font-size: 11.5px; }
   .modsearch:focus-visible { outline: 2px solid var(--accent-ink); }
 
-  .ping { display: inline-flex; align-items: center; gap: 6px; box-sizing: border-box; height: 26px; padding: 0 0 0 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-row); color: var(--fg-muted); font-size: 11.5px; white-space: nowrap; }
-  .ping :global(select) { height: 24px; border: 0; border-left: 1px solid var(--border); border-radius: 0 7px 7px 0; }
+  .ping { display: inline-flex; align-items: center; gap: 6px; box-sizing: border-box; height: 26px; padding: 0 0 0 9px; border: 1px solid var(--border-control); border-radius: var(--radius); background: var(--bg-row); color: var(--fg-muted); font-size: 11.5px; white-space: nowrap; }
+  .ping :global(select) { height: 24px; border: 0; border-left: 1px solid var(--border-control); border-radius: 0 7px 7px 0; }
 </style>

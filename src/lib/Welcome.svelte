@@ -73,5 +73,4 @@
   footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 4px; }
   .small { font-size: 11.5px; }
   kbd { padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-row); font-size: 11px; }
-  .btn { all: unset; cursor: pointer; padding: 7px 16px; border-radius: var(--radius); background: var(--accent); color: var(--accent-fg); font-weight: 600; }
 </style>

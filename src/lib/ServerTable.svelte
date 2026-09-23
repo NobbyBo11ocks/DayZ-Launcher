@@ -341,7 +341,7 @@
 
 <style>
   .table { display: flex; flex-direction: column; min-height: 0; height: 100%; font-size: 12.5px; outline: none; }
-  .table:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+  .table:focus-visible { box-shadow: inset 0 0 0 2px var(--accent-ink); }
   .head, .row { display: grid; grid-template-columns: minmax(200px, 1fr) 130px 52px 96px 56px 64px 92px; align-items: center; }
   .head { border-bottom: 1px solid var(--border); background: var(--bg); }
   /* Accent, like the title-bar counts (user request, D-177). */

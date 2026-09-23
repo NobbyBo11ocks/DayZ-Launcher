@@ -197,7 +197,7 @@
   .sub { color: var(--fg-muted); font-size: 12px; }
   .acts { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
 
-  .chip { all: unset; box-sizing: border-box; cursor: pointer; display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 999px; background: var(--bg-row); border: 1px solid var(--border); font-size: 11.5px; white-space: nowrap; }
+  .chip { all: unset; box-sizing: border-box; cursor: pointer; display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 999px; background: var(--bg-row); border: 1px solid var(--border-control); font-size: 11.5px; white-space: nowrap; }
   .chip:hover { border-color: var(--accent-ink); }
   .chip:disabled { opacity: 0.5; cursor: default; }
   .chip:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
@@ -205,7 +205,7 @@
 
   .areas { display: flex; flex-wrap: wrap; gap: 5px; }
   .chip.sm { height: 21px; padding: 0 8px; font-size: 11px; }
-  .chip.off { opacity: 0.45; text-decoration: line-through; }
+  .chip.off { opacity: 0.7; text-decoration: line-through; }
   .n { margin-left: 5px; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
 
   .note { margin: 0; font-size: 12px; }

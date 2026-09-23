@@ -34,8 +34,8 @@
   --border: #b6bfcb;
   /* 3.41 / 3.20 / 3.01 against the light theme's three surfaces. */
   --border-control: #788cae;
-  --ok: #1a7f37;
-  --warn: #9a6700;
+  --ok: #17702f;
+  --warn: #8a5c00;
   --danger: #cf222e;
   color-scheme: light;
 }
@@ -300,17 +300,27 @@ h1 {
 
 /* Shared button base (D-160). Components override with their own scoped rules,
    which are more specific because Svelte adds a scoping class to them. */
+/* Three sizes, and no fourth. Every component used to redeclare `.btn` with its own
+   padding, which produced eight heights across the app; the local blocks are gone
+   and anything that needs a different size says so with a modifier (D-226). */
 .btn {
   all: unset;
   box-sizing: border-box;
   cursor: pointer;
-  padding: 6px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 14px;
   border-radius: var(--radius);
   background: var(--accent);
   color: var(--accent-fg);
+  font-size: 12.5px;
   font-weight: 600;
   white-space: nowrap;
 }
+.btn.large { height: 32px; padding: 0 18px; font-size: 13px; }
+.btn.slim { height: 22px; padding: 0 8px; font-size: 12px; }
 .btn:hover { filter: brightness(1.08); }
 .btn:disabled { opacity: 0.5; cursor: default; filter: none; }
 /* Deliberately more specific than a component's scoped `.btn.svelte-hash` (0,2,0):
@@ -337,4 +347,4 @@ button.btn.ghost, a.btn.ghost { background: transparent; color: var(--fg-muted);
 button.btn.ghost:hover, a.btn.ghost:hover { color: var(--fg); filter: none; }
 button.btn.danger, a.btn.danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); font-weight: 600; }
 button.btn.danger:hover, a.btn.danger:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); filter: none; }
-.btn.small { padding: 4px 10px; font-size: 12px; }
+.btn.small { height: 24px; padding: 0 10px; font-size: 12px; }

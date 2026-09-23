@@ -80,10 +80,8 @@
   .favs { display: flex; flex-direction: column; height: 100%; min-height: 0; }
   .top { padding: 8px 16px; border-bottom: 1px solid var(--border); }
   .bar { display: flex; align-items: center; gap: 10px; font-size: 12px; }
-  .search { flex: 0 0 260px; padding: 6px 10px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg); }
-  .btn { all: unset; cursor: pointer; padding: 6px 12px; border-radius: var(--radius); background: var(--bg-row); color: var(--fg); border: 1px solid var(--border); }
-  .btn:disabled { opacity: 0.5; cursor: default; }
-  .btn:focus-visible { outline: 2px solid var(--accent-ink); }
+  .search { flex: 0 0 260px; padding: 6px 10px; border-radius: var(--radius); border: 1px solid var(--border-control); background: var(--bg-row); color: var(--fg); }
+  .search:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
   .empty { margin: auto; text-align: center; max-width: 520px; }
   .empty p { margin: 4px 0; }
   kbd { padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-row); font-size: 11px; }
