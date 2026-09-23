@@ -56,3 +56,8 @@ jobs:
 
       - name: NSIS template matches upstream
         run: node tools/nsis_template_check.js
+
+      # An unparseable workflow fails in 0 s with no log and no explanation, so CI has
+      # to be the thing that notices (D-228).
+      - name: Workflows parse
+        run: node tools/workflow_check.js
