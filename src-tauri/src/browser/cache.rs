@@ -147,6 +147,8 @@ pub struct PopulationSample {
     pub queue: i32,
 }
 
+/// A scanned mod list with the time it was scanned: `(scanned_at, [(workshop id, name)])`.
+pub type ScannedMods = (i64, Vec<(u64, String)>);
 impl Cache {
     pub fn open(path: &Path) -> rusqlite::Result<Self> {
         if let Some(dir) = path.parent() {
@@ -709,7 +711,7 @@ impl Cache {
     /// The join dialog asks the server itself; this is what it falls back to when the
     /// server will not answer RULES, because "launching without mods" on a modded
     /// server is a kick, not a join (D-209).
-    pub fn server_mods(&self, id: &str) -> rusqlite::Result<Option<(i64, Vec<(u64, String)>)>> {
+    pub fn server_mods(&self, id: &str) -> rusqlite::Result<Option<ScannedMods>> {
         let scanned_at: Option<i64> = self
             .conn
             .query_row(

@@ -1107,11 +1107,16 @@ async fn cached_row(cache: &Arc<Mutex<Cache>>, id: &str) -> Option<ServerRow> {
 /// The mod list the last scan recorded for one server, with when it was scanned.
 /// `Some((_, []))` means the scan found it vanilla, which is not the same as never
 /// having looked.
-async fn cached_mods(cache: &Arc<Mutex<Cache>>, id: &str) -> Option<(i64, Vec<(u64, String)>)> {
+async fn cached_mods(
+    cache: &Arc<Mutex<Cache>>,
+    id: &str,
+) -> Option<crate::browser::cache::ScannedMods> {
     let c = Arc::clone(cache);
     let key = id.to_string();
     tauri::async_runtime::spawn_blocking(move || {
-        c.lock().ok().and_then(|c| c.server_mods(&key).ok().flatten())
+        c.lock()
+            .ok()
+            .and_then(|c| c.server_mods(&key).ok().flatten())
     })
     .await
     .ok()
