@@ -73,7 +73,6 @@ class Updates {
         } else if (ev.event === "Finished") this.progress = 100;
       });
       this.state = "ready";
-      await relaunch();
     } catch (e) {
       // Back to "available", not "error" (D-184): the update is still there and still
       // installable, and the error card offered only "Check for updates", which is
@@ -82,6 +81,16 @@ class Updates {
       this.state = "available";
       this.progress = 0;
       logWarn("update", `install of ${u.version} failed: ${describe(e)}`);
+      return;
+    }
+    // Outside the try: the installer has already run by now, so a failure here is a
+    // failure to *restart*, and reporting it as "could not install 0.1.26" sent the
+    // user to install an update that is on disk already (D-194).
+    try {
+      await relaunch();
+    } catch (e) {
+      this.error = `${u.version} is installed; the launcher could not restart itself (${describe(e)}). Close it and start it again.`;
+      logWarn("update", `relaunch after ${u.version} failed: ${describe(e)}`);
     }
   }
 }

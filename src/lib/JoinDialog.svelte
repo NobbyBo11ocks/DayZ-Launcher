@@ -53,13 +53,21 @@
   // page shows the progress.
   const busy = $derived(phase === "launching");
 
+  /** Consecutive failed probes, so a server that dies mid-wait says so (D-194). */
+  let slotMisses = $state(0);
+
   async function refreshSlots(): Promise<ServerSlots | null> {
     try {
       slots = await invoke<ServerSlots>("server_slots", { id: serverId });
+      slotMisses = 0;
+      return slots;
     } catch {
-      /* unreachable right now; keep the last snapshot */
+      // Returning the last snapshot made every failure look like "still full": the
+      // wait loop's guard is `!s`, which was never null once one probe had worked, so
+      // a server that had gone away counted up forever.
+      slotMisses += 1;
+      return null;
     }
-    return slots;
   }
 
   $effect(() => {
@@ -310,7 +318,11 @@
         <p class="status">Downloading via Steam… {syncInfo.installed}/{syncInfo.total} installed{#if totalBytes > 0} · {fmtBytes(downloadedBytes)} of {fmtBytes(totalBytes)}{/if}</p>
       {:else if phase === "waiting"}
         <p class="status">
-          Waiting for a free slot… {#if slots}{slots.players}/{slots.maxPlayers}{#if slots.queue} · {slots.queue} in queue{/if} · {/if}{checks} check{checks === 1 ? "" : "s"} · {mmss(waitedSecs)}
+          {#if slotMisses >= 3}
+            The server has stopped answering — {slotMisses} checks in a row. Still trying · {mmss(waitedSecs)}
+          {:else}
+            Waiting for a free slot… {#if slots}{slots.players}/{slots.maxPlayers}{#if slots.queue} · {slots.queue} in queue{/if} · {/if}{checks} check{checks === 1 ? "" : "s"} · {mmss(waitedSecs)}
+          {/if}
         </p>
         <p class="muted small">DayZ starts as soon as the server reports a free slot; the window will flash in the taskbar.</p>
       {:else if phase === "launching"}

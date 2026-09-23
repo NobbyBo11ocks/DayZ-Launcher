@@ -51,8 +51,10 @@
   let muted = $state<string[]>([]);
   const isMuted = (id: string) => muted.includes(id);
   async function toggleArea(id: string) {
-    muted = isMuted(id) ? muted.filter((m) => m !== id) : [...muted, id];
+    // The guard comes first. Mutating `muted` before it left the chip struck through
+    // while logging carried on exactly as before, with nothing said (D-194).
     if (!settings) return;
+    muted = isMuted(id) ? muted.filter((m) => m !== id) : [...muted, id];
     settings = { ...settings, logMuted: muted };
     try {
       await invoke("settings_set", { settings });
@@ -63,8 +65,8 @@
   }
 
   async function setRecording(on: boolean) {
-    recording = on;
     if (!settings) return;
+    recording = on;
     settings = { ...settings, logging: on };
     try {
       await invoke("settings_set", { settings });

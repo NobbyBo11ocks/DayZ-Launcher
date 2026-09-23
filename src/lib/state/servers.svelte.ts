@@ -107,6 +107,24 @@ const FRIENDS_POLL_MS = 60_000;
 /** One collator for the whole session: `localeCompare` builds one per call (D-152). */
 const COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
+/**
+ * Collator order over the *distinct* values of a field, as a lookup.
+ *
+ * A comparator that calls `COLLATOR.compare` does so n log n times; when the field
+ * has few distinct values — 149 maps across 13 000 servers — sorting those once and
+ * comparing integers afterwards is several times cheaper, and the order is identical
+ * because equal strings get equal ranks and the comparator falls through to its own
+ * tie-breaks (D-193, after D-181).
+ */
+function rankDistinct<T>(rows: readonly T[], of: (row: T) => string): Map<string, number> {
+  const distinct = new Set<string>();
+  for (const r of rows) distinct.add(of(r));
+  const sorted = [...distinct].sort(COLLATOR.compare);
+  const rank = new Map<string, number>();
+  for (let i = 0; i < sorted.length; i++) rank.set(sorted[i]!, i);
+  return rank;
+}
+
 /** Private (RFC 1918), loopback and link-local IPv4: what Steam's LAN discovery returns (D-087). */
 export function isLanIp(ip: string): boolean {
   // Called once per row while the LAN tab is open. `split(".").map(Number)` allocated
@@ -151,7 +169,26 @@ class ServersStore {
   }
   /** Call after any batch of writes to `rows`. */
   rowsChanged() {
+    if (this.#dirtyTimer !== undefined) {
+      clearTimeout(this.#dirtyTimer);
+      this.#dirtyTimer = undefined;
+    }
     this.#rowsVersion++;
+  }
+  #dirtyTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * Same pooling as `#inbox`, for writes that are already in `rows`. The host used to
+   * verify in chunks of 500 and so emitted about six events a pass; it streams now
+   * (D-193), which is ~28, and each one bumping the version would run the whole
+   * derived chain 28 times instead of six. The rows are already merged — only the
+   * recompute is deferred, by at most `ROW_FLUSH_MS`.
+   */
+  #markDirty() {
+    if (this.#dirtyTimer !== undefined) return;
+    this.#dirtyTimer = setTimeout(() => {
+      this.#dirtyTimer = undefined;
+      this.#rowsVersion++;
+    }, ROW_FLUSH_MS);
   }
   /** Reads the version so a derived or template re-runs when the map changes. */
   get rowsTick(): number {
@@ -321,13 +358,23 @@ class ServersStore {
     const modCounts =
       key === "mods" ? new Map(out.map((r) => [r.id, this.modsByServer.get(r.id)?.length ?? -1])) : null;
     const nameRank = key === "name" ? this.#rankByName() : null;
+    // Same argument as D-181's name ranks, and cheaper still because there are only
+    // ~149 distinct map names across the whole list: one collator pass over the
+    // distinct values turns every comparison into integer subtraction. Measured here
+    // at 13 380 rows, 13.43 → 4.69 ms with byte-identical order, and it runs on every
+    // 350 ms flush while the column is selected (D-193).
+    const mapRank = key === "map" ? rankDistinct(out, (r) => r.map) : null;
     const cmp = (a: ServerRow, b: ServerRow): number => {
       switch (key) {
         case "name":
           // Precomputed ranks (D-181); the id tie-break is already in them.
           return (nameRank?.get(a.id) ?? 0) - (nameRank?.get(b.id) ?? 0);
         case "map":
-          return COLLATOR.compare(a.map, b.map) || trustedPlayers(b) - trustedPlayers(a) || byId(a, b);
+          return (
+            (mapRank!.get(a.map) ?? 0) - (mapRank!.get(b.map) ?? 0) ||
+            trustedPlayers(b) - trustedPlayers(a) ||
+            byId(a, b)
+          );
         case "mods": {
           // Unscanned servers sort below every scanned one, in both directions.
           const ma = modCounts?.get(a.id) ?? -1;
@@ -450,8 +497,16 @@ class ServersStore {
       this.error = `The cached server list could not be read (${describe(e)}). Refresh to fetch a new one.`;
     }
     // Favourites are the user's own data and live in their own tables: a failure to
-    // read the server list must not take them off the screen with it.
-    await this.loadFavourites();
+    // read the server list must not take them off the screen with it. Nor may a failure
+    // to read *them* take the session: this sits before every `listen()` below, and an
+    // unguarded rejection here used to skip all of them plus the status snapshot, the
+    // first refresh and the watchdog — one unlucky SQLITE_BUSY from a backup and the
+    // grid read "Starting up…" until the app was restarted (D-194).
+    try {
+      await this.loadFavourites();
+    } catch (e) {
+      logWarn("cache", `favourites unavailable at start: ${describe(e)}`);
+    }
     void this.loadModsIndex();
     this.#unlisten.push(
       await listen<ServerRow[]>("servers:batch", (ev) => {
@@ -682,7 +737,7 @@ class ServersStore {
         verdict: v.verdict,
       });
     }
-    this.rowsChanged();
+    this.#markDirty();
   }
 
   /** Called by the table with the ids currently on screen (debounced there). */

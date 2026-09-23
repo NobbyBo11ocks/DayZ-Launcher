@@ -373,10 +373,16 @@ pub fn prune_thumbnails(dir: &std::path::Path, keep: &std::collections::HashSet<
         let name = entry.file_name();
         let stem = name.to_string_lossy();
         let stem = stem.strip_suffix(".jpg").unwrap_or(&stem);
-        // "<gid>-<max>.jpg" since D-160; older files have no suffix and are dropped
-        // by the same rule because their stem is not a known gid either.
-        let stem = stem.rsplit_once('-').map_or(stem, |(gid, _)| gid);
-        if !keep.contains(stem) {
+        // "<gid>-<max>.jpg" since D-160. A file with no suffix predates that and can
+        // never be found again whatever its gid, but `rsplit_once` returning `None`
+        // left the whole stem in place — a live gid — so the sweep kept precisely the
+        // files it was written to remove: 18 of 37 here, 1 031 165 of 1 540 316 bytes
+        // the app could no longer read (D-193).
+        let Some((gid, _)) = stem.rsplit_once('-') else {
+            let _ = std::fs::remove_file(entry.path());
+            continue;
+        };
+        if !keep.contains(gid) {
             let _ = std::fs::remove_file(entry.path());
         }
     }
@@ -544,5 +550,30 @@ mod tests {
         });
         assert!(!press.official && !press.update);
         assert_eq!(press.url, "https://www.pcgamer.com/x");
+    }
+
+    #[test]
+    fn prune_drops_the_files_that_predate_the_suffix() {
+        // The regression D-193 fixed: an unsuffixed file carries a live gid, so the
+        // old rule looked it up in , found it, and kept a file nothing can read.
+        let dir = std::env::temp_dir().join(format!("dzl-prune-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        for name in ["111-640.jpg", "111.jpg", "222-640.jpg", "333-640.jpg"] {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+        let keep: std::collections::HashSet<String> =
+            ["111".to_string(), "222".to_string()].into_iter().collect();
+        super::prune_thumbnails(&dir, &keep);
+        let mut left: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            left,
+            vec!["111-640.jpg".to_string(), "222-640.jpg".to_string()]
+        );
     }
 }

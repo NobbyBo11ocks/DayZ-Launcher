@@ -194,7 +194,8 @@ export type Verification = {
   verified: number | null;
   maxPlayers: number;
   pingMs: number | null;
-  keywords: string | null;
+  /** The raw `keywords` string is `skip_serializing` on the Rust side since D-188 —
+   *  the host writes it to the cache, the browser reads the parsed `tags`. */
   tags: DayzTags | null;
   verifiedAt: number;
   reason: string;

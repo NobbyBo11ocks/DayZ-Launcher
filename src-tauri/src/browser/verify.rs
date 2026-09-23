@@ -164,6 +164,40 @@ pub fn judge(
 /// `with_info` also refreshes INFO (ping, clock, reported count); the automatic
 /// post-refresh pass passes `false` because Steam just delivered fresh INFO and
 /// halving the datagrams keeps the burst small (D-047). Results are in completion order.
+/// Every target spawned at once, handed back one at a time as each finishes.
+///
+/// `verify_many` cannot report anything until its slowest target has answered, so a
+/// caller that wants results on screen while the pass runs has to chop the work into
+/// chunks — and every chunk boundary idles the pacer for the length of that chunk's
+/// tail. The `JoinSet` is the whole pass; the client's permits still bound how many
+/// are in flight (D-193).
+pub fn verify_stream(client: &Client, targets: Vec<Target>, with_info: bool) -> VerifyStream {
+    let mut set = JoinSet::new();
+    for t in targets {
+        let c = client.clone();
+        set.spawn(async move { verify_one(&c, t, with_info).await });
+    }
+    VerifyStream { set }
+}
+
+pub struct VerifyStream {
+    set: JoinSet<Verification>,
+}
+
+impl VerifyStream {
+    /// The next result to finish, or `None` when every target has been reported. A task
+    /// that panicked is skipped rather than ending the pass.
+    pub async fn next(&mut self) -> Option<Verification> {
+        while let Some(joined) = self.set.join_next().await {
+            match joined {
+                Ok(v) => return Some(v),
+                Err(_) => continue,
+            }
+        }
+        None
+    }
+}
+
 pub async fn verify_many(
     client: &Client,
     targets: Vec<Target>,

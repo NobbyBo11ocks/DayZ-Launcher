@@ -72,6 +72,22 @@ impl Client {
         self
     }
 
+    /// A copy with its own permit pool.
+    ///
+    /// `with_rate` rebuilds the pacer but keeps the shared `Arc<Semaphore>`, so a bulk
+    /// pass started from `state.a2s` queues in the same FIFO as the interactive
+    /// queries. That costs twice. The pass inherits the interactive pool's size, and
+    /// concurrency ÷ rate is how long a permit-holder waits for its datagram: at
+    /// 128 ÷ 100 pps that is 1.28 s, already past the 1 s deadline before a challenge
+    /// reply can be answered, so nearly every query was being rescued by its retry —
+    /// 6 582 datagrams where 4 200 were needed. And in the other direction, a pass
+    /// that streams instead of running in chunks holds those permits continuously and
+    /// starves a row click of its 3 queries. Own pool, both problems gone (D-193).
+    pub fn with_concurrency(mut self, n: usize) -> Self {
+        self.permits = Arc::new(Semaphore::new(n.max(1)));
+        self
+    }
+
     /// Maximum datagrams per second across all queries; `0` disables pacing.
     pub fn with_rate(mut self, packets_per_second: u32) -> Self {
         self.pacer = (packets_per_second > 0).then(|| {
@@ -234,6 +250,24 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn with_rate_shares_the_permit_pool_and_with_concurrency_does_not() {
+        // The distinction D-193 turns on: a bulk pass built with `with_rate` alone is
+        // still queueing behind whatever else holds `state.a2s`'s permits.
+        let base = Client::new(128);
+        let paced = base.clone().with_rate(100);
+        assert!(
+            Arc::ptr_eq(&base.permits, &paced.permits),
+            "with_rate must not be mistaken for isolation"
+        );
+        assert_eq!(paced.permits.available_permits(), 128);
+
+        let own = base.clone().with_concurrency(64).with_rate(100);
+        assert!(!Arc::ptr_eq(&base.permits, &own.permits));
+        assert_eq!(own.permits.available_permits(), 64);
+        assert_eq!(base.permits.available_permits(), 128);
+    }
 
     #[tokio::test]
     async fn pacing_spreads_sends() {

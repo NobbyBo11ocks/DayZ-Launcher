@@ -30,6 +30,9 @@ use crate::browser::ServerRow;
 use super::DAYZ_APP_ID;
 
 const BATCH_INTERVAL: Duration = Duration::from_millis(100);
+/// Rows per `servers:batch`. A row serialises to 558 B, so 358 is the ~200 KB docs/04
+/// §4 sets as the ceiling for one event (D-193).
+const BATCH_MAX_ROWS: usize = 358;
 const TICK_ACTIVE: Duration = Duration::from_millis(10);
 /// Nothing is in flight, so the only reason to wake is to notice a new command,
 /// which the 100 ms batch interval already bounds. 50 ms doubled the host's share
@@ -1025,14 +1028,25 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                 (true, None) => {}
                 (true, Some(_)) => {
                     // It came back inside the grace period, or after we reported it gone.
+                    let was_reported_gone = lost_since
+                        .is_some_and(|t: Instant| t.elapsed() >= LIVENESS_GRACE)
+                        && !shared
+                            .status
+                            .lock()
+                            .map(|st| st.initialized)
+                            .unwrap_or(false);
                     lost_since = None;
-                    if !shared
-                        .status
-                        .lock()
-                        .map(|st| st.initialized)
-                        .unwrap_or(false)
-                    {
-                        crate::log_info!("steam", "Steam is back");
+                    if was_reported_gone {
+                        // Steam really did go away, so the handles this session holds
+                        // point at a client that no longer exists: D-190 stopped
+                        // dropping them at the moment of the loss, which is unsafe, but
+                        // marking the session live again without re-opening it left a
+                        // corpse — every later refresh spun for the full 180 s partition
+                        // timeout and came back "0 listed". Dropping it *here* is safe:
+                        // Steam has just started, so nothing of ours is in flight, and
+                        // the next command re-initialises (D-194).
+                        session = None;
+                        crate::log_info!("steam", "Steam is back; the session will re-open");
                         shared.set_status(&events, |st| {
                             st.initialized = true;
                             st.error = None;
@@ -1138,10 +1152,31 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                     // Steam calls back once per partition; when it never does, nothing
                     // else in this loop can end the refresh (D-160).
                     let timed_out = finished.is_none() && p.started.elapsed() >= PARTITION_TIMEOUT;
-                    if finished.is_some() || timed_out || p.last_flush.elapsed() >= BATCH_INTERVAL {
-                        let batch: Vec<ServerRow> = std::mem::take(&mut *p.rows.borrow_mut());
-                        if !batch.is_empty() {
+                    // Steam can hand over several thousand rows inside one 100 ms
+                    // window — the first callback of a partition usually does — and
+                    // the flush took whatever had accumulated, so a single
+                    // `servers:batch` could be megabytes against the ~200 KB docs/04
+                    // §4 asks for. Split it; the loop comes back in 10 ms while a
+                    // refresh is active, so nothing is held up (D-193).
+                    let ending = finished.is_some() || timed_out;
+                    let ready = p.rows.borrow().len();
+                    if ending || ready >= BATCH_MAX_ROWS || p.last_flush.elapsed() >= BATCH_INTERVAL
+                    {
+                        loop {
+                            let batch: Vec<ServerRow> = {
+                                let mut rows = p.rows.borrow_mut();
+                                let take = rows.len().min(BATCH_MAX_ROWS);
+                                if take == 0 {
+                                    break;
+                                }
+                                rows.drain(..take).collect()
+                            };
                             let _ = events.send(SteamEvent::Batch(batch));
+                            // The partition is about to be taken below, so everything
+                            // still queued has to leave now or it is dropped.
+                            if !ending {
+                                break;
+                            }
                         }
                         p.last_flush = Instant::now();
                     }

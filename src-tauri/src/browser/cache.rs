@@ -90,6 +90,15 @@ const SELECT_COLUMNS: &str = "id, ip, game_port, query_port, name, map, descript
 static GET_SQL: std::sync::LazyLock<String> =
     std::sync::LazyLock::new(|| format!("SELECT {SELECT_COLUMNS} FROM servers WHERE id = ?1"));
 
+/// What `row_counts` reports (D-193).
+#[derive(Debug, Clone, Copy)]
+pub struct RowCounts {
+    pub servers: i64,
+    pub favourites: i64,
+    pub history: i64,
+    pub population: i64,
+}
+
 pub struct Cache {
     conn: Connection,
 }
@@ -150,7 +159,10 @@ impl Cache {
         Self::migrate(conn)
     }
 
-    #[cfg(test)]
+    /// A cache that exists only for this run. The tests use it, and so does start-up
+    /// when the real file cannot be opened *or* moved aside: browsing still works
+    /// because the list comes from Steam, and refusing to start instead loses the
+    /// session for a lock that may clear in a minute (D-194).
     pub fn open_in_memory() -> rusqlite::Result<Self> {
         Self::migrate(Connection::open_in_memory()?)
     }
@@ -235,7 +247,7 @@ impl Cache {
             }
             tx.commit()?;
         }
-        self.checkpoint();
+        self.checkpoint_durable();
         Ok(())
     }
 
@@ -249,7 +261,14 @@ impl Cache {
             self.conn
                 .execute("DELETE FROM favourites WHERE id = ?1", params![id])?;
         }
-        self.checkpoint();
+        // The one user table with no logging at all, and the one whose disappearance
+        // started Q22 (D-194).
+        crate::log_info!(
+            "cache",
+            "favourite {}: {id}",
+            if on { "added" } else { "removed" }
+        );
+        self.checkpoint_durable();
         Ok(())
     }
 
@@ -263,7 +282,7 @@ impl Cache {
         )?;
         // A join is rare and precious: move it from the write-ahead log into the main
         // file at once, so a lost or truncated `-wal` cannot take it with it (Q22).
-        self.checkpoint();
+        self.checkpoint_durable();
         Ok(())
     }
 
@@ -273,7 +292,7 @@ impl Cache {
     pub fn history_clear(&self) -> rusqlite::Result<usize> {
         let n = self.conn.execute("DELETE FROM history", [])?;
         crate::log_info!("cache", "history cleared by the user: {n} row(s)");
-        self.checkpoint();
+        self.checkpoint_durable();
         Ok(n)
     }
 
@@ -284,7 +303,7 @@ impl Cache {
     /// checkpointed_pages)` — so the row has to be read. Q22 is an unexplained loss of
     /// committed rows, and "the checkpoint quietly copied nothing" is one of the few
     /// explanations left, so both outcomes are on the record (D-187).
-    pub fn checkpoint(&self) {
+    pub fn checkpoint(&self) -> bool {
         let result = self
             .conn
             .query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |r| {
@@ -297,14 +316,45 @@ impl Cache {
         match result {
             Ok((busy, log_pages, checkpointed)) => {
                 if checkpointed < log_pages {
+                    // `busy` was measured at 0 while nothing was copied, with a reader
+                    // holding an older snapshot — so "blocked by a reader" cannot be
+                    // conditioned on it, and a reader is the likely cause either way
+                    // (D-194).
                     crate::log_warn!(
                         "cache",
-                        "checkpoint copied {checkpointed} of {log_pages} page(s){}; the rest stays in the write-ahead log",
-                        if busy != 0 { ", blocked by a reader" } else { "" }
+                        "checkpoint copied {checkpointed} of {log_pages} page(s) (busy={busy}); the rest stays in the write-ahead log"
                     );
                 }
+                checkpointed >= log_pages
             }
-            Err(e) => crate::log_warn!("cache", "checkpoint failed: {e}"),
+            Err(e) => {
+                crate::log_warn!("cache", "checkpoint failed: {e}");
+                false
+            }
+        }
+    }
+
+    /// For the two writes whose durability the user would notice: a favourite and a
+    /// join. A PASSIVE checkpoint can copy nothing at all — measured at
+    /// `(busy 0, log 12, checkpointed 0)` with one reader on an older snapshot — and
+    /// then the row exists only in the write-ahead log, which is exactly the state
+    /// Q22 kept producing. FULL waits for the readers instead of stepping around
+    /// them, bounded by the connection's busy timeout so a stuck reader costs a few
+    /// seconds and a log line rather than the thread (D-194).
+    pub fn checkpoint_durable(&self) {
+        if self.checkpoint() {
+            return;
+        }
+        match self.conn.query_row("PRAGMA wal_checkpoint(FULL)", [], |r| {
+            Ok((r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
+        }) {
+            Ok((log_pages, checkpointed)) if checkpointed < log_pages => crate::log_warn!(
+                "cache",
+                "full checkpoint still left {} of {log_pages} page(s) in the write-ahead log",
+                log_pages - checkpointed
+            ),
+            Ok(_) => {}
+            Err(e) => crate::log_warn!("cache", "full checkpoint failed: {e}"),
         }
     }
 
@@ -685,6 +735,22 @@ impl Cache {
             .map(|(id, mods)| ServerMods { id, mods })
             .collect();
         Ok(ModsIndex { catalog, index })
+    }
+
+    /// Row counts for the four tables that hold anything the user would miss.
+    ///
+    /// Q22 and Q25 are both "the rows are gone and nothing records when": logged once
+    /// at open, a recurrence has a before-and-after instead of a guess (D-193).
+    pub fn row_counts(&self) -> rusqlite::Result<RowCounts> {
+        let one = |sql: &str| -> rusqlite::Result<i64> {
+            self.conn.query_row(sql, [], |r| r.get::<_, i64>(0))
+        };
+        Ok(RowCounts {
+            servers: one("SELECT count(*) FROM servers")?,
+            favourites: one("SELECT count(*) FROM favourites")?,
+            history: one("SELECT count(*) FROM history")?,
+            population: one("SELECT count(*) FROM population")?,
+        })
     }
 
     pub fn get_meta(&self, key: &str) -> rusqlite::Result<Option<String>> {

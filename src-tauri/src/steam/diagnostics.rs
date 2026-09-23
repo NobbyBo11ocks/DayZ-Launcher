@@ -108,12 +108,29 @@ pub fn collect() -> AppResult<Diagnostics> {
         warnings.push("Steam is running but nobody is logged in.".into());
     }
 
+    // A truncated `libraryfolders.vdf` or `appworkshop_221100.acf` — a power cut
+    // mid-write is enough — used to propagate with `?` and fail the whole collect,
+    // which `join_plan` turns into a dead join dialog for *every* server, vanilla ones
+    // included. None of these files is needed to connect; each becomes a warning and
+    // the parts that did parse are still reported (D-194).
     let libs = match &steam.path {
-        Some(p) => locate::libraries(p)?,
+        Some(p) => match locate::libraries(p) {
+            Ok(l) => l,
+            Err(e) => {
+                warnings.push(format!("Steam's library list could not be read ({e})."));
+                Vec::new()
+            }
+        },
         None => Vec::new(),
     };
 
-    let game = locate::find_dayz(&libs)?;
+    let game = match locate::find_dayz(&libs) {
+        Ok(g) => g,
+        Err(e) => {
+            warnings.push(format!("DayZ's install could not be read ({e})."));
+            None
+        }
+    };
     let mut dayz = None;
     let mut workshop = None;
     let mut junctions = Vec::new();
@@ -143,7 +160,16 @@ pub fn collect() -> AppResult<Diagnostics> {
             has_official_launcher: g.official_launcher().is_file(),
         });
 
-        if let Some(ws) = workshop::read(&g.library.path)? {
+        let workshop_read = match workshop::read(&g.library.path) {
+            Ok(w) => w,
+            Err(e) => {
+                warnings.push(format!(
+                    "Steam's Workshop list could not be read ({e}); installed mods cannot be checked."
+                ));
+                None
+            }
+        };
+        if let Some(ws) = workshop_read {
             let missing = ws.items.iter().filter(|i| i.folder.is_none()).count();
             if missing > 0 {
                 warnings.push(format!(

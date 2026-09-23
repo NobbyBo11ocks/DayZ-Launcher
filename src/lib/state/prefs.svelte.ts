@@ -58,7 +58,11 @@ class Prefs {
         this.theme = normTheme(u.theme);
         this.accent = normAccent(u.accent);
       }
-      this.news = u.news !== false;
+      // Only when the file was actually read. `read()` falls back to the defaults
+      // after its retries, and the default is `news: true` — so a backend slow past
+      // ~2 s used to switch the News page back on for someone who had turned it off,
+      // and with it the fetches Settings promises never happen (D-194).
+      if (uiPrefs.readOk) this.news = u.news !== false;
       this.#fromFile = true;
       uiPrefs.patch({ theme: this.theme, accent: this.accent });
     });

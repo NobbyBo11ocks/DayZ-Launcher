@@ -22,6 +22,11 @@
   const id = $derived(row?.id ?? null);
   const verifiedAt = $derived(row?.verifiedAt ?? null);
 
+  /** How long a selection has to hold still before the pane queries the server.
+   *  Long enough that arrow-keying through rows costs nothing, short enough that a
+   *  deliberate click still feels immediate. */
+  const DETAILS_SETTLE_MS = 220;
+
   let samples = $state<PopulationSample[]>([]);
   let samplesFor: string | null = null;
 
@@ -88,18 +93,26 @@
     }
     loading = true;
     let cancelled = false;
-    invoke<ServerDetails>("server_details", { id: cur })
-      .then((d) => {
-        if (!cancelled) details = d;
-      })
-      .catch((e) => {
-        if (!cancelled) error = String(e);
-      })
-      .finally(() => {
-        if (!cancelled) loading = false;
-      });
+    // Held back until the selection settles. Each call is three paced A2S queries out
+    // of the same budget a verification pass is using, plus a `servers:verified` emit
+    // whose derived chain costs ~6.4 ms however few rows it carries — so holding
+    // ArrowDown down the list was spending ~64 ms of main thread and ~50 datagrams a
+    // second on servers the user was scrolling straight past (D-193).
+    const timer = setTimeout(() => {
+      invoke<ServerDetails>("server_details", { id: cur })
+        .then((d) => {
+          if (!cancelled) details = d;
+        })
+        .catch((e) => {
+          if (!cancelled) error = String(e);
+        })
+        .finally(() => {
+          if (!cancelled) loading = false;
+        });
+    }, DETAILS_SETTLE_MS);
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
   });
 

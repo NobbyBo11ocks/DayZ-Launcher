@@ -49,8 +49,82 @@ pub fn elevation() -> proc::ElevationState {
         .unwrap_or(proc::ElevationState::Matched)
 }
 
+/// A dialog for the failures that happen before there is a window to put a message in.
+///
+/// `panic = "abort"` and `windows_subsystem = "windows"` between them mean a panic in
+/// `setup` — which is how Tauri reports a failed setup — ends the process with no
+/// window, no console and, if the data directory is the thing that failed, no log line
+/// either. The icon flashes and nothing else ever happens. One message box is the
+/// difference between "it doesn't work" and a sentence the user can act on (D-194).
+/// Last resort when `cache.db` can be neither opened nor moved out of the way: a
+/// cache that lives in memory for this run only. Nothing persists, and the user is
+/// told once, but the launcher starts and the server list — which comes from Steam,
+/// not from here — works normally (D-194).
+fn in_memory_cache(why: &str) -> browser::Cache {
+    match browser::Cache::open_in_memory() {
+        Ok(c) => {
+            log_warn!(
+                "cache",
+                "running without a cache file ({why}); favourites, join history and \
+                 population will not be kept for this session"
+            );
+            fatal_dialog(&format!(
+                "The launcher could not use its cache file:\n\n{why}\n\nIt is usually a \
+                 lock held by antivirus, a backup or a file-sync client, and it clears \
+                 by itself. The launcher will run normally this time, but favourites, \
+                 join history and population will not be saved.\n\nNothing was deleted."
+            ));
+            c
+        }
+        // `Connection::open_in_memory` failing means the process is out of memory;
+        // there is nothing left to fall back to.
+        Err(e) => {
+            log_error!("cache", "in-memory cache failed too: {e}");
+            panic!("cache unavailable: {e}");
+        }
+    }
+}
+
+fn fatal_dialog(message: &str) {
+    use std::os::windows::ffi::OsStrExt;
+    let wide = |s: &str| -> Vec<u16> {
+        std::ffi::OsStr::new(s)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    };
+    let text = wide(message);
+    let caption = wide("DZSA CrayZ Launcher could not start");
+    // SAFETY: both strings are NUL-terminated and outlive the call; a null owner window
+    // is valid and makes the box application-modal.
+    unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
+            std::ptr::null_mut(),
+            text.as_ptr(),
+            caption.as_ptr(),
+            windows_sys::Win32::UI::WindowsAndMessaging::MB_OK
+                | windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONERROR,
+        );
+    }
+}
+
 pub fn run() {
     let _ = STARTED.set(Instant::now());
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let what = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "no further detail".into());
+        log_error!("app", "panic: {what}");
+        fatal_dialog(&format!(
+            "The launcher stopped unexpectedly.\n\n{what}\n\nIf this keeps happening, \
+             the log is at %LOCALAPPDATA%\\com.dayzlauncher.desktop\\logs\\launcher.log."
+        ));
+        previous(info);
+    }));
     let steam_pid = steam::registry::detect().pid;
     let state = proc::elevation_state(steam_pid);
     if state == proc::ElevationState::SteamHigher && proc::relaunch_elevated() {
@@ -135,7 +209,7 @@ pub fn run() {
                                 }
                                 Err(e2) => {
                                     log_error!("cache", "second open failed as well: {e2}");
-                                    return Err(e2.into());
+                                    in_memory_cache(&format!("{e2}"))
                                 }
                             }
                         }
@@ -147,7 +221,7 @@ pub fn run() {
                                 "could not open or move {} ({move_err}); the file is most likely held by another program, such as antivirus or a backup. Nothing was changed",
                                 db_path.display()
                             );
-                            return Err(e.into());
+                            in_memory_cache(&format!("{e}"))
                         }
                     }
                 }
@@ -159,6 +233,24 @@ pub fn run() {
                 let s = settings.get();
                 log::set_enabled(s.logging);
                 log::set_muted(s.log_muted);
+            }
+
+            // Q22 and Q25 are both "the user's own rows are gone and nothing says when".
+            // One line per start, before anything can write, is the before-and-after the
+            // investigation has never had — and it costs three counting queries against
+            // indexes on tables that hold tens of rows (D-193).
+            if let Ok(c) = cache.lock() {
+                match c.row_counts() {
+                    Ok(n) => log_info!(
+                        "cache",
+                        "open: {} servers, {} favourites, {} joins, {} population samples",
+                        n.servers,
+                        n.favourites,
+                        n.history,
+                        n.population
+                    ),
+                    Err(e) => log_warn!("cache", "could not count rows at open: {e}"),
+                }
             }
 
             let last_refresh = cache

@@ -309,6 +309,18 @@ pub struct VerifySummary {
 /// chunk and persists. With `announce`, also emits `servers:verify-done`
 /// (VerifySummary); only the automatic post-refresh pass announces, so on-demand
 /// checks of visible rows never masquerade as the full pass.
+/// The verification pass's own permit pool, kept at the interactive client's size —
+/// the pass is not being made gentler, it is being taken out of the queue the join
+/// dialog and the details pane share (D-193).
+const VERIFY_CONCURRENCY: usize = 128;
+/// Rows per `servers:verified` event. docs/04 §4 caps an event at ~200 KB and a row
+/// measures 558 B, so 128 rows is ~71 KB — small enough that the front end's derived
+/// chain shrugs at it, large enough that a pass is not thousands of events.
+const VERIFY_FLUSH_ROWS: usize = 128;
+/// …and a partial batch goes out anyway once this long has passed, so the last few
+/// stragglers of a pass are not held back by the ones that will never answer.
+const VERIFY_FLUSH_EVERY: std::time::Duration = std::time::Duration::from_millis(250);
+
 pub async fn run_verification(
     app: AppHandle,
     cache: Arc<Mutex<Cache>>,
@@ -320,20 +332,36 @@ pub async fn run_verification(
     // The automatic pass (announce) relies on Steam's fresh INFO and sends PLAYER only;
     // on-demand checks of visible rows also refresh ping and clock.
     let with_info = !announce;
+    let total = targets.len();
     let by_id: HashMap<String, Target> =
         targets.iter().map(|t| (t.id.clone(), t.clone())).collect();
-    let mut latest: HashMap<String, Verdict> = HashMap::with_capacity(targets.len());
+    let mut latest: HashMap<String, Verdict> = HashMap::with_capacity(total);
     let mut offline: Vec<Target> = Vec::new();
-    for chunk in targets.chunks(500) {
-        let results = verify::verify_many(&client, chunk.to_vec(), with_info).await;
-        for v in &results {
-            if v.verdict == Verdict::Offline {
-                if let Some(t) = by_id.get(&v.id) {
-                    offline.push(t.clone());
-                }
+    // Chunks of 500 meant the first result appeared only when the slowest of 500 had
+    // finished — measured at 2.95 s against 0.40 s streamed, and the whole pass 17.99 s
+    // against 15.00 s, because each barrier idled the pacer while the tail drained.
+    // Streaming needs its own permit pool: these tasks hold permits continuously, and
+    // in `state.a2s`'s shared FIFO that starved a row click of its three queries by 85×
+    // (D-193).
+    let client = client.with_concurrency(VERIFY_CONCURRENCY);
+    let mut pending = verify::verify_stream(&client, targets, with_info);
+    let mut batch: Vec<Verification> = Vec::with_capacity(VERIFY_FLUSH_ROWS);
+    let mut last_flush = Instant::now();
+    while let Some(v) = pending.next().await {
+        if v.verdict == Verdict::Offline {
+            if let Some(t) = by_id.get(&v.id) {
+                offline.push(t.clone());
             }
         }
-        publish(&app, &cache, &mut latest, results).await;
+        batch.push(v);
+        if batch.len() >= VERIFY_FLUSH_ROWS || last_flush.elapsed() >= VERIFY_FLUSH_EVERY {
+            publish(&app, &cache, &mut latest, std::mem::take(&mut batch)).await;
+            batch.reserve(VERIFY_FLUSH_ROWS);
+            last_flush = Instant::now();
+        }
+    }
+    if !batch.is_empty() {
+        publish(&app, &cache, &mut latest, batch).await;
     }
     // Second chance for targets that did not answer: a longer timeout, INFO included,
     // so a server that is merely slow or drops PLAYER is not reported as down.
@@ -345,7 +373,7 @@ pub async fn run_verification(
         publish(&app, &cache, &mut latest, results).await;
     }
     let mut summary = VerifySummary {
-        total: targets.len(),
+        total,
         elapsed_ms: t0.elapsed().as_millis() as u64,
         ..Default::default()
     };
@@ -521,8 +549,11 @@ pub async fn run_mod_scan(
         let _ = app.emit("servers:mods-done", &summary);
         return summary;
     }
-    // Gentler than the verification pass: RULES replies are up to ~5 KB each.
-    let client = client.with_rate(100).with_retries(1);
+    // Gentler than the verification pass: RULES replies are up to ~5 KB each. Its own
+    // permit pool, sized so that concurrency ÷ rate (64 ÷ 100 = 0.64 s) stays inside
+    // the 1 s deadline — sharing `state.a2s`'s 128 permits put 1.28 s of queue in front
+    // of the challenge leg and made the retry do 99 % of the work (D-193).
+    let client = client.with_concurrency(64).with_rate(100).with_retries(1);
     for chunk in targets.chunks(200) {
         let mut set = tokio::task::JoinSet::new();
         for (id, addr) in chunk.iter().cloned() {
@@ -772,6 +803,14 @@ fn news_thumb_dir(app: &AppHandle) -> AppResult<PathBuf> {
 #[tauri::command]
 pub async fn news_fetch(app: AppHandle, state: State<'_, AppState>) -> AppResult<NewsCached> {
     let items = crate::news::fetch(60).await.map_err(AppError::Internal)?;
+    // A valid reply with no posts is Steam having a bad day, not the news being gone.
+    // Writing it over the cache emptied the page and then deleted every thumbnail,
+    // because the keep-set was empty too — and since D-122 removed Refresh, the only
+    // way back was to wait half an hour (D-194).
+    if items.is_empty() {
+        crate::log_warn!("news", "Steam returned no posts; keeping the cached ones");
+        return news_cached(state).await;
+    }
     let now = ServerRow::now_unix();
     let json =
         serde_json::to_string(&items).map_err(|e| AppError::Internal(format!("news: {e}")))?;
