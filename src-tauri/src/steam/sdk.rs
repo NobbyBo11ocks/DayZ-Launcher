@@ -883,11 +883,29 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => return,
             };
-            // Presence reads (friends list, avatar) come from Steam's local cache and
-            // must not keep an otherwise idle session alive (D-077, D-103); every
-            // other command, and a session re-opened for any command, counts.
-            if !matches!(cmd, Cmd::Friends { .. } | Cmd::FriendAvatar { .. }) {
+            // Presence reads (friends list, avatar) and the Workshop's own update
+            // flags come from Steam's local cache and must not keep an otherwise idle
+            // session alive (D-077, D-103); every other command, and a session
+            // re-opened for any command, counts.
+            //
+            // StaleItems was missing, and the Workshop poll runs every 15 minutes -
+            // exactly the default `steam_idle_minutes`. So the release lasted about
+            // five seconds per cycle: Steam went on showing the user in DayZ and
+            // counting playtime all session, with a Shutdown/Init pair every quarter
+            // hour, which is the churn D-190 blamed for the 0xC0000409 exit (D-220).
+            let idle_safe = matches!(
+                cmd,
+                Cmd::Friends { .. } | Cmd::FriendAvatar { .. } | Cmd::StaleItems { .. }
+            );
+            if !idle_safe {
                 last_activity = Instant::now();
+            }
+            // A released session answers the Workshop poll with `None`, which
+            // `mods_stale` already reads as "could not be asked" rather than "nothing
+            // is stale" - so there is nothing worth re-opening a session for.
+            if session.is_none() && matches!(cmd, Cmd::StaleItems { .. }) {
+                reject(cmd, &events, "Steam session released while idle".into());
+                continue;
             }
             if session.is_none() && !matches!(cmd, Cmd::Shutdown) {
                 match open_session() {

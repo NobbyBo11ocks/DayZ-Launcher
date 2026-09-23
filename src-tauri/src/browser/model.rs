@@ -119,12 +119,16 @@ impl ServerRow {
             return 0;
         };
         match (a.parse::<i32>(), b.parse::<i32>(), c.parse::<i32>()) {
-            // `a` was unguarded: a server advertising "22.0.0" overflows i32, which
-            // in release wraps to a fabricated version that then tells the user the
-            // server will reject them, and in a dev build panics inside
-            // `direct_connect`'s await chain so the dialog never resolves (D-197).
+            // The D-197 guard bounded the *parts* and not the arithmetic, so it never
+            // fixed anything: `a * 100_000_000` passes i32::MAX at a = 22, and the sum
+            // overflows from "21.48.0" up. Release has overflow-checks off, so a server
+            // advertising "99.99.999999" became 1_410_065_407 -> "14.10.65407", a version
+            // nobody runs, which the join dialog then used to tell the user they would be
+            // rejected; a dev build panicked inside the DZSA import instead. Both inputs
+            // are server-controlled. Widen to i64 and let the conversion decide (D-219).
             (Ok(a), Ok(b), Ok(c)) if (0..100).contains(&a) && b < 100 && c < 1_000_000 => {
-                a * 100_000_000 + b * 1_000_000 + c
+                let v = i64::from(a) * 100_000_000 + i64::from(b) * 1_000_000 + i64::from(c);
+                i32::try_from(v).unwrap_or(0)
             }
             _ => 0,
         }
@@ -168,5 +172,12 @@ mod tests {
             "1.30.164014"
         );
         assert_eq!(ServerRow::version_int("garbage"), 0);
+        // Every one of these is a string a remote server can put in A2S_INFO or the
+        // DZSA JSON. Before D-219 the first overflowed i32, and in release (no
+        // overflow-checks) the rest wrapped to plausible-looking version numbers.
+        assert_eq!(ServerRow::version_int("21.47.483647"), 2_147_483_647);
+        assert_eq!(ServerRow::version_int("21.48.0"), 0);
+        assert_eq!(ServerRow::version_int("22.0.0"), 0);
+        assert_eq!(ServerRow::version_int("99.99.999999"), 0);
     }
 }

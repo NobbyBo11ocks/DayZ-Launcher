@@ -742,7 +742,12 @@ impl Cache {
         let mut catalog = Vec::new();
         {
             let mut stmt = self.conn.prepare(
-                "SELECT mod_id, MAX(name), COUNT(*) FROM server_mods GROUP BY mod_id ORDER BY 3 DESC, 2",
+                // `mod_id > 0`: id 0 is an unpublished, server-side-only mod. It ranked
+                // 154th of 10 593 here, so it sat inside the 300 the dropdown offers -
+                // and picking it set `filters.mod = 0`, which the filter reads as "any
+                // mod", so the list did not change and the control snapped back to
+                // "Any mod" (D-221).
+                "SELECT mod_id, MAX(name), COUNT(*) FROM server_mods WHERE mod_id > 0 GROUP BY mod_id ORDER BY 3 DESC, 2",
             )?;
             let rows = stmt.query_map([], |r| {
                 Ok(ModCatalogEntry {

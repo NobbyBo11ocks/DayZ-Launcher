@@ -405,7 +405,15 @@ pub fn run() {
                                     // back so the running pass or the next refresh still
                                     // gets them (D-208).
                                     log_info!("verify", "a pass is already running; skipped");
+                                    // Back into the accumulator the next refresh is
+                                    // still extending, so dedupe: otherwise refresh
+                                    // N+1 sends two PLAYER datagrams to every address
+                                    // N already covered (against D-037) and reports a
+                                    // total twice the sum of its verdicts, which is
+                                    // the arithmetic D-208 existed to fix (D-220).
                                     populated = targets;
+                                    populated.sort_by(|a, b| a.id.cmp(&b.id));
+                                    populated.dedup_by(|a, b| a.id == b.id);
                                     let _ = handle.emit(
                                         "servers:verify-done",
                                         &commands::VerifySummary {

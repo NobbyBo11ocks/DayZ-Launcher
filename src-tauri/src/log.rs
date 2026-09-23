@@ -133,6 +133,27 @@ pub fn path() -> Option<PathBuf> {
     sink().lock().ok().and_then(|s| s.path.clone())
 }
 
+/// Collapses the control characters that let a message forge log lines.
+///
+/// Most of what reaches this sink is ours, but not all of it: a server name arrives
+/// from A2S_INFO or the DZSA JSON and goes straight into the "join" and "verify"
+/// entries, and `log_ui` takes whatever the WebView sends. A name containing a
+/// newline and a plausible timestamp writes entries indistinguishable from real ones,
+/// in the file the user copies into a support report. The WebView's own path has
+/// flattened since D-160; the Rust macros never did (D-221).
+fn flatten(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\n' | '\r' => out.push_str("\\n"),
+            '\t' => out.push(' '),
+            c if c.is_control() => out.push(char::REPLACEMENT_CHARACTER),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// Appends one entry. Never panics and never blocks on a poisoned lock.
 pub fn write(level: Level, target: &str, message: impl Into<String>) {
     if !enabled() || muted(target) {
@@ -142,7 +163,7 @@ pub fn write(level: Level, target: &str, message: impl Into<String>) {
         at: now_ms(),
         level,
         target: target.to_string(),
-        message: message.into(),
+        message: flatten(&message.into()),
     };
 
     #[cfg(debug_assertions)]
@@ -163,8 +184,19 @@ pub fn write(level: Level, target: &str, message: impl Into<String>) {
         entry.target,
         entry.message
     );
-    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(path) {
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&path) {
         let _ = f.write_all(line.as_bytes());
+        // The cap was only ever applied in `init`, so a long session had no bound at
+        // all - and the fastest writer is `log_ui`, which the WebView calls on every
+        // `console.error`. A page in an error loop wrote until the disk filled and
+        // only the next start rotated (D-221). Checked from the handle we already
+        // hold, so this costs no extra syscall on the common path.
+        if f.metadata().map(|m| m.len() > MAX_BYTES).unwrap_or(false) {
+            drop(f);
+            if let Some(dir) = path.parent() {
+                let _ = fs::rename(&path, dir.join("launcher.1.log"));
+            }
+        }
     }
 }
 

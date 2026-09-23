@@ -1,6 +1,6 @@
 [package]
 name = "dayz-launcher"
-version = "0.1.31"
+version = "0.1.35"
 description = "Windows DayZ Standalone launcher: server browser, mod sync, direct launch"
 authors = ["DayZ Launcher contributors"]
 edition = "2021"

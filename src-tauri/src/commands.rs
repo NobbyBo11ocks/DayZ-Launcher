@@ -248,7 +248,13 @@ pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResu
         with_mods += mods.len();
         let c = Arc::clone(&cache);
         let for_db = batch.clone();
-        let _ = tauri::async_runtime::spawn_blocking(move || {
+        // Logging it was not enough: the command still returned Ok(n), still emitted
+        // a `servers:done` claiming n responded, and still wrote `last_refresh` - so
+        // on an unwritable cache the user was told thirteen thousand servers had been
+        // imported, watched the grid fill from the events, and found none of them on
+        // the next start. The comment below has named this bug class since D-186; now
+        // the result travels (D-220).
+        let wrote = tauri::async_runtime::spawn_blocking(move || {
             if let Ok(mut c) = c.lock() {
                 // Both were discarded, so a failed write still returned Ok(n) and
                 // the mod rows could be written for servers the upsert never stored
@@ -259,27 +265,30 @@ pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResu
                         "DZSA upsert of {} row(s) failed: {e}",
                         for_db.len()
                     );
-                } else if let Err(e) = c.replace_server_mods_many(&mods, now) {
+                    return Err(format!("could not store the server list: {e}"));
+                }
+                if let Err(e) = c.replace_server_mods_many(&mods, now) {
                     crate::log_error!(
                         "cache",
                         "DZSA mod lists for {} row(s) failed: {e}",
                         mods.len()
                     );
+                    return Err(format!("could not store the mod lists: {e}"));
                 }
+                Ok(())
+            } else {
+                Err("the server cache is unavailable".to_string())
             }
         })
-        .await;
+        .await
+        .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?;
+        wrote.map_err(AppError::Internal)?;
         let _ = app.emit("servers:batch", &batch);
     }
-    {
-        let c = Arc::clone(&cache);
-        let _ = tauri::async_runtime::spawn_blocking(move || {
-            if let Ok(c) = c.lock() {
-                let _ = c.set_meta("last_refresh", &now.to_string());
-            }
-        })
-        .await;
-    }
+    // `last_refresh` deliberately not written here. It seeds the Steam worker's 60 s
+    // throttle across restarts (lib.rs), so a DZSA import used to make the *next*
+    // start skip its automatic Steam refresh without saying so - and D-160 already
+    // says a non-Steam source must not claim the Steam refresh timestamp (D-220).
     let done = crate::steam::sdk::RefreshDone {
         total: n,
         responded: n,
@@ -310,13 +319,31 @@ pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResu
         targets.len()
     );
     if !targets.is_empty() {
-        tauri::async_runtime::spawn(run_verification(
-            app,
-            cache,
-            state.a2s.clone(),
-            targets,
-            true,
-        ));
+        // Every other announcing pass claims this first (D-197, D-204). This one did
+        // not, so a second DZSA import - or a Steam refresh whose pass *is* guarded,
+        // started when Steam came up mid-import - ran a second 128-permit pool on the
+        // same pacer, doubled the NAT flows to the same addresses (D-037), and emitted
+        // two `servers:verify-done`: the first cleared the spinner and posted its
+        // summary while the other pass was still writing (D-220).
+        let client = state.a2s.clone();
+        match InFlight::claim(&state.verifying) {
+            Some(guard) => {
+                tauri::async_runtime::spawn(async move {
+                    let _guard = guard;
+                    run_verification(app, cache, client, targets, true).await;
+                });
+            }
+            None => {
+                crate::log_info!("verify", "a pass is already running; DZSA pass skipped");
+                let _ = app.emit(
+                    "servers:verify-done",
+                    &VerifySummary {
+                        skipped: true,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
     } else {
         // Nothing to verify still has to close the pass (D-160): the UI sets
         // "verifying" as soon as the fallback is asked for, and only this event
@@ -1206,6 +1233,14 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
             .map(|d| {
                 d.mods
                     .iter()
+                    // Workshop id 0 is a mod that was never published - server-side
+                    // only. It can never appear in the local inventory, so it stayed in
+                    // `toSync` for ever: `canLaunch` was permanently false, the Join
+                    // button was never rendered, and the only offered action downloaded
+                    // id 0 and could not succeed. 97 of 3 446 cached servers (2.8 %) are
+                    // affected. `dzsa.rs` has filtered these since the fallback was
+                    // built; the live RULES path never did (D-221).
+                    .filter(|m| m.workshop_id > 0)
                     .map(|m| (m.workshop_id, m.name.clone()))
                     .collect()
             })
@@ -1460,6 +1495,14 @@ pub async fn launch_game(
             .map(|d| {
                 d.mods
                     .iter()
+                    // Workshop id 0 is a mod that was never published - server-side
+                    // only. It can never appear in the local inventory, so it stayed in
+                    // `toSync` for ever: `canLaunch` was permanently false, the Join
+                    // button was never rendered, and the only offered action downloaded
+                    // id 0 and could not succeed. 97 of 3 446 cached servers (2.8 %) are
+                    // affected. `dzsa.rs` has filtered these since the fallback was
+                    // built; the live RULES path never did (D-221).
+                    .filter(|m| m.workshop_id > 0)
                     .map(|m| (m.workshop_id, m.name.clone()))
                     .collect()
             })
@@ -1854,12 +1897,20 @@ pub async fn direct_connect(
     };
     let stored = vec![row.clone()];
     let c = Arc::clone(&state.cache);
-    let _ = tauri::async_runtime::spawn_blocking(move || {
-        if let Ok(mut c) = c.lock() {
-            let _ = c.upsert(&stored);
-        }
+    // The write was discarded and not even logged, while the command still returned
+    // the row and emitted `servers:batch` - so on an unwritable cache the server
+    // appeared in the grid and then `join_plan` and `launch_game`, which both start
+    // from `cached_row(..).ok_or("unknown server")`, refused it with nothing in the
+    // log to explain why. Every other cache write on this path reports (D-220).
+    tauri::async_runtime::spawn_blocking(move || match c.lock() {
+        Ok(mut c) => c
+            .upsert(&stored)
+            .map_err(|e| format!("could not store the server: {e}")),
+        Err(_) => Err("the server cache is unavailable".to_string()),
     })
-    .await;
+    .await
+    .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?
+    .map_err(AppError::Internal)?;
     let _ = app.emit("servers:batch", &vec![row.clone()]);
     if let Some(t) = Target::from_row(&row) {
         tauri::async_runtime::spawn(run_verification(
