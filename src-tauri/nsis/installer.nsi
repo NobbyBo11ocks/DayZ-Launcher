@@ -3,9 +3,10 @@
 ;   https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.11.5/crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi
 ; with the changes marked below by `; >>> dzl-change:` … `; <<< dzl-change`, each one
 ; carrying the upstream line it replaces so the checker can put them all back and
-; compare against the real thing (D-205). Today that is three: the per-user install
-; directory (D-067, S-56, Q19), the flags passed to the uninstaller an upgrade runs
-; (D-205), and refusing to skip a locked binary (D-205).
+; compare against the real thing (D-205). Today: the per-user install directory
+; (D-067, S-56, Q19), an options page before the install (D-206), the flags passed to
+; the uninstaller an upgrade runs and refusing to skip a locked binary (D-205), and
+; skipping the reinstall page for a straight upgrade (D-207).
 ; When @tauri-apps/cli is upgraded, run `node tools/nsis_template_check.js --write`,
 ; which re-fetches the template at the new tag and re-applies every marked change.
 ; --- end of DayZ Launcher header; everything below is upstream ---
@@ -249,12 +250,26 @@ Function PageReinstall
     StrCpy $R2 "$(addOrReinstall)"
     StrCpy $R3 "$(uninstallApp)"
     !insertmacro MUI_HEADER_TEXT "$(alreadyInstalled)" "$(chooseMaintenanceOption)"
+; >>> dzl-change:   ; Upgrading\n  ${ElseIf} $R0 = 1\n    StrCpy $R1 "$(olderOrUnknownVersionInstalled)"\n    StrCpy $R2 "$(uninstallBeforeInstalling)"\n    StrCpy $R3 "$(dontUninstall)"\n    !insertmacro MUI_HEADER_TEXT "$(alreadyInstalled)" "$(choowHowToInstall)"
+  ; An upgrade is not a question. Upstream shows a page whose pre-selected answer is
+  ; "Uninstall before installing", which launches the previous version's uninstaller
+  ; in the middle of the install — a second window the user did not ask for, and, on
+  ; anything older than this build, its confirm page with the "Delete application
+  ; data" checkbox on it. This installer overwrites in place; the uninstall achieves
+  ; nothing except losing shortcuts, pins and possibly the user's data. So: skip the
+  ; page for a straight upgrade, exactly as `/UPDATE` already does for the auto-updater.
+  ; Same-version reinstalls and downgrades still ask, because there the answer is
+  ; genuinely the user's (D-207).
   ; Upgrading
   ${ElseIf} $R0 = 1
+    ${If} $WixMode <> 1
+      Abort
+    ${EndIf}
     StrCpy $R1 "$(olderOrUnknownVersionInstalled)"
     StrCpy $R2 "$(uninstallBeforeInstalling)"
     StrCpy $R3 "$(dontUninstall)"
     !insertmacro MUI_HEADER_TEXT "$(alreadyInstalled)" "$(choowHowToInstall)"
+; <<< dzl-change
   ; Downgrading
   ${ElseIf} $R0 = -1
     StrCpy $R1 "$(newerVersionInstalled)"
