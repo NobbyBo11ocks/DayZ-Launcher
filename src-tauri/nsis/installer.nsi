@@ -6,7 +6,8 @@
 ; compare against the real thing (D-205). Today: the per-user install directory
 ; (D-067, S-56, Q19), an options page before the install (D-206), the flags passed to
 ; the uninstaller an upgrade runs and refusing to skip a locked binary (D-205), and
-; skipping the reinstall page for a straight upgrade (D-207).
+; skipping the reinstall page for a straight upgrade (D-207), keeping the Add/Remove
+; entry through an upgrade and waiting for the old binary's lock to clear (D-214).
 ; When @tauri-apps/cli is upgraded, run `node tools/nsis_template_check.js --write`,
 ; which re-fetches the template at the new tag and re-applies every marked change.
 ; --- end of DayZ Launcher header; everything below is upstream ---
@@ -462,7 +463,7 @@ Function PageOptions
   ${If} $OptNewsState = 1
     ${NSD_Check} $OptNewsCheckbox
   ${EndIf}
-  ${NSD_CreateLabel} 12u 24u 96% 26u "With the news page off, the launcher never contacts Steam's news feed, its picture CDN or YouTube. It can be turned back on at any time in Settings."
+  ${NSD_CreateLabel} 12u 24u 96% 34u "With the news page off, the launcher never contacts Steam's news feed, its picture CDN or YouTube. It can be turned back on at any time in Settings."
   Pop $0
   nsDialogs::Show
 FunctionEnd
@@ -744,10 +745,39 @@ Section Install
     !insertmacro NSIS_HOOK_PREINSTALL
   !endif
 
+; >>> dzl-change:   !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"\n\n  ; Copy main executable\n  File "${MAINBINARYSRCPATH}"
   !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+
+  ; CheckIfAppIsRunning kills the host and waits a flat 500 ms, but WebView2 spawns
+  ; children that outlive it and keep a handle on the install folder (D-196) — the
+  ; smoke test had to learn the same thing. Since AllowSkipFiles was turned off
+  ; (D-205) a locked binary no longer silently skips: the install aborts, so an
+  ; auto-update arriving a second too early now fails visibly. Wait for the lock to
+  ; clear instead of guessing at 500 ms, up to ten seconds, and test the one thing
+  ; that actually matters by trying to open the file for writing. Nothing is killed:
+  ; every msedgewebview2.exe on the machine has the same image name, and most of them
+  ; belong to other applications (D-214).
+  ${If} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
+    StrCpy $R9 0
+    wait_unlock_loop:
+      ClearErrors
+      FileOpen $R8 "$INSTDIR\${MAINBINARYNAME}.exe" a
+      ${IfNot} ${Errors}
+        FileClose $R8
+        Goto wait_unlock_done
+      ${EndIf}
+      IntOp $R9 $R9 + 1
+      ${If} $R9 >= 40
+        Goto wait_unlock_done
+      ${EndIf}
+      Sleep 250
+      Goto wait_unlock_loop
+    wait_unlock_done:
+  ${EndIf}
 
   ; Copy main executable
   File "${MAINBINARYSRCPATH}"
+; <<< dzl-change
 
   ; Copy resources
   {{#each resources_dirs}}
@@ -950,14 +980,25 @@ Section Uninstall
     ${EndIf}
   ${EndIf}
 
-  ; Remove registry information for add/remove programs
-  !if "${INSTALLMODE}" == "both"
-    DeleteRegKey SHCTX "${UNINSTKEY}"
-  !else if "${INSTALLMODE}" == "perMachine"
-    DeleteRegKey HKLM "${UNINSTKEY}"
-  !else
-    DeleteRegKey HKCU "${UNINSTKEY}"
-  !endif
+; >>> dzl-change:   ; Remove registry information for add/remove programs\n  !if "${INSTALLMODE}" == "both"\n    DeleteRegKey SHCTX "${UNINSTKEY}"\n  !else if "${INSTALLMODE}" == "perMachine"\n    DeleteRegKey HKLM "${UNINSTKEY}"\n  !else\n    DeleteRegKey HKCU "${UNINSTKEY}"\n  !endif
+  ; Remove registry information for add/remove programs.
+  ; Gated on $UpdateMode like the shortcuts above it; upstream leaves it ungated. An
+  ; upgrade runs this uninstaller partway through the install, and between here and
+  ; the install writing DisplayName back, a Cancel, a crash or a power cut left the
+  ; machine with no app, no Add/Remove entry and shortcuts pointing at a deleted exe,
+  ; recoverable only by downloading the installer again (D-214). Under /UPDATE the
+  ; installer rewrites every one of these values a few lines later, so keeping the
+  ; key leaks nothing.
+  ${If} $UpdateMode <> 1
+    !if "${INSTALLMODE}" == "both"
+      DeleteRegKey SHCTX "${UNINSTKEY}"
+    !else if "${INSTALLMODE}" == "perMachine"
+      DeleteRegKey HKLM "${UNINSTKEY}"
+    !else
+      DeleteRegKey HKCU "${UNINSTKEY}"
+    !endif
+  ${EndIf}
+; <<< dzl-change
 
   ; Removes the Autostart entry for ${PRODUCTNAME} from the HKCU Run key if it exists.
   ; This ensures the program does not launch automatically after uninstallation if it exists.

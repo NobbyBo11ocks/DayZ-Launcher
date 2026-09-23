@@ -91,7 +91,14 @@ certificate.
 1. Decide Trusted Signing vs. file certificate; record it in docs/09.
 2. Add the `bundle.windows` signing keys (or `signCommand`) and build once locally; verify with
    `Get-AuthenticodeSignature`.
-3. Add the workflow step and secrets; dry-run the workflow (build only) and check the artifact's
+3. **Sign the uninstaller too.** `signCommand` covers the app binaries and the installer, but the
+   NSIS template takes `UNINSTALLERSIGNCOMMAND` separately and Tauri leaves it empty, so a signed
+   installer would drop an *unsigned* `uninstall.exe` into the install folder — which is the
+   binary Windows runs from Add/Remove Programs, and the one an upgrade runs mid-install. Set
+   `bundle.windows.nsis.uninstallerSignCommand` (or confirm the CLI version derives it from
+   `signCommand`) and verify the shipped `uninstall.exe` with `Get-AuthenticodeSignature`, not
+   just the setup exe (D-214).
+4. Add the workflow step and secrets; dry-run the workflow (build only) and check the artifact's
    signature.
-4. Tag a release; confirm SmartScreen behaviour on a clean machine.
-5. Close Q11 in docs/10.
+5. Tag a release; confirm SmartScreen behaviour on a clean machine.
+6. Close Q11 in docs/10.

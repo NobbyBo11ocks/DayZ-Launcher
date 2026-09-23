@@ -33,6 +33,23 @@ process.exitCode = await main(process.argv.includes("--write"));
  * Splits a marked body into the blocks we changed and the upstream text each replaces.
  * `restored` is what upstream should look like once ours are put back.
  */
+/**
+ * The restore check is blind to anything added *inside* a marked block: each block is
+ * swapped for the upstream text its anchor carries, so extra lines there simply vanish.
+ * That is not hypothetical — a build of 0.1.30 carried `!insertmacro MUI_PAGE_FINISH`
+ * twice, once as a stray copy of the upstream line at the top of a block and once
+ * where we re-added it, and this checker passed it green. The installer showed the
+ * finish page twice. A page inserted twice is the shape that mistake takes, so it gets
+ * its own assertion (D-214).
+ */
+function duplicatePages(body) {
+  const seen = new Map();
+  for (const line of body.split("\n")) {
+    const m = /^\s*!insertmacro\s+(MUI_(?:UN)?PAGE_[A-Z_]+)/.exec(line);
+    if (m) seen.set(m[1], (seen.get(m[1]) ?? 0) + 1);
+  }
+  return [...seen].filter(([, n]) => n > 1);
+}
 function unmark(body) {
   const lines = body.split("\n");
   const out = [];
@@ -81,6 +98,14 @@ async function main(write) {
     return fail(String(e?.message ?? e));
   }
   if (blocks.length === 0) return fail("no `; >>> dzl-change:` blocks found; the template claims no deviations");
+
+  const dupes = duplicatePages(body);
+  if (dupes.length > 0) {
+    return fail(
+      "a wizard page is inserted more than once, which the restore check below cannot see: " +
+        dupes.map(([name, n]) => `${name} x${n}`).join(", "),
+    );
+  }
 
   if (restored === upstream && header.includes(tag)) {
     console.log(`ok: upstream ${tag} + ${blocks.length} marked changes (${body.split("\n").length} lines)`);
