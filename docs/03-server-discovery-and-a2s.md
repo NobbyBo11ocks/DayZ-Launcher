@@ -116,6 +116,13 @@ DayZ smuggles a binary structure through the key/value pairs (S-09, S-11, S-12, 
 
 4. Remaining plain pairs **[LIVE]**: `allowedBuild=0`, `clientPort=49591`, `dedicated=1`, `island=GreenCounty`, `language=65545`, `platform=win`, `requiredBuild=0`, `requiredVersion=129`, `timeLeft=15`.
 
+   `timeLeft` is **a constant, not per-server state**. Probed live on 2026-09-23 against ten
+   servers chosen to disagree with each other — two official Bohemia shards, two vanilla
+   community servers, two near-empty ones and four of the busiest on the list — whose in-game
+   clocks spanned 03:15 to 22:03. Every one answered `timeLeft=15`. So it is neither the
+   in-game hour nor minutes to the next restart, which was the reading that would have made it
+   worth showing before a loot run. It carries no information and nothing renders it (D-215).
+
 **Match mods by Workshop ID only.** Names differ between A2S (`mod.cpp`), DZSA (Workshop title) and the local junction name (`meta.cpp` name). Live example: `Community Framework` / `CF` / `@CF`.
 
 **DayZ does not split large RULES answers** (D-033). Live captures of a 121-mod server (4 587-byte datagram, 43 rules, 34 fragments) and a 105-mod server (5 309 bytes, 49 rules, 40 fragments, 197 signatures) each arrived as **one** UDP datagram, far above the 1 400-byte Source convention. Receive buffers must therefore be large (the client uses 64 KiB for RULES and 16 KiB for INFO and PLAYER); the split-packet path stays implemented per spec but has not been observed from DayZ. Fragment index is 1-based and fits in a byte (max seen 40).
