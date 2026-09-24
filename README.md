@@ -26,7 +26,6 @@
 <br>
 
 <img src="docs/screenshots/servers.png" width="900" alt="The server browser: country flags, verified player counts, filter bar, and a details pane with the server's mods and population history">
-<sub>Screenshots taken at v0.1.25 and due a retake: since then the filter bar gained the PVE/PVP/RP row and ping presets, the map column shows names rather than folder ids, and the details pane lists other servers at the same address.</sub>
 
 </div>
 
