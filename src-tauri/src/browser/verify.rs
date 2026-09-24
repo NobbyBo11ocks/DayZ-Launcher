@@ -1,11 +1,13 @@
-//! Population trust: rules R2–R5 from docs/11-fake-population-detection.md.
+//! Population trust: rules R2–R5 and the continuity rule R11 from docs/11-fake-population-detection.md.
 //!
 //! For each server: one A2S_INFO (fresh reported count, ping, clock) and one
 //! A2S_PLAYER (real head-count). The verdict compares the two and inspects the
 //! player entries for synthetic patterns.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
+use std::sync::{LazyLock, Mutex};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinSet;
@@ -131,7 +133,11 @@ pub fn judge(
                 // distinct durations — so young sessions only count when they also
                 // repeat.
                 let repetitive = distinct.len() * 3 <= v as usize;
-                if distinct.len() <= 2 || named || (all_young && repetitive) {
+                // `distinct <= 2` alone fired on a five-player restart reconnect
+                // (durations 10.9–11.9 s, 34 more joined within five minutes), so
+                // it needs the list not to be young; a young fabricated list is
+                // still caught by `repetitive` from six entries up (D-233).
+                if (distinct.len() <= 2 && !all_young) || named || (all_young && repetitive) {
                     return (
                         Verdict::Synthetic,
                         Some(v),
@@ -143,13 +149,17 @@ pub fn judge(
                 }
             }
             let diff = reported - v;
-            // With a fresh INFO (the on-demand path) the two datagrams are ~50 ms
-            // apart and can only disagree by the players who joined or left in
-            // between: docs/11 R2 says two, the code allowed four. The automatic
-            // pass compares against Steam's own ping, up to a minute old, and keeps
-            // the wider band (D-233).
-            let slack = if info.is_some() { 3 } else { 5 };
-            if diff >= slack || (max > 0 && diff * 5 >= max && diff >= 3) {
+            // Four ghosts of tolerance on every path, and deliberately so. It looked
+            // like a fresh INFO could only differ from PLAYER by the joins and leaves
+            // in the 50 ms between the datagrams, and a slack of three was shipped
+            // briefly on that reasoning; a 245-address live probe then found ~70
+            // honest servers on one hosting provider whose INFO comes from an edge
+            // cache and whose PLAYER is a 100-second snapshot. Around every restart
+            // the two disagree by a few for ~15 minutes, and three would have flagged
+            // them every three hours. The 20 % clause needs three ghosts: one or two
+            // connecting players on a ten-slot server tripped it four times in 102
+            // verdicts (D-233).
+            if diff >= 5 || (max > 0 && diff * 5 >= max && diff >= 3) {
                 (
                     Verdict::Inflated,
                     Some(v),
@@ -223,6 +233,134 @@ pub async fn verify_many(
     out
 }
 
+/// What the previous check saw on one server, for the continuity rule (D-233).
+struct Seen {
+    at: Instant,
+    durations: Vec<f32>,
+    strikes: u8,
+}
+
+/// Sessions per server from the previous check. Only servers that answered PLAYER
+/// with five or more entries are kept, and the map is cleared past 20 000 entries,
+/// which is more servers than have ever verified here.
+static LAST_SEEN: LazyLock<Mutex<HashMap<String, Seen>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Two checks closer than this cannot tell a re-drawn list from a stable one.
+const CONTINUITY_MIN_GAP_SECS: f32 = 60.0;
+/// How far the real advance may sit from the wall-clock gap. A snapshot-serving host
+/// hands out a PLAYER list refreshed every 100 s, so its durations advance by the
+/// snapshot's age, not the gap — 400.0 s over a 341.9 s gap was measured live (D-233).
+const CONTINUITY_SHIFT_WINDOW_SECS: f32 = 120.0;
+/// Once the shift is known, real durations line up to well under a second; three
+/// seconds covers the pacer and a few-second proxy cache (docs/11, T9).
+const CONTINUITY_SLACK_SECS: f32 = 3.0;
+/// Consecutive failed comparisons before the verdict changes.
+const CONTINUITY_STRIKES: u8 = 2;
+
+/// How many of `prev` reappear in `now` advanced by exactly `shift`, each entry used once.
+pub fn carried_over(prev: &[f32], now: &[f32], shift: f32, slack: f32) -> usize {
+    let mut pool: Vec<f32> = now.to_vec();
+    let mut matched = 0;
+    for &d in prev {
+        let want = d + shift;
+        if let Some(i) = pool.iter().position(|&n| (n - want).abs() <= slack) {
+            pool.swap_remove(i);
+            matched += 1;
+        }
+    }
+    matched
+}
+
+/// The most of `prev` that any single shift within `window` of `dt` carries into
+/// `now`. Candidate shifts are the differences between each of the first three old
+/// durations and every new one, so a session that left does not hide the shift; at
+/// most 3 × 127 candidates, each scored in one pass (D-233).
+pub fn best_carried_over(prev: &[f32], now: &[f32], dt: f32, window: f32, slack: f32) -> usize {
+    let mut best = 0;
+    for &p in prev.iter().take(3) {
+        for &n in now {
+            let shift = n - p;
+            if (shift - dt).abs() > window {
+                continue;
+            }
+            let m = carried_over(prev, now, shift, slack);
+            if m > best {
+                best = m;
+                if best == prev.len() {
+                    return best;
+                }
+            }
+        }
+    }
+    best
+}
+
+/// Rule R11: real sessions carry over between checks, advanced by the time elapsed;
+/// a fabricated list is re-drawn on every query.
+///
+/// The one tool found that fakes A2S_PLAYER (docs/11, T2) appends entries whose
+/// durations are `random() × 10 000` on each query, after the real ones. R2 passes it
+/// (INFO matches the list) and R5 passes it (distinct, not young, unnamed). Between
+/// two checks a minute or more apart every real duration reappears advanced by the
+/// gap; the fakes never do. Two consecutive checks in which at most one session — or
+/// a fifth of them, on a busy server — carried over, and the list is synthetic. A
+/// restart is exempt (every session younger than the gap), and so is a list that
+/// halved, which is a wipe or a mass leave and not a lie. A later check that carries
+/// over clears the strikes, so the verdict heals itself (D-233).
+pub fn continuity(id: &str, durations: &[f32]) -> Option<String> {
+    if durations.len() < 5 {
+        return None;
+    }
+    let now = Instant::now();
+    let Ok(mut map) = LAST_SEEN.lock() else {
+        return None;
+    };
+    if map.len() > 20_000 {
+        map.clear();
+    }
+    let mut strikes = 0u8;
+    let mut reason = None;
+    if let Some(prev) = map.get(id) {
+        let dt = now.duration_since(prev.at).as_secs_f32();
+        if dt < CONTINUITY_MIN_GAP_SECS {
+            // Too soon to tell: keep the earlier sample and its strikes.
+            return None;
+        }
+        let restarted = durations.iter().all(|&d| d < dt);
+        let halved = durations.len() * 2 < prev.durations.len();
+        if prev.durations.len() >= 5 && !restarted && !halved {
+            let matched = best_carried_over(
+                &prev.durations,
+                durations,
+                dt,
+                CONTINUITY_SHIFT_WINDOW_SECS,
+                CONTINUITY_SLACK_SECS,
+            );
+            let floor = (prev.durations.len() / 5).max(1);
+            if matched <= floor {
+                strikes = prev.strikes.saturating_add(1);
+                if strikes >= CONTINUITY_STRIKES {
+                    reason = Some(format!(
+                        "{matched} of {} sessions carried over between checks {:.0} s apart",
+                        prev.durations.len(),
+                        dt
+                    ));
+                }
+            }
+        }
+    }
+    map.insert(
+        id.to_string(),
+        Seen {
+            at: now,
+            durations: durations.to_vec(),
+            strikes,
+        },
+    );
+    reason
+}
+
 pub async fn verify_one(client: &Client, t: Target, with_info: bool) -> Verification {
     let info = if with_info {
         client.info(t.addr).await.ok()
@@ -230,12 +368,23 @@ pub async fn verify_one(client: &Client, t: Target, with_info: bool) -> Verifica
         None
     };
     let players = client.players(t.addr).await;
-    let (verdict, verified, reason) = judge(
+    let (mut verdict, verified, mut reason) = judge(
         info.as_ref().map(|r| &r.value),
         players.as_ref().map(|r| &r.value),
         t.reported,
         t.max_players,
     );
+    // R11 runs only on a list R2 and R5 have already passed; it is the check those
+    // two cannot make from one sample (D-233).
+    if verdict == Verdict::Verified {
+        if let Ok(p) = players.as_ref() {
+            let durations: Vec<f32> = p.value.players.iter().map(|x| x.duration_secs).collect();
+            if let Some(why) = continuity(&t.id, &durations) {
+                verdict = Verdict::Synthetic;
+                reason = why;
+            }
+        }
+    }
     let (reported, max_players) = info
         .as_ref()
         .map(|r| (r.value.players as i32, r.value.max_players as i32))
@@ -262,6 +411,50 @@ mod tests {
         info,
         packet::{classify, Datagram},
     };
+
+    #[test]
+    fn continuity_real_sessions_carry_over() {
+        // Twenty sessions two minutes later: every duration advanced by 120 s.
+        let a: Vec<f32> = (0..20).map(|i| 300.0 + i as f32 * 37.0).collect();
+        let b: Vec<f32> = a.iter().map(|d| d + 120.0).collect();
+        assert_eq!(best_carried_over(&a, &b, 120.0, 120.0, 3.0), 20);
+        // One left and one joined: nineteen still carry over, and the one that left
+        // was among the three the shift candidates are drawn from.
+        let mut c = b.clone();
+        c[0] = 12.0;
+        assert_eq!(best_carried_over(&a, &c, 120.0, 120.0, 3.0), 19);
+        // A snapshot-serving host: durations advanced 400 s over a 342 s gap (measured
+        // live on Dead City), and a few-second proxy cache at +6 s (KarmaKrew).
+        let d: Vec<f32> = a.iter().map(|x| x + 400.0).collect();
+        assert_eq!(best_carried_over(&a, &d, 341.9, 120.0, 3.0), 20);
+        let e: Vec<f32> = a.iter().map(|x| x + 126.0).collect();
+        assert_eq!(best_carried_over(&a, &e, 120.0, 120.0, 3.0), 20);
+    }
+
+    #[test]
+    fn continuity_redrawn_list_does_not_carry_over() {
+        // docs/11 T2: `random() × 10 000` on every query. One real player at 2 000 s
+        // carries over; nineteen fakes do not.
+        let mut a: Vec<f32> = (1..20).map(|i| (i * 7919 % 10_000) as f32).collect();
+        a.push(2000.0);
+        let mut b: Vec<f32> = (1..20).map(|i| (i * 104_729 % 10_000) as f32).collect();
+        b.push(2120.0);
+        // No shift lines up more than the floor a twenty-entry list allows (four): the
+        // real player plus whatever coincides within three seconds.
+        assert!(best_carried_over(&a, &b, 120.0, 120.0, 3.0) <= 4);
+    }
+
+    #[test]
+    fn continuity_needs_a_gap_and_two_strikes() {
+        // Same id, two immediate calls: the second is inside the minimum gap, so it
+        // neither strikes nor replaces the sample.
+        let a: Vec<f32> = (0..10).map(|i| 500.0 + i as f32 * 50.0).collect();
+        let b: Vec<f32> = (0..10).map(|i| (i * 977 % 10_000) as f32).collect();
+        assert!(continuity("test:1", &a).is_none());
+        assert!(continuity("test:1", &b).is_none());
+        // Fewer than five entries never take part.
+        assert!(continuity("test:2", &[1.0, 2.0, 3.0]).is_none());
+    }
 
     fn players(durations: &[f32], name: &str) -> Players {
         Players {
