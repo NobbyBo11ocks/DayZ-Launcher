@@ -235,7 +235,7 @@
         <span class="muted">The server has stopped answering player queries; Steam still sees players on it. Showing the last head-count, not the server's claim.</span>
       {:else if v && vouched}
         <strong>Player count unconfirmed</strong>
-        <span class="muted">The server does not answer player queries. Steam sees at least one session, which does not confirm the {row.players} it claims (D-233).</span>
+        <span class="muted">The server does not answer player queries. Steam sees at least one session, which does not confirm the {row.players} it claims.</span>
       {:else if v}
         <strong>{verdictLabel[v.verdict]}</strong>
         <span class="muted">{v.reason}</span>
