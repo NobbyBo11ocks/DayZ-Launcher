@@ -37,14 +37,14 @@ DayZ's server list is full of servers that say they have forty players and have 
 
 This one asks the server directly, counts the players itself, and compares the answer with Steam's authenticated session count. A full sweep of this machine's list flagged **6 309 of 13 380 servers** — 47 % — and hid them by default.
 
-That number is also why the automatic refresh asks Steam only for servers that have players: it arrives in about forty seconds and it skips the partitions where almost all of the fakes live. Of the 3 446 populated servers in the current cache, 25 did not verify and 20 of those are flagged and hidden — the difference is the five that refuse player queries while Steam vouches for them, which the rule deliberately keeps. Press **Refresh** when you want the empty ones too — a server you can be first on, or your own at an off-hour — and the list will say so when they are missing.
+That number is also why the automatic refresh asks Steam only for servers that have players: it arrives in about forty seconds and it skips the partitions where almost all of the fakes live. Of the 3 446 populated servers in the current cache, 25 did not verify and 20 of those are flagged and hidden — the difference is the five that refuse player queries while Steam vouches that someone is there. That vouch keeps a row visible only once a real head-count has been taken; until then the details pane says "Player count unconfirmed". Press **Refresh** when you want the empty ones too — a server you can be first on, or your own at an off-hour — and the list will say so when they are missing.
 
 <table>
 <tr><td width="33%" align="center">
 
 ### ✓ Verified
 
-Every populated server queried directly with A2S and cross-checked against Steam. Inflated and fabricated counts are flagged and hidden.
+Every populated server queried directly with A2S and cross-checked against Steam — and against the previous check. Inflated, fabricated and re-drawn counts are flagged and hidden.
 
 </td><td width="33%" align="center">
 
@@ -155,7 +155,7 @@ No accounts, no API keys, no telemetry. Every destination it contacts is listed 
 ```mermaid
 flowchart LR
   Steam[("Steam client")] -- matchmaking list --> Cache[("SQLite cache")]
-  Servers["Game servers"] -- "A2S info · rules · players" --> Verify{"Trust rules<br/>R0–R5"}
+  Servers["Game servers"] -- "A2S info · rules · players" --> Verify{"Trust rules<br/>R0–R11"}
   Verify -- verified --> Cache
   Verify -- inflated / fake --> Hidden["Hidden by default"]
   Cache --> UI["Server browser"]
@@ -167,7 +167,7 @@ flowchart LR
 ```
 
 1. **List.** The Steamworks matchmaking API supplies the server list with pings, the same list the in-game browser sees. It is cached in SQLite so the previous list appears instantly and is refreshed in the background.
-2. **Verify.** Populated servers are queried directly with A2S (INFO, RULES, PLAYER). The advertised count is checked against the player list and against Steam; servers that fail the trust rules are marked inflated or fake. The rules, and what each one caught, are in [docs/11](docs/11-fake-population-detection.md).
+2. **Verify.** Populated servers are queried directly with A2S (INFO, RULES, PLAYER). The advertised count is checked against the player list, against Steam, and against the previous check: real sessions carry over between checks advanced by the gap, while a fabricated list is re-drawn on every query. A claim above the engine's 127-slot ceiling and an exact copy of a verified server's name on another address count against a row as well. Servers that fail the trust rules are marked inflated or fake. The rules, and what each one caught, are in [docs/11](docs/11-fake-population-detection.md).
 3. **Join.** The join plan compares the server's mod list with your Workshop items, subscribes and downloads what is missing, creates `!Workshop\@<mod>` junctions matched by Workshop ID, and starts `DayZ_BE.exe` with the official argument form.
 4. **Friends and news.** Friends' servers come from Steam's game info and rich presence. News comes from Steam's news feed for DayZ; pictures are shrunk on the host — 360 px for the cards, 640 for the featured one — so the window stays light.
 
