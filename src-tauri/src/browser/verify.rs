@@ -143,7 +143,13 @@ pub fn judge(
                 }
             }
             let diff = reported - v;
-            if diff >= 5 || (max > 0 && diff * 5 >= max && diff > 0) {
+            // With a fresh INFO (the on-demand path) the two datagrams are ~50 ms
+            // apart and can only disagree by the players who joined or left in
+            // between: docs/11 R2 says two, the code allowed four. The automatic
+            // pass compares against Steam's own ping, up to a minute old, and keeps
+            // the wider band (D-233).
+            let slack = if info.is_some() { 3 } else { 5 };
+            if diff >= slack || (max > 0 && diff * 5 >= max && diff >= 3) {
                 (
                     Verdict::Inflated,
                     Some(v),

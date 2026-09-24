@@ -12,7 +12,7 @@
   import { external } from "./external";
   import { mapLabel } from "./maps";
   import { servers } from "./state/servers.svelte";
-  import { clock, countryName, isInflated, trustedPlayers, type Diagnostics, type PopulationSample, type ServerDetails, type ServerRow } from "./types";
+  import { clock, countryName, type Diagnostics, isInflated, type PopulationSample, queueOf, type ServerDetails, type ServerRow, trustedPlayers } from "./types";
 
   let { row, localVersion }: { row: ServerRow | null; localVersion: string | null } = $props();
 
@@ -202,6 +202,7 @@
     {@const v = details?.verification}
     {@const verdict = v?.verdict ?? row.verdict}
     {@const vouched = row.steamEmpty === false && verdict === "unverifiable"}
+    {@const counted = row.verifiedPlayers != null}
     {@const versionOk = !localVersion || row.version === localVersion}
 
     <header class="head">
@@ -225,13 +226,16 @@
       </div>
     </header>
 
-    <section class="trust" class:bad={verdict && verdict !== "verified" && !vouched} class:good={verdict === "verified" || vouched}>
+    <section class="trust" class:bad={verdict && verdict !== "verified" && !(vouched && counted)} class:good={verdict === "verified"}>
       {#if isInflated(row) && !v}
         <strong>Inflated player count</strong>
         <span class="muted">Steam reports 0 authenticated players; the server claims {row.players}.</span>
+      {:else if v && vouched && counted}
+        <strong>Last counted {row.verifiedPlayers}</strong>
+        <span class="muted">The server has stopped answering player queries; Steam still sees players on it. Showing the last head-count, not the server's claim.</span>
       {:else if v && vouched}
-        <strong>Steam-confirmed players</strong>
-        <span class="muted">The server does not answer player queries, but Steam's authenticated session count shows real players. Showing the server's own number.</span>
+        <strong>Player count unconfirmed</strong>
+        <span class="muted">The server does not answer player queries. Steam sees at least one session, which does not confirm the {row.players} it claims (D-233).</span>
       {:else if v}
         <strong>{verdictLabel[v.verdict]}</strong>
         <span class="muted">{v.reason}</span>
@@ -244,7 +248,7 @@
       <dt>Players</dt>
       <dd>
         <strong>{trustedPlayers(row)}</strong> / {row.maxPlayers}
-        {#if row.tags.queue} <span class="muted">· {row.tags.queue} in queue</span>{/if}
+        {#if queueOf(row)} <span class="muted">· {queueOf(row)} in queue</span>{/if}
         {#if row.verifiedPlayers != null && row.players !== row.verifiedPlayers} <span class="muted">· server claims {row.players}</span>{/if}
       </dd>
       <dt>Ping</dt>

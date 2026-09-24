@@ -3,7 +3,7 @@
   // Virtualised server table (docs/05 §5, docs/06 §2): fixed 36 px rows, renders only
   // the viewport plus overscan, reports visible ids for verification, keyboard nav.
   import Flag from "./Flag.svelte";
-  import { clock, isInflated, isUntrusted, isUnchecked, trustedPlayers, type ServerRow } from "./types";
+  import { clock, isInflated, isUnchecked, isUntrusted, queueOf, type ServerRow, trustedPlayers } from "./types";
   import type { SortKey } from "./state/servers.svelte";
 
   let {
@@ -292,7 +292,9 @@
                   ? `Inflated: server claims ${r.players}, ${r.verifiedPlayers ?? 0} actually connected`
                   : r.verdict === "unverifiable"
                     ? r.steamEmpty === false
-                      ? "Server does not answer player queries; Steam confirms it has authenticated players (count is the server's own)"
+                      ? r.verifiedPlayers != null
+                        ? "Server has stopped answering player queries; showing its last head-count"
+                        : "Server does not answer player queries; Steam sees a session but the number is the server's own, unconfirmed"
                       : "Server refuses player queries while claiming players"
                     : r.verdict === "synthetic"
                       ? "Player list looks fabricated"
@@ -308,7 +310,7 @@
                    server that answers INFO and firewalls PLAYER relies on. -->
               <span class="txt" class:muted={unchecked && !untrusted}>
                 {#if untrusted}<span class="warn">⚠</span>{:else if unchecked}<span class="unchecked">?</span>{/if}
-                {pop}/{r.maxPlayers}{#if r.tags.queue}<span class="muted"> +{r.tags.queue}</span>{/if}
+                {unchecked ? r.players : pop}/{r.maxPlayers}{#if queueOf(r)}<span class="muted"> +{queueOf(r)}</span>{/if}
               </span>
             </div>
             <div role="gridcell" class="cell c-num {pingClass(r.pingMs)}" title={pingTitle(r.pingMs)}>{r.pingMs}</div>

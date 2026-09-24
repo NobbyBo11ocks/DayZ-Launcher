@@ -10,23 +10,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { uiPrefs } from "./uiprefs.svelte";
 import { describe, logWarn } from "../log";
-import {
-  isUntrusted,
-  trustedPlayers,
-  type CachedServers,
-  type Favourite,
-  type FriendInfo,
-  type HistoryEntry,
-  type ImportResult,
-  type ModScanSummary,
-  type ModsIndex,
-  type RefreshDone,
-  type ServerMods,
-  type ServerRow,
-  type SteamStatus,
-  type Verification,
-  type VerifySummary,
-} from "../types";
+import { type CachedServers, type Favourite, type FriendInfo, type HistoryEntry, type ImportResult, isUntrusted, type ModScanSummary, type ModsIndex, queueOf, type RefreshDone, type ServerMods, type ServerRow, type SteamStatus, trustedPlayers, type Verification, type VerifySummary } from "../types";
 
 export type SortKey = "name" | "map" | "mods" | "players" | "ping" | "time" | "version";
 export type Perspective = "any" | "1pp" | "3pp";
@@ -449,7 +433,7 @@ class ServersStore {
       const pop = trustedPlayers(r);
       if (notFull && pop >= r.maxPlayers) continue;
       if (notEmpty && pop <= 0) continue;
-      if (hasQueue && !(r.tags.queue && r.tags.queue > 0)) continue;
+      if (hasQueue && queueOf(r) === 0) continue;
       if (noPassword && r.password) continue;
       // 13 375 of 13 380 servers run BattlEye, so the chip that used to sit here
       // filtered out five of them; the hive is the distinction that changes what a

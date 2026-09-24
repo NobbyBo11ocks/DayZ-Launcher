@@ -126,7 +126,16 @@ export const isUntrusted = (r: ServerRow): boolean =>
   r.verdict === "inflated" ||
   r.verdict === "synthetic" ||
   r.verdict === "offline" ||
-  (r.verdict === "unverifiable" && r.steamEmpty !== false);
+  // No DayZ server has ever verified above 116 here, and the engine caps a slot list at
+  // 127; 2 323 cached rows claim more, every one of them a Steam-says-empty fake. Insurance
+  // for the day one of them also holds a Steam session (D-233).
+  r.players > 127 ||
+  // Steam vouching used to override "unverifiable" outright, which trusted the
+  // server's own INFO claim for any operator holding one Steam session and dropping
+  // PLAYER: three fingerprinted farm boxes sat on screen at 96, 67 and 44 that way.
+  // The vouch now only keeps a server visible when a real head-count was taken
+  // before; a claim nobody has ever counted is untrusted whatever Steam says (D-233).
+  (r.verdict === "unverifiable" && !(r.steamEmpty === false && r.verifiedPlayers != null));
 
 /**
  * True when the number on screen is the server's own claim rather than a head-count
@@ -137,8 +146,31 @@ export const isUntrusted = (r: ServerRow): boolean =>
 export const isUnchecked = (r: ServerRow): boolean =>
   r.verifiedPlayers == null && (r.verdict === "unverifiable" || r.verdict === "offline" || r.verdict == null);
 
-/** Population a player may rely on (mirrors `judge` in browser/verify.rs). */
-export const trustedPlayers = (r: ServerRow): number => (r.verifiedPlayers ?? (isInflated(r) ? 0 : r.players));
+/**
+ * Population a player may rely on (mirrors `judge` in browser/verify.rs). This is
+ * what the list sorts by and what the title-bar count adds up, so it must never be
+ * a number only the server has asserted.
+ */
+export const trustedPlayers = (r: ServerRow): number => {
+  // A fresh Steam batch saying empty, with INFO agreeing at 0, beats a head-count
+  // from hours ago: 87 live rows painted a 20-hour-old 3–5 over a server everyone
+  // else could see was empty (D-233).
+  if (r.steamEmpty === true && r.players === 0) return 0;
+  if (r.verifiedPlayers != null) return r.verifiedPlayers;
+  if (isInflated(r)) return 0;
+  // A server that refuses PLAYER has a claim, not a count. The cell still shows the
+  // claim, dimmed and marked "?"; the sort must not reward it (D-233).
+  if (r.verdict === "unverifiable") return 0;
+  return r.players;
+};
+
+/**
+ * The queue a server advertises, believed only when the server is actually full.
+ * `lqs<N>` is a free-text keyword, and a 7-player server was showing "+172" with
+ * it — 486 never-verified rows advertise one (D-233).
+ */
+export const queueOf = (r: ServerRow): number =>
+  r.tags.queue && r.tags.queue > 0 && trustedPlayers(r) >= r.maxPlayers - 2 ? r.tags.queue : 0;
 
 export type SteamStatus = {
   initialized: boolean;

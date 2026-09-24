@@ -5,3 +5,6 @@ dist/
 *.timestamp-*
 *.log
 Thumbs.db
+
+# Local copies of the live cache for audits; never committed (D-233).
+.audit/
