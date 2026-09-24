@@ -627,6 +627,23 @@ impl Cache {
     }
 
     /// Drops rows not confirmed for `max_age_secs` (and their mod lists); returns how many were removed.
+    /// Withdraws Steam's vouch from every server the populated partition did not
+    /// return this time.
+    ///
+    /// `steam_empty = 0` meant "Steam listed this server as having players" *at some*
+    /// refresh, and nothing ever withdrew it: the automatic refresh asks for
+    /// `hasplayers` only, so a server that dropped out of that list simply kept its
+    /// vouch, for up to the 30-day prune. 2 669 vouched rows in the live cache were
+    /// absent from the latest refresh, 19 of them among the 27 rows the vouch was
+    /// rescuing from an "unverifiable" verdict. A vouch is now good for one refresh;
+    /// a server Steam does not list this time goes back to unknown (D-233).
+    pub fn unvouch_unseen(&self, refresh_started: i64) -> rusqlite::Result<usize> {
+        self.conn.execute(
+            "UPDATE servers SET steam_empty = NULL WHERE steam_empty = 0 AND last_seen < ?1",
+            params![refresh_started],
+        )
+    }
+
     pub fn prune(&self, max_age_secs: i64) -> rusqlite::Result<usize> {
         let cutoff = ServerRow::now_unix() - max_age_secs;
         // Never prune a favourite (D-159): dropping the row emptied the Favourites

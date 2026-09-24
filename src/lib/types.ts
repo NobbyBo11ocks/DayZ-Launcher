@@ -104,11 +104,19 @@ export type ServerRow = {
   version: string;
   pingMs: number;
   tags: DayzTags;
+  /** Steam's INFO bot count. Equal to `players` on every spoofed row measured; see `isUntrusted` (D-233). */
+  bots?: number;
   verifiedPlayers?: number | null;
   /** Steam's master reported zero authenticated players (row from a `noplayers` partition). */
   steamEmpty?: boolean | null;
   verifiedAt?: number | null;
   verdict?: Verdict | null;
+  /**
+   * Front-end only, set by the store: this row's exact name belongs to a server that
+   * verified on another address, and this copy never has. 2 771 rows in the live cache,
+   * 0 collisions among 1 077 honest populated names (D-233).
+   */
+  clone?: boolean;
   /** ISO 3166-1 alpha-2 from the embedded GeoIP table, absent when unknown (D-073). */
   country?: string | null;
 };
@@ -130,6 +138,12 @@ export const isUntrusted = (r: ServerRow): boolean =>
   // 127; 2 323 cached rows claim more, every one of them a Steam-says-empty fake. Insurance
   // for the day one of them also holds a Steam session (D-233).
   r.players > 127 ||
+  // The bots byte, as a prior on rows nobody has counted: the INFO patchers write it
+  // equal to their fabricated count. Honest servers with AI declare bots != players, and
+  // the three honest rows where the two happen to agree all have a head-count that
+  // exempts them here (D-233).
+  (r.verifiedPlayers == null && (r.bots ?? 0) > 0 && r.bots === r.players) ||
+  r.clone === true ||
   // Steam vouching used to override "unverifiable" outright, which trusted the
   // server's own INFO claim for any operator holding one Steam session and dropping
   // PLAYER: three fingerprinted farm boxes sat on screen at 96, 67 and 44 that way.

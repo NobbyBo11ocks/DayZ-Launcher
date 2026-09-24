@@ -286,8 +286,10 @@
             <div
               role="gridcell"
               class="cell c-num players"
-              title={isInflated(r)
-                ? `Steam reports 0 authenticated players; the server claims ${r.players}`
+              title={r.clone
+                ? "Same name as a server that verified on another address; this copy never has"
+                : isInflated(r)
+                  ? `Steam reports 0 authenticated players; the server claims ${r.players}`
                 : r.verdict === "inflated"
                   ? `Inflated: server claims ${r.players}, ${r.verifiedPlayers ?? 0} actually connected`
                   : r.verdict === "unverifiable"

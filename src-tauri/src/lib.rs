@@ -337,11 +337,29 @@ pub fn run() {
                             // real wrote last_refresh, pruned rows the list never renewed
                             // and reported "0 of 0 shown" as a success.
                             let full_list = d.source == "steam" && !d.rejected;
+                            // Only a refresh that Steam answered completely may withdraw
+                            // vouches: a capped or early-stopped one did not see every
+                            // populated server, and withdrawing on it would punish the
+                            // ones it never reached (D-233).
+                            let complete = full_list && !d.capped && !d.stopped_early;
+                            let refresh_started = browser::ServerRow::now_unix()
+                                - (d.elapsed_ms / 1000) as i64
+                                - 10;
                             let c = Arc::clone(&cache);
                             let _ = tauri::async_runtime::spawn_blocking(move || {
                                 if let Ok(c) = c.lock() {
                                     if full_list {
                                         let _ = c.set_meta("last_refresh", &browser::ServerRow::now_unix().to_string());
+                                        if complete {
+                                            match c.unvouch_unseen(refresh_started) {
+                                                Ok(n) if n > 0 => log_info!(
+                                                    "steam",
+                                                    "{n} server(s) Steam no longer lists as populated lost their vouch"
+                                                ),
+                                                Ok(_) => {}
+                                                Err(e) => log_warn!("cache", "unvouch failed: {e}"),
+                                            }
+                                        }
                                         let _ = c.prune(CACHE_MAX_AGE_SECS);
                                         let _ = c.population_prune(POPULATION_MAX_AGE_SECS);
                                         // A refresh writes thousands of rows and never

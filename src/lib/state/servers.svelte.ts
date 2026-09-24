@@ -80,6 +80,9 @@ const RE_PVE = /\bpve\b/;
 const RE_PVP = /\bpvp\b/;
 const RE_RP = /\b(?:rp|roleplay|role-play)\b/;
 
+/** Exact-name identity for the clone rule: case and whitespace folded, nothing else. */
+const cloneKey = (name: string): string => name.trim().toLowerCase().replace(/\s+/g, " ");
+
 function styleOf(text: string): number {
   return (RE_PVE.test(text) ? STYLE_PVE : 0) | (RE_PVP.test(text) ? STYLE_PVP : 0) | (RE_RP.test(text) ? STYLE_RP : 0);
 }
@@ -207,6 +210,7 @@ class ServersStore {
       clearTimeout(this.#dirtyTimer);
       this.#dirtyTimer = undefined;
     }
+    this.#recomputeClones();
     this.#rowsVersion++;
     this.#rowSetVersion++;
   }
@@ -222,8 +226,33 @@ class ServersStore {
     if (this.#dirtyTimer !== undefined) return;
     this.#dirtyTimer = setTimeout(() => {
       this.#dirtyTimer = undefined;
+      this.#recomputeClones();
       this.#rowsVersion++;
     }, ROW_FLUSH_MS);
+  }
+
+  /**
+   * Marks rows whose exact name belongs to a server that verified with five or more
+   * players on a different address, when this copy itself has not verified.
+   *
+   * Mirror farms clone the names of real communities: "MIDNIGHT PLUS 3PP | n2" exists
+   * 408 times in the live cache, "HATE | STALKER RP" 245 times. Among 1 077 honest
+   * populated names, none runs on two addresses, and the generic names that do collide
+   * ("DayZ Server", "test server") never reach five verified players, so the reference
+   * set excludes them. The flag clears itself the moment the copy verifies (D-233).
+   * Two passes over the map, ~2 ms at 24 000 rows, once per flush.
+   */
+  #recomputeClones() {
+    const owners = new Map<string, string>();
+    for (const r of this.rows.values()) {
+      if (r.verdict === "verified" && (r.verifiedPlayers ?? 0) >= 5) owners.set(cloneKey(r.name), r.ip);
+    }
+    for (const r of this.rows.values()) {
+      const owner = owners.size ? owners.get(cloneKey(r.name)) : undefined;
+      const clone = owner !== undefined && owner !== r.ip && r.verdict !== "verified";
+      if (clone) r.clone = true;
+      else if (r.clone) delete r.clone;
+    }
   }
   /** Reads the version so a derived or template re-runs when the map changes. */
   get rowsTick(): number {
@@ -682,6 +711,20 @@ class ServersStore {
         }
         this.done = ev.payload;
         this.lastRefresh = Math.floor(Date.now() / 1000);
+        // Mirror of the host's `unvouch_unseen` (D-233): the in-memory rows must agree
+        // with the cache, or the vouch would linger on screen until the next start.
+        const seen = this.#seenThisRefresh;
+        this.#seenThisRefresh = null;
+        if (seen && ev.payload.source === "steam" && !ev.payload.rejected && !ev.payload.capped && !ev.payload.stoppedEarly) {
+          let n = 0;
+          for (const r of this.rows.values()) {
+            if (r.steamEmpty === false && !seen.has(r.id)) {
+              r.steamEmpty = null;
+              n++;
+            }
+          }
+          if (n > 0) this.rowsChanged();
+        }
       }),
       await listen<SteamStatus>("steam:status", (ev) => {
         this.steam = ev.payload;
@@ -790,6 +833,8 @@ class ServersStore {
   }
 
   #dzsaTried = false;
+  /** Ids delivered by the refresh in flight, or null when none is (D-233). */
+  #seenThisRefresh: Set<string> | null = null;
   dzsaLoading = $state(false);
 
   private maybeAutoRefresh() {
@@ -855,6 +900,9 @@ class ServersStore {
     try {
       const started = await invoke<boolean>("servers_refresh", { force, full });
       this.#autoRefreshed = started;
+      // Every id the batches deliver from here on; the rows Steam does not return
+      // this time lose their vouch when the refresh completes (D-233).
+      if (started) this.#seenThisRefresh = new Set();
       if (started) {
         this.done = null;
         this.verifySummary = null;
@@ -882,6 +930,7 @@ class ServersStore {
       if (!prev || prev.name !== r.name) this.#namesDirty = true;
       // Keep verification results the Steam batch does not carry.
       this.rows.set(r.id, prev ? { ...r, verifiedPlayers: prev.verifiedPlayers, verifiedAt: prev.verifiedAt, verdict: prev.verdict } : r);
+      this.#seenThisRefresh?.add(r.id);
       if (r.steamEmpty === true && !this.hasEmptyServers) this.hasEmptyServers = true;
     }
     this.rowsChanged();

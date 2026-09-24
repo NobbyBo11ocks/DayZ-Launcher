@@ -21,7 +21,9 @@ pub struct ServerRow {
     pub max_players: i32,
     // Stored and queried, never rendered: 19 000 rows cross IPC on every start, so
     // each unread field is ~19 000 copies of nothing (D-160).
-    #[serde(skip_serializing)]
+    // Read by the front end since D-233: every fake-population tool found writes the
+    // bots byte equal to its fabricated count (5 093 of 5 093 Steam-says-empty rows),
+    // and honest servers that declare AI do not match their player count.
     pub bots: i32,
     pub password: bool,
     #[serde(skip_serializing)]
