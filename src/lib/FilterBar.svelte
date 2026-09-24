@@ -3,6 +3,7 @@
   // parts share this component: `primary` (search, perspective, map, country, mods;
   // 28 px controls) for the first row of the Servers page and `chips` (quick toggles,
   // ping, trust, specific mod, reset; 26 px) for the second.
+  import { untrack } from "svelte";
   import { servers, type HiveFilter, type ModFilter, type Perspective, type StyleFilter } from "./state/servers.svelte";
   import { countryName } from "./types";
   import { mapLabel } from "./maps";
@@ -37,11 +38,19 @@
   // write: without the cancel, a timer armed moments earlier wrote the old term back
   // into the freshly reset filters, leaving the list filtered by an invisible term
   // (D-159).
+  //
+  // Only the store is a dependency. Reading `typed` inside made it one too, so every
+  // keystroke re-ran this while the store’s search was still empty (it is written on
+  // a 180 ms delay), which cancelled that write and blanked the field: focus worked,
+  // characters never appeared. Reproduced live on 0.1.39 (D-230).
   $effect(() => {
-    if (servers.filters.search === "" && typed !== "") {
-      clearTimeout(searchTimer);
-      typed = "";
-    }
+    const stored = servers.filters.search;
+    untrack(() => {
+      if (stored === "" && typed !== "") {
+        clearTimeout(searchTimer);
+        typed = "";
+      }
+    });
   });
   $effect(() => () => clearTimeout(searchTimer));
 

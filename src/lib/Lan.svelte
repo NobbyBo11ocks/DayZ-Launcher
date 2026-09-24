@@ -4,6 +4,7 @@
   import DetailsPane from "./DetailsPane.svelte";
   import ServerTable from "./ServerTable.svelte";
 
+  import { untrack } from "svelte";
   import { searchBox } from "./search";
 
   // The shared search filter, written on a pause rather than on every keystroke
@@ -11,9 +12,17 @@
   const box = searchBox();
   let typed = $state(servers.filters.search);
   $effect(() => box.dispose);
-  // A reset from elsewhere has to show up in the field (D-159).
+  // A reset from elsewhere has to show up in the field and cancel a pending write
+  // (D-159). Only the store is tracked: with `typed` tracked too, every keystroke
+  // blanked the field while the write still went through (D-230).
   $effect(() => {
-    if (servers.filters.search === "" && typed !== "") typed = "";
+    const stored = servers.filters.search;
+    untrack(() => {
+      if (stored === "" && typed !== "") {
+        box.dispose();
+        typed = "";
+      }
+    });
   });
   import { servers } from "./state/servers.svelte";
 
