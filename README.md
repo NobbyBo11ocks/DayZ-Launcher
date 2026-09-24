@@ -8,14 +8,14 @@
 
 <br><br>
 
-[![Latest release](https://img.shields.io/github/v/release/NobbyBo11ocks/dayz-launcher?display_name=tag&label=release&color=a3e635&labelColor=1d2530)](https://github.com/NobbyBo11ocks/dayz-launcher/releases/latest)
-[![CI](https://img.shields.io/github/actions/workflow/status/NobbyBo11ocks/dayz-launcher/ci.yml?branch=main&label=CI&labelColor=1d2530)](https://github.com/NobbyBo11ocks/dayz-launcher/actions/workflows/ci.yml)
-[![Downloads](https://img.shields.io/github/downloads/NobbyBo11ocks/dayz-launcher/total?color=2ea44f&labelColor=1d2530)](https://github.com/NobbyBo11ocks/dayz-launcher/releases)
+[![Latest release](https://img.shields.io/github/v/release/NobbyBo11ocks/DayZ-Launcher?display_name=tag&label=release&color=a3e635&labelColor=1d2530)](https://github.com/NobbyBo11ocks/DayZ-Launcher/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/NobbyBo11ocks/DayZ-Launcher/ci.yml?branch=main&label=CI&labelColor=1d2530)](https://github.com/NobbyBo11ocks/DayZ-Launcher/actions/workflows/ci.yml)
+[![Downloads](https://img.shields.io/github/downloads/NobbyBo11ocks/DayZ-Launcher/total?color=2ea44f&labelColor=1d2530)](https://github.com/NobbyBo11ocks/DayZ-Launcher/releases)
 [![Platform](https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-0078d4?labelColor=1d2530)](#install)
 [![Installer](https://img.shields.io/badge/installer-4.7%20MB-8957e5?labelColor=1d2530)](#install)
 [![Telemetry](https://img.shields.io/badge/telemetry-none-2ea44f?labelColor=1d2530)](#what-it-talks-to)
 
-### [⬇ Download for Windows](https://github.com/NobbyBo11ocks/dayz-launcher/releases/latest)
+### [⬇ Download for Windows](https://github.com/NobbyBo11ocks/DayZ-Launcher/releases/latest)
 
 <sub>
 
@@ -178,7 +178,7 @@ flowchart LR
 
 ## Install
 
-1. Download `DZSA CrayZ Launcher_<version>_x64-setup.exe` from the [latest release](https://github.com/NobbyBo11ocks/dayz-launcher/releases/latest).
+1. Download `DZSA CrayZ Launcher_<version>_x64-setup.exe` from the [latest release](https://github.com/NobbyBo11ocks/DayZ-Launcher/releases/latest).
 2. Run it. It installs per user to `%LOCALAPPDATA%\Programs\DZSA CrayZ Launcher` and adds a Start menu entry. WebView2 is installed silently if Windows does not have it.
 3. Start Steam, then the launcher. Updates are automatic: each release is signed with a minisign key and the app verifies the signature before installing.
 
@@ -277,7 +277,7 @@ TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/dayz-launcher.key)" TAURI_SIGNING_PRIV
 
 `--ci` stops the CLI from prompting for the key password (the key has none). Run this from Git Bash; PowerShell drops empty environment variables, and without the password variable the CLI waits on a prompt forever.
 
-The public key is in `src-tauri/tauri.conf.json`; the updater polls `https://github.com/NobbyBo11ocks/dayz-launcher/releases/latest/download/latest.json`.
+The public key is in `src-tauri/tauri.conf.json`; the updater polls `https://github.com/NobbyBo11ocks/DayZ-Launcher/releases/latest/download/latest.json`.
 
 </details>
 
@@ -295,13 +295,13 @@ git tag vX.Y.Z && git push origin main vX.Y.Z
 The [release workflow](.github/workflows/release.yml) builds the signed installer on a clean Windows runner, creates the release with generated notes, uploads the installer, its `.sig` and `latest.json`, smoke-installs the result, and verifies the published manifest. It needs **one** repository secret, set once from the machine that holds the key. In PowerShell:
 
 ```powershell
-(Get-Content "$env:USERPROFILE\.tauri\dayz-launcher.key" -Raw).Trim() | gh secret set TAURI_SIGNING_PRIVATE_KEY --repo NobbyBo11ocks/dayz-launcher
+(Get-Content "$env:USERPROFILE\.tauri\dayz-launcher.key" -Raw).Trim() | gh secret set TAURI_SIGNING_PRIVATE_KEY --repo NobbyBo11ocks/DayZ-Launcher
 ```
 
 or from Git Bash:
 
 ```bash
-gh secret set TAURI_SIGNING_PRIVATE_KEY --repo NobbyBo11ocks/dayz-launcher < ~/.tauri/dayz-launcher.key
+gh secret set TAURI_SIGNING_PRIVATE_KEY --repo NobbyBo11ocks/DayZ-Launcher < ~/.tauri/dayz-launcher.key
 ```
 
 `--repo` lets the command run from any directory; without it `gh` reads the repository from the current folder's git remote and fails outside a checkout.

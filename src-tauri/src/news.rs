@@ -11,7 +11,7 @@ pub const OFFICIAL_FEED: &str = "steam_community_announcements";
 const USER_AGENT: &str = concat!(
     "DayZLauncher/",
     env!("CARGO_PKG_VERSION"),
-    " (+https://github.com/NobbyBo11ocks/dayz-launcher)"
+    " (+https://github.com/NobbyBo11ocks/DayZ-Launcher)"
 );
 /// Characters of body text kept per post.
 const SUMMARY_CHARS: usize = 320;
