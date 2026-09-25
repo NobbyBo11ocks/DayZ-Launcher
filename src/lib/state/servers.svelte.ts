@@ -10,7 +10,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { uiPrefs } from "./uiprefs.svelte";
 import { describe, logWarn } from "../log";
-import { type CachedServers, type Favourite, type FriendInfo, type HistoryEntry, type ImportResult, isUntrusted, type ModScanSummary, type ModsIndex, queueOf, type RefreshDone, type ServerMods, type ServerRow, type SteamStatus, trustedPlayers, type Verification, type VerifySummary } from "../types";
+import { type CachedServers, type Favourite, type FriendInfo, type HistoryEntry, type ImportResult, isInflated, isUntrusted, type ModScanSummary, type ModsIndex, queueOf, type RefreshDone, type ServerMods, type ServerRow, type SteamStatus, trustedPlayers, type Verification, type VerifySummary } from "../types";
 
 export type SortKey = "name" | "map" | "mods" | "players" | "ping" | "time" | "version";
 export type Perspective = "any" | "1pp" | "3pp";
@@ -346,7 +346,6 @@ class ServersStore {
   /** Mod ids per scanned server and the mod catalogue with server counts (D-080). */
   modsByServer = new SvelteMap<string, number[]>();
   modCatalog = new SvelteMap<number, { name: string; servers: number }>();
-  modScan = $state<ModScanSummary | null>(null);
   modScanning = $state(false);
   /** Set by a view that wants the app to switch section (Mods → Servers with a mod filter). */
   navigate = $state<string | null>(null);
@@ -427,7 +426,7 @@ class ServersStore {
   });
   untrustedCount = $derived(this.#trustCounts.untrusted);
 
-  /** Filters away from their defaults, all rows of the bar (D-108). */
+  /** Filters away from their defaults, every group of the panel (D-108, D-249). */
   activeFilterCount = $derived.by(() => {
     const f = this.filters;
     return (
@@ -443,7 +442,8 @@ class ServersStore {
     );
   });
 
-  /** Filters away from their defaults in the fold-away row only (D-108). */
+  /** The Status toggles, ping, trust and specific-mod filters away from their defaults:
+   *  the part of `activeFilterCount` that was once the fold-away row (D-108). */
   moreFilterCount = $derived.by(() => {
     const f = this.filters;
     return (
@@ -708,7 +708,8 @@ class ServersStore {
     return n;
   });
 
-  /** Rows with a local-network address (LAN tab, D-087), search-filtered, busiest first. */
+  /** Rows with a local-network address (LAN tab, D-087), search-filtered, in the list's
+   *  own sort order (D-209). */
   lanRows = $derived.by(() => {
     void this.#rowsVersion;
     const q = this.filters.search.trim().toLowerCase();
@@ -828,13 +829,11 @@ class ServersStore {
         if (this.error === VERIFY_STALLED) this.error = null;
       }),
       await listen<ModScanSummary>("servers:mods-start", (ev) => {
-        this.modScan = ev.payload;
         this.modScanning = ev.payload.total > 0;
         this.#scanningSince = Date.now();
       }),
       await listen<[ServerMods[], [number, string][]]>("servers:mods", (ev) => this.applyMods(ev.payload[0], ev.payload[1])),
-      await listen<ModScanSummary>("servers:mods-done", (ev) => {
-        this.modScan = ev.payload;
+      await listen<ModScanSummary>("servers:mods-done", () => {
         this.modScanning = false;
         this.#scanningSince = 0;
       }),
@@ -1195,7 +1194,7 @@ class ServersStore {
     const stale = ids.filter((id) => {
       const r = this.rows.get(id);
       if (!r || this.#pending.has(id)) return false;
-      if (r.steamEmpty === true && r.players > 0) return false; // R0 already decided
+      if (isInflated(r)) return false; // R0 already decided
       return r.verifiedAt == null || now - r.verifiedAt > STALE_SECS;
     });
     if (stale.length === 0) return;

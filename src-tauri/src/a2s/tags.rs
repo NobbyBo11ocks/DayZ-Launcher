@@ -1,9 +1,9 @@
 //! DayZ keyword tags carried in A2S_INFO's `keywords` string (docs/03 §3, S-37).
 //! Live example: `battleye,no3rd,external,privHive,shardABC123,lqs0,etm4.000000,entm6.000000,mod,15:12`.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DayzTags {
     pub battleye: bool,
@@ -68,7 +68,8 @@ impl DayzTags {
         t
     }
 
-    /// `HH:MM` for display.
+    /// `HH:MM`. The UI formats `time_minutes` itself, so only the tests read this (D-257).
+    #[cfg(test)]
     pub fn time_string(&self) -> Option<String> {
         self.time_minutes
             .map(|m| format!("{:02}:{:02}", m / 60, m % 60))

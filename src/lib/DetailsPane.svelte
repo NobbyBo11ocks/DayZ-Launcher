@@ -5,7 +5,7 @@
   // toggle, and the player sessions are summarised instead of listed.
   // Every command through the logging wrapper: a failure is recorded with its
   // command name before it is rethrown (D-158/D-160).
-  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+  import { listen } from "@tauri-apps/api/event";
   import { invokeLogged as invoke } from "./log";
   import Flag from "./Flag.svelte";
   import Sparkline from "./Sparkline.svelte";

@@ -1,6 +1,6 @@
 <script lang="ts">
-  // Landing page (D-099, D-100): a welcome band with the Steam persona and avatar,
-  // the newest post featured with its picture, then the latest posts as cards.
+  // Landing page (D-099, D-100): the newest post featured with its picture, then the
+  // latest posts as cards (the welcome band went in D-173 and D-178).
   // Pictures are host-made thumbnails (D-111). A video plays in a player that is
   // created on click and destroyed on close (D-150), so an idle home page still has
   // no embedded player and the memory budget holds.
@@ -11,8 +11,6 @@
   import { untrack } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { news, type NewsView } from "./state/news.svelte";
-  import { servers } from "./state/servers.svelte";
-  import { updates } from "./state/updates.svelte";
   import type { NewsItem } from "./types";
 
   $effect(() => {
@@ -223,9 +221,6 @@
 
 <style>
   .home { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
-
-  /* Welcome band: accent glow from the top-left corner, persona and quick facts. */
-
 
   /* Video player (D-150). */
   .player-backdrop { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 24px; background: rgb(0 0 0 / 0.72); }

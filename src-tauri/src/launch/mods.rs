@@ -6,16 +6,13 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
-
 use crate::error::{AppError, AppResult};
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+/// A mod's junction for one launch. Never crosses IPC, so no `Serialize`; the id and
+/// the source folder it also carried were never read (D-257).
+#[derive(Debug, Clone)]
 pub struct ModLink {
-    pub id: u64,
     pub name: String,
-    pub source: PathBuf,
     pub junction: PathBuf,
     pub created: bool,
 }
@@ -104,9 +101,7 @@ pub fn ensure_junctions(
             ))
         })?;
         out.push(ModLink {
-            id: *id,
             name: base,
-            source: source.clone(),
             junction,
             created,
         });

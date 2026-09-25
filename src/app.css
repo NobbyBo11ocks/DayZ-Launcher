@@ -407,30 +407,30 @@ h1 {
 .btn.slim { height: 22px; padding: 0 8px; font-size: 12px; }
 .btn:hover { filter: brightness(1.08); }
 .btn:disabled { opacity: 0.5; cursor: default; filter: none; }
-/* Deliberately more specific than a component's scoped `.btn.svelte-hash` (0,2,0):
-   every component block starts with `all: unset`, which resets `outline`, and on a
-   specificity tie the component wins on source order — so roughly forty buttons had
-   no focus ring at all, including every control in the join dialog (D-186). */
 ::placeholder { color: var(--fg-muted); opacity: 1; }
 
-/* Same story as the `.btn` ring above, for the buttons that are not `.btn`: the Mods
+/* Same story as the `.btn` ring below, for the buttons that are not `.btn`: the Mods
    page's filter tabs and sort headers and the toast's close button all open with
    `all: unset`, which clears `outline`, and no component rule puts one back (D-198). */
 button:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
 
-button.btn:focus-visible,
-a.btn:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+/* Deliberately more specific than a component's scoped `.btn.svelte-hash` (0,2,0):
+   every component block starts with `all: unset`, which resets `outline`, and on a
+   specificity tie the component wins on source order — so roughly forty buttons had
+   no focus ring at all, including every control in the join dialog (D-186). Only
+   `button` is named: no link in the app is styled as a button (D-257). */
+button.btn:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 /* Same trick, same reason, and it had to be here too: a component's own
    `.btn.svelte-hash` is (0,2,0) as well, comes later in the bundle and opens with
    `all: unset`, so every one of these modifiers was a no-op inside a component.
    Cancel rendered identically to Join in the join dialog, and the unsubscribe
    confirmation's "Yes" carried no red at all (D-197). */
-button.btn.secondary, a.btn.secondary { background: var(--bg-row); color: var(--fg); border: 1px solid var(--border-control); font-weight: 500; }
-button.btn.secondary:hover, a.btn.secondary:hover { border-color: var(--accent); filter: none; }
-button.btn.ghost, a.btn.ghost { background: transparent; color: var(--fg-muted); border: 1px solid var(--border-control); font-weight: 500; }
-button.btn.ghost:hover, a.btn.ghost:hover { color: var(--fg); filter: none; }
-button.btn.danger, a.btn.danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); font-weight: 600; }
-button.btn.danger:hover, a.btn.danger:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); filter: none; }
+button.btn.secondary { background: var(--bg-row); color: var(--fg); border: 1px solid var(--border-control); font-weight: 500; }
+button.btn.secondary:hover { border-color: var(--accent); filter: none; }
+button.btn.ghost { background: transparent; color: var(--fg-muted); border: 1px solid var(--border-control); font-weight: 500; }
+button.btn.ghost:hover { color: var(--fg); filter: none; }
+button.btn.danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); font-weight: 600; }
+button.btn.danger:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); filter: none; }
 .btn.small { height: 24px; padding: 0 10px; font-size: 12px; }
 
 /* `user-select: none` on the body keeps the chrome from highlighting on a drag, but an

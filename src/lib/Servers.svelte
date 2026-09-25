@@ -1,19 +1,14 @@
 <script lang="ts">
-  // Server browser view (docs/06, D-108, D-249): a compact header (the search, with
-  // Direct connect and Refresh at the right, over a thin status line), then the
-  // virtualised table and the details pane. The filters live in the left rail under
-  // the sections (FilterPanel, mounted by App.svelte while this page is open). Direct
-  // connect lives in a small popover next to Refresh.
+  // Server browser view (docs/06, D-108, D-249, D-250): a one-row header (the search,
+  // Direct connect beside it in a small popover, Refresh at the right, and between them
+  // any notice that needs the user), then the virtualised table and the details pane.
+  // The filters live in the left rail under the sections (FilterPanel, mounted by
+  // App.svelte while this page is open).
   import { untrack } from "svelte";
   import DetailsPane from "./DetailsPane.svelte";
   import ServerTable from "./ServerTable.svelte";
   import { searchBox } from "./search";
   import { servers } from "./state/servers.svelte";
-  // Every command through the logging wrapper: a failure is recorded with its
-  // command name before it is rethrown (D-158).
-  import { invokeLogged as invoke } from "./log";
-
-  /** Per mount; the backend keeps only the first mark it ever receives. */
 
   // The shared search filter, written on a pause rather than on every keystroke: every
   // write re-filters and re-sorts up to 20 000 rows (D-152, D-222). `typed` keeps the

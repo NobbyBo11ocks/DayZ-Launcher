@@ -68,6 +68,8 @@ pub struct Rules {
 }
 
 impl Rules {
+    /// Only the tests read a plain rule as a number (D-257).
+    #[cfg(test)]
     pub fn plain_u32(&self, key: &str) -> Option<u32> {
         self.plain.get(key)?.parse().ok()
     }

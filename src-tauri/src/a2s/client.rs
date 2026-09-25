@@ -27,7 +27,6 @@ pub struct Reply<T> {
     pub value: T,
     /// Round trip of the final (post-challenge) exchange.
     pub rtt: Duration,
-    pub packets: u8,
 }
 
 #[derive(Debug)]
@@ -100,29 +99,26 @@ impl Client {
     }
 
     pub async fn info(&self, addr: SocketAddr) -> A2sResult<Reply<Info>> {
-        let (payload, rtt, packets) = self.query(addr, Kind::Info).await?;
+        let (payload, rtt) = self.query(addr, Kind::Info).await?;
         Ok(Reply {
             value: info::parse(&payload)?,
             rtt,
-            packets,
         })
     }
 
     pub async fn rules(&self, addr: SocketAddr) -> A2sResult<Reply<Rules>> {
-        let (payload, rtt, packets) = self.query(addr, Kind::Rules).await?;
+        let (payload, rtt) = self.query(addr, Kind::Rules).await?;
         Ok(Reply {
             value: rules::parse(&payload)?,
             rtt,
-            packets,
         })
     }
 
     pub async fn players(&self, addr: SocketAddr) -> A2sResult<Reply<Players>> {
-        let (payload, rtt, packets) = self.query(addr, Kind::Players).await?;
+        let (payload, rtt) = self.query(addr, Kind::Players).await?;
         Ok(Reply {
             value: players::parse(&payload)?,
             rtt,
-            packets,
         })
     }
 
@@ -159,7 +155,7 @@ impl Client {
         tokio::time::sleep_until(tokio::time::Instant::from_std(at)).await;
     }
 
-    async fn query(&self, addr: SocketAddr, kind: Kind) -> A2sResult<(Vec<u8>, Duration, u8)> {
+    async fn query(&self, addr: SocketAddr, kind: Kind) -> A2sResult<(Vec<u8>, Duration)> {
         let _permit = self
             .permits
             .acquire()
@@ -186,7 +182,7 @@ impl Client {
         Err(last)
     }
 
-    async fn query_once(&self, sock: &UdpSocket, kind: Kind) -> A2sResult<(Vec<u8>, Duration, u8)> {
+    async fn query_once(&self, sock: &UdpSocket, kind: Kind) -> A2sResult<(Vec<u8>, Duration)> {
         let mut challenge: Option<[u8; 4]> = None;
         let mut buf = vec![0u8; kind.max_datagram()];
         let mut challenges_seen = 0u8;
@@ -205,7 +201,6 @@ impl Client {
             }
             sock.send(&kind.request(challenge)).await?;
             let mut reasm = Reassembler::new();
-            let mut packets = 0u8;
             loop {
                 let remaining = deadline.saturating_duration_since(Instant::now());
                 if remaining.is_zero() {
@@ -220,7 +215,6 @@ impl Client {
                     Err(_) => return Err(A2sError::Timeout),
                 };
                 let rtt = sent_at.elapsed();
-                packets = packets.saturating_add(1);
                 match classify(&buf[..n])? {
                     Datagram::Single(payload) => {
                         if let Some(c) = challenge_of(payload) {
@@ -234,7 +228,7 @@ impl Client {
                         if payload.first() != Some(&kind.response_type()) {
                             continue; // stray datagram; keep waiting
                         }
-                        return Ok((payload.to_vec(), rtt, packets));
+                        return Ok((payload.to_vec(), rtt));
                     }
                     Datagram::Split {
                         id,
@@ -244,7 +238,7 @@ impl Client {
                         ..
                     } => {
                         if let Some(full) = reasm.push(id, total, number, body)? {
-                            return Ok((full, rtt, packets));
+                            return Ok((full, rtt));
                         }
                     }
                 }

@@ -1,7 +1,7 @@
 // DayZ news (D-099, D-100): Steam's feed for app 221100, cached by the backend for
 // an instant first paint, refreshed every 30 minutes while the launcher runs.
 // Official update posts that arrive after the user last looked raise an in-app
-// toast and, when the window is not focused, a Windows notification. The store
+// toast and, when the window is not focused, a Windows notification.
 // Every command through the logging wrapper: a failure is recorded with its
 // command name before it is rethrown (D-158).
 import { invokeLogged as invoke } from "../log";
@@ -33,7 +33,6 @@ class NewsStore {
   items = $state<NewsItem[]>([]);
   loading = $state(false);
   error = $state<string | null>(null);
-  /** Unix seconds of the fetch behind `items`. */
   /** Unix seconds of the newest official post the user has looked at (settings.json). */
   seen = $state(0);
   /** The seen mark when the current visit to the tab began: newer posts keep their "New" pill. */
@@ -44,7 +43,6 @@ class NewsStore {
   view = $state<NewsView>("updates");
   /** Update posts not yet dismissed, newest last (at most three). */
   alerts = $state<NewsAlert[]>([]);
-  /** PNG data URL of the signed-in user's Steam avatar, once Steam has it. */
   /** Object URLs of downscaled post pictures by `gid:size` (D-111, D-256); the backend
    *  caches the files. */
   thumbs = new SvelteMap<string, string>();

@@ -23,11 +23,8 @@
   import { uiPrefs } from "./lib/state/uiprefs.svelte";
   import { updates } from "./lib/state/updates.svelte";
 
-  // The server store lives for the whole session: its listeners must not depend on
-  // which section is open (D-084).
   // Uncaught errors and rejected promises reach the log before anything else runs (D-158).
   installErrorHooks();
-
 
   // Workshop updates are checked at start and every fifteen minutes, so a mod its
   // author updated shows up without opening the Mods page (D-191).
@@ -40,6 +37,8 @@
     };
   });
 
+  // The server store lives for the whole session: its listeners must not depend on
+  // which section is open (D-084).
   $effect(() => {
     void servers.start();
     void updates.autoCheck();

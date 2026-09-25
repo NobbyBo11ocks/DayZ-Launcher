@@ -840,7 +840,8 @@ pub async fn mods_index(state: State<'_, AppState>) -> AppResult<crate::browser:
     .map_err(|e| AppError::Internal(format!("mods index task failed: {e}")))?
 }
 
-/// Starts a mod scan now; `force` ignores the one-day freshness. Returns the target count.
+/// Starts a mod scan now; `force` ignores the one-day freshness and the wait after a
+/// failed read (D-244). The targets and the outcome arrive as `servers:mods-*` events.
 #[tauri::command]
 pub async fn mods_scan(app: AppHandle, state: State<'_, AppState>, force: bool) -> AppResult<()> {
     // The claim lives inside `run_mod_scan` so that the automatic scan after a refresh
@@ -973,8 +974,6 @@ pub async fn junctions_remove_dangling() -> AppResult<JunctionCleanup> {
 #[serde(rename_all = "camelCase")]
 pub struct NewsCached {
     pub items: Vec<crate::news::NewsItem>,
-    /// Unix seconds of the fetch that produced `items`, if any.
-    pub fetched_at: Option<i64>,
 }
 
 fn news_thumb_dir(app: &AppHandle) -> AppResult<PathBuf> {
@@ -999,7 +998,6 @@ pub async fn news_fetch(app: AppHandle, state: State<'_, AppState>) -> AppResult
         crate::log_warn!("news", "Steam returned no posts; keeping the cached ones");
         return news_cached(state).await;
     }
-    let now = ServerRow::now_unix();
     let json =
         serde_json::to_string(&items).map_err(|e| AppError::Internal(format!("news: {e}")))?;
     let keep: std::collections::HashSet<String> = items.iter().map(|n| n.gid.clone()).collect();
@@ -1007,16 +1005,13 @@ pub async fn news_fetch(app: AppHandle, state: State<'_, AppState>) -> AppResult
     let c = Arc::clone(&state.cache);
     let _ = tauri::async_runtime::spawn_blocking(move || {
         if let Ok(c) = c.lock() {
+            // The fetch time went with the page's last reader of it (D-229, D-257).
             let _ = c.set_meta("news", &json);
-            let _ = c.set_meta("news_at", &now.to_string());
         }
         crate::news::prune_thumbnails(&dir, &keep);
     })
     .await;
-    Ok(NewsCached {
-        items,
-        fetched_at: Some(now),
-    })
+    Ok(NewsCached { items })
 }
 
 /// A downscaled JPEG of a post's picture (D-111), cached on disk; the bytes travel
@@ -1049,12 +1044,7 @@ pub async fn news_cached(state: State<'_, AppState>) -> AppResult<NewsCached> {
             .flatten()
             .and_then(|j| serde_json::from_str(&j).ok())
             .unwrap_or_default();
-        let fetched_at = c
-            .get_meta("news_at")
-            .ok()
-            .flatten()
-            .and_then(|v| v.parse().ok());
-        Ok(NewsCached { items, fetched_at })
+        Ok(NewsCached { items })
     })
     .await
     .map_err(|e| AppError::Internal(format!("news task failed: {e}")))?

@@ -4,7 +4,7 @@
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { uiPrefs } from "./uiprefs.svelte";
-import { describe, logError, logInfo, logWarn } from "../log";
+import { describe, logInfo, logWarn } from "../log";
 
 const LAST_CHECK_KEY = "dayz-launcher.update-check";
 const AUTO_CHECK_INTERVAL_MS = 24 * 3600 * 1000;

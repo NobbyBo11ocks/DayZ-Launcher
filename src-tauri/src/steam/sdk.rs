@@ -325,13 +325,14 @@ pub struct FriendInfo {
     pub server: Option<FriendServer>,
 }
 
-/// Workshop item metadata from `ISteamUGC` details query (M5 join plan).
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+/// Workshop item metadata from `ISteamUGC` details query (M5 join plan). The join plan
+/// reads it into its own type, so it needs no `Serialize` (D-257).
+#[derive(Debug, Clone)]
 pub struct ItemDetails {
     pub id: u64,
     pub title: String,
     pub file_size: u64,
+    /// Printed by the live join test (`tests/live_join.rs`).
     pub time_updated: u32,
 }
 
@@ -1112,7 +1113,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                 }
             }
             let Some(s) = session.as_ref() else { return }; // only reachable for Shutdown
-            let (mms, ugc) = (&s.mms, &s.ugc);
+            let ugc = &s.ugc;
             match cmd {
                 Cmd::Sync { job, ids } => {
                     if let Some(old) = sync.take() {
@@ -1184,11 +1185,9 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                         source: "steam",
                     }));
                 }
+                // Not busy here: the arm above answers every refresh that arrives
+                // while one is running. Partitions start below, on the same session.
                 Cmd::Refresh(mut parts) => {
-                    if active.is_some() {
-                        continue;
-                    }
-                    let _ = mms; // partitions start below on the same session
                     parts.reverse(); // pop() takes from the end
                     active = Some(ActiveRefresh {
                         pending: parts,

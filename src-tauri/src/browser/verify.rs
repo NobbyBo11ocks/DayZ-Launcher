@@ -9,14 +9,14 @@ use std::net::SocketAddr;
 use std::sync::{LazyLock, Mutex};
 use std::time::Instant;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tokio::task::JoinSet;
 
 use crate::a2s::{A2sError, Client, Info, Players};
 
 use super::ServerRow;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Verdict {
     /// R2: PLAYER agrees with INFO (difference ≤ 4, D-233).

@@ -84,7 +84,9 @@ pub fn country(ip: Ipv4Addr) -> Option<&'static str> {
     std::str::from_utf8(code).ok()
 }
 
-/// Number of ranges in the embedded table (Diagnostics).
+/// Number of ranges in the embedded table. Diagnostics never showed it; the tests
+/// check the table is complete with it (D-257).
+#[cfg(test)]
 pub fn ranges() -> usize {
     table().map_or(0, Table::len)
 }
