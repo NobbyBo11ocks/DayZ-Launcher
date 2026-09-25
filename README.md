@@ -21,7 +21,7 @@
 
 <br>
 
-<img src="docs/screenshots/servers.png" width="900" alt="The server browser: country flags, verified player counts, filter bar, and a details pane with the server's mods and population history">
+<img src="docs/screenshots/servers.png" width="900" alt="The server browser: every filter in a column beside the list, country flags, verified player counts, and a details pane with the server's mods and population history">
 
 </div>
 
@@ -71,9 +71,39 @@ No accounts, no API keys, no telemetry. Every destination it contacts is listed 
 <tr>
 <td width="33%" valign="top">
 
-<img src="docs/screenshots/home.jpg" alt="Home: the latest DayZ updates with pictures and video previews">
+<img src="docs/screenshots/news.png" alt="News: the latest DayZ updates with pictures and video previews, shown as updates only, all news, or with the press included">
 
-**Home** — the latest DayZ posts with pictures and video previews, an unread badge on the rail, and a notification when an update lands. Switch the page off in Settings and nothing is ever fetched.
+**News** — the latest DayZ posts with pictures and video previews: the updates alone, everything, or the press as well. An unread badge on the rail, and a notification when an update lands. Switch the page off in Settings and nothing is ever fetched.
+
+</td>
+<td width="33%" valign="top">
+
+<img src="docs/screenshots/favourites.png" alt="Favourites: the starred servers with their verified counts, and an import from the official launcher">
+
+**Favourites** — the servers you starred, with the same verified counts, ping and time of day as the browser, and a one-click import of the official launcher's favourites.
+
+</td>
+<td width="33%" valign="top">
+
+<img src="docs/screenshots/friends.png" alt="Friends: Steam friends with their status and the server each one is on, with a Join button">
+
+**Friends** — who is online, who is in DayZ and on which server, straight from Steam, with Join beside anyone you can follow in.
+
+</td>
+</tr>
+<tr>
+<td width="33%" valign="top">
+
+<img src="docs/screenshots/lan.png" alt="LAN: DayZ servers on your own network, found through Steam">
+
+**LAN** — servers on your own network, found through Steam: one on this PC or behind the same router. For a known address elsewhere, Direct connect is on the Servers page.
+
+</td>
+<td width="33%" valign="top">
+
+<img src="docs/screenshots/mods.png" alt="Mods: the installed Workshop mods with their size, update date, junction and the number of servers running each">
+
+**Mods** — every Workshop mod you have, its size, when it last changed, its `!Workshop` junction and how many servers run it, with Folder and Unsubscribe beside each. Junctions are shared with the official launcher and never deleted on their own; the dangling ones go with one confirmed click.
 
 </td>
 <td width="33%" valign="top">
@@ -83,6 +113,8 @@ No accounts, no API keys, no telemetry. Every destination it contacts is listed 
 **Settings** — a dark and a light theme, twelve accents, what the browser hides, how DayZ is started, saved launch profiles, and the Steam session with its idle release.
 
 </td>
+</tr>
+<tr>
 <td width="33%" valign="top">
 
 <img src="docs/screenshots/logs.png" alt="Logs: what the launcher has been doing, with per-area mute chips and a recording switch">
@@ -102,7 +134,7 @@ No accounts, no API keys, no telemetry. Every destination it contacts is listed 
 <tr valign="top"><td>
 
 - Steam's own matchmaking list — no API key, the same list the in-game browser sees
-- **Official or community hive**, perspective, map, country, mod, queue, password, daytime, version, ping and friends
+- **Official or community hive**, perspective, map, country, mod, queue, password, daytime, version, ping and friends — every filter in a column beside the list, all in view at once
 - **PVE, PVP or RP** — read out of what the server calls itself, and labelled as the claim it is (48 % of the list says PVE)
 - Search matches the description as well as the name, so "trader" finds servers whose name never says it
 - **Maps by the name people use** — "Livonia" finds `enoch`, "Frostline" finds `sakhal`
@@ -254,7 +286,7 @@ npm run tauri build
 
 Output: `src-tauri/target/release/bundle/nsis/` (`DZSA CrayZ Launcher_<version>_x64-setup.exe` plus a `.sig` for the updater).
 
-`src-tauri/nsis/installer.nsi` is a copy of Tauri's stock template carrying **eight deviations in fifteen marked blocks**, plus one new file (`nsis/hooks.nsh`) on Tauri's own extension point. Each deviation is bracketed by `; >>> dzl-change:` and carries the upstream lines it replaces, so `node tools/nsis_template_check.js` puts them all back and compares against the real thing rather than keeping a second copy of what we wrote (D-205):
+`src-tauri/nsis/installer.nsi` is a copy of Tauri's stock template carrying **nine deviations in sixteen marked blocks**, plus one new file (`nsis/hooks.nsh`) on Tauri's own extension point. Each deviation is bracketed by `; >>> dzl-change:` and carries the upstream lines it replaces, so `node tools/nsis_template_check.js` puts them all back and compares against the real thing rather than keeping a second copy of what we wrote (D-205):
 
 1. The per-user default install directory is `%LOCALAPPDATA%\Programs\<product>` rather than `%LOCALAPPDATA%\<product>`, which collided with the official DayZ Launcher's data folder under this app's original name (D-067).
 2. An options page before anything is written, so the news question is answered before the launcher has ever run (D-206), and `/NONEWS` for silent installs.
@@ -264,6 +296,7 @@ Output: `src-tauri/target/release/bundle/nsis/` (`DZSA CrayZ Launcher_<version>_
 6. The install waits for the old binary's lock to clear before overwriting it, because WebView2's children outlive the host (D-214).
 7. `AllowSkipFiles off`: NSIS otherwise skips a locked file, and a silent install exited 0 having changed nothing while writing the new version to Add/Remove Programs (D-205).
 8. The launcher's own look on every page, uninstaller included: its dark surfaces, light text and lime accent, the logo beside the welcome and finish pages, the gas mask in the header, and a splash for an interactive install that silent, passive and update runs never show. Each picture comes in seven sizes, one per common display scale, and the installer loads the one made for the screen it is on (D-258).
+9. After the shortcuts are written, the installer tells Explorer to invalidate its icon cache (`SHChangeNotify`). Explorer keeps the icons it has drawn for a shortcut by the target's path, so an update that changed the icon left the Start menu and desktop shortcuts showing the old one (D-260). A pinned taskbar button is Explorer's own copy: unpin it and pin it again.
 
 Auto-updates were never affected by any of this — the updater always passes `/UPDATE`.
 
@@ -354,7 +387,7 @@ src-tauri/src/       Rust host
   log.rs             The app's own log: memory ring plus a rotating file
   geoip.rs           Offline IP-to-country lookup read in place from the image
   http.rs            Capped response bodies for every outbound fetch
-src-tauri/nsis/      Installer template (Tauri's stock template with seven marked deviations)
+src-tauri/nsis/      Installer template (Tauri's stock template with nine marked deviations)
                      plus the header and sidebar bitmaps the setup wizard uses
 docs/                Research, architecture, budgets, sources, decisions log
 site/                The landing page
