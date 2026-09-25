@@ -170,14 +170,38 @@ async function cutEmblem() {
 
 const emblem = await cutEmblem();
 writeFileSync(EMBLEM, await sharp(emblem).png({ compressionLevel: 9 }).toBuffer());
-const meta = await sharp(emblem).metadata();
 
-/** The emblem centred on a transparent square; small sizes get a touch of sharpening. */
+/**
+ * The icon is framed on what can be seen, not on the canvas: `cutEmblem` keeps 24 px
+ * round the mask for the halo's blur, and that faint tail took ~15 % of every icon
+ * square — 3½ of a 24 px taskbar button's pixels (user: "slightly bigger", D-264).
+ * Cropped to where the halo's alpha passes `threshold`, the mask is ~18 % larger at
+ * every size; the few faint pixels past the crop are invisible at icon sizes.
+ */
+async function visible(img, threshold) {
+  const { data, info } = await sharp(img).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  let [x0, y0, x1, y1] = [info.width, info.height, -1, -1];
+  for (let y = 0; y < info.height; y++) {
+    for (let x = 0; x < info.width; x++) {
+      if (data[(y * info.width + x) * 4 + 3] > threshold) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+  }
+  return sharp(img).extract({ left: x0, top: y0, width: x1 - x0 + 1, height: y1 - y0 + 1 }).png().toBuffer();
+}
+const framed = await visible(emblem, 4);
+const meta = await sharp(framed).metadata();
+
+/** The framed emblem centred on a transparent square; small sizes get a touch of sharpening. */
 async function png(size) {
   const scale = size / Math.max(meta.width, meta.height);
   const w = Math.max(1, Math.round(meta.width * scale));
   const h = Math.max(1, Math.round(meta.height * scale));
-  let fit = sharp(emblem).resize(w, h, { kernel: "lanczos3" });
+  let fit = sharp(framed).resize(w, h, { kernel: "lanczos3" });
   if (size <= 32) fit = fit.sharpen({ sigma: 0.5 });
   return sharp({ create: { width: size, height: size, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
     .composite([{ input: await fit.png().toBuffer(), left: (size - w) >> 1, top: (size - h) >> 1 }])
@@ -257,6 +281,6 @@ if (process.argv.includes("--preview")) {
   console.log("wrote icon-preview.png");
 }
 console.log(
-  `make_icon: wrote docs/art/emblem.png (${meta.width}x${meta.height}), icon.ico (${icoSizes.join(", ")}; ${(icoFile.length / 1024).toFixed(1)} KB) ` +
+  `make_icon: wrote docs/art/emblem.png, icons framed on its visible ${meta.width}x${meta.height}, icon.ico (${icoSizes.join(", ")}; ${(icoFile.length / 1024).toFixed(1)} KB) ` +
     `and ${Object.keys(pngTargets).length} PNG sizes to src-tauri/icons`,
 );

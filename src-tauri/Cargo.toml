@@ -31,6 +31,9 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_Security",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
+    # The window's icons from the exe's icon group at its DPI (D-264).
+    "Win32_System_LibraryLoader",
+    "Win32_UI_HiDpi",
 ] }
 tokio = { version = "1.53.1", features = ["net", "time", "sync", "macros", "rt-multi-thread"] }
 # DZSA server-list fallback when Steam is unavailable (D-089); the updater already pulls this version.

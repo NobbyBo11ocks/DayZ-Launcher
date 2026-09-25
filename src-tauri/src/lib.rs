@@ -7,6 +7,7 @@ mod commands;
 pub mod error;
 pub mod geoip;
 pub mod http;
+mod icon;
 pub mod launch;
 pub mod log;
 pub mod news;
@@ -588,7 +589,12 @@ pub fn run() {
                 .find(|w| w.label == "main")
                 .cloned()
                 .ok_or("tauri.conf.json has no window labelled main")?;
-            tauri::WebviewWindowBuilder::from_config(app.handle(), &main)?.build()?;
+            let window = tauri::WebviewWindowBuilder::from_config(app.handle(), &main)?.build()?;
+            // The taskbar's icon from the exe's own icon group, at the right size: tao
+            // only sets the small one, which the taskbar scaled up soft (Q31, D-264).
+            if let Ok(hwnd) = window.hwnd() {
+                icon::apply(hwnd.0 as _);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -632,6 +638,17 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|handle, event| {
+            // A move to a screen with another scale wants the icons at its sizes (D-264).
+            if let tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::ScaleFactorChanged { .. },
+                ..
+            } = &event
+            {
+                if let Some(Ok(hwnd)) = handle.get_webview_window(label).map(|w| w.hwnd()) {
+                    icon::apply(hwnd.0 as _);
+                }
+            }
             // Tauri exits through `process::exit`, so `Drop` never runs: the Steamworks
             // threads were still live when the process went away, `steamclient` asserted
             // "Illegal termination of worker thread 'SocketThread'" and the app
