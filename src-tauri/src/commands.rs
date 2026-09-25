@@ -235,7 +235,10 @@ pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResu
         let batch: Vec<ServerRow> = chunk.iter().map(|r| r.row.clone()).collect();
         for r in &batch {
             if r.players > 0 {
-                if let Some(t) = Target::from_row(r) {
+                if let Some(mut t) = Target::from_row(r) {
+                    // DZSA's own count, of an age nobody knows: judged against a fresh
+                    // INFO, not against itself (D-236).
+                    t.reported_at = 0;
                     targets.push(t);
                 }
             }
@@ -396,8 +399,24 @@ pub async fn run_verification(
 ) -> VerifySummary {
     let t0 = Instant::now();
     // The automatic pass (announce) relies on Steam's fresh INFO and sends PLAYER only;
-    // on-demand checks of visible rows also refresh ping and clock.
+    // on-demand checks of visible rows also refresh ping and clock. A target whose INFO
+    // is over a minute old is re-read either way (`verify_one`, D-236).
     let with_info = !announce;
+    // A standing R11 verdict survives a restart (D-236).
+    let mut targets = targets;
+    if !targets.is_empty() {
+        let c = Arc::clone(&cache);
+        let synthetic = tauri::async_runtime::spawn_blocking(move || {
+            c.lock().ok().and_then(|c| c.synthetic_ids().ok())
+        })
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+        for t in &mut targets {
+            t.was_synthetic |= synthetic.contains(&t.id);
+        }
+    }
     let total = targets.len();
     let by_id: HashMap<String, Target> =
         targets.iter().map(|t| (t.id.clone(), t.clone())).collect();
@@ -1077,15 +1096,25 @@ pub async fn server_details(
         .map_err(|_| AppError::Internal(format!("bad server id {id}")))?;
     let client = state.a2s.clone();
     let cache = Arc::clone(&state.cache);
-    let (reported, max_players) = cached_counts(&cache, &id).await;
+    let cached = cached_row(&cache, &id).await;
+    let (reported, max_players) = cached
+        .as_ref()
+        .map_or((0, 0), |r| (r.players, r.max_players));
+    let was_synthetic = cached
+        .as_ref()
+        .is_some_and(|r| r.verdict.as_deref() == Some("synthetic"));
 
     let (info, rules, players) =
         tokio::join!(client.info(addr), client.rules(addr), client.players(addr));
-    let (verdict, verified, reason) = verify::judge(
+    // With R11, like every other check: `judge` alone published "verified" over a
+    // standing "synthetic" verdict each time the row was opened (D-236).
+    let (verdict, verified, reason) = verify::judge_with_continuity(
+        &id,
         info.as_ref().ok().map(|r| &r.value),
         players.as_ref().map(|r| &r.value),
         reported,
         max_players,
+        was_synthetic,
     );
     let (reported, max_players) = info
         .as_ref()
@@ -1163,13 +1192,6 @@ fn humanise_age(secs: i64) -> String {
         s if s < 36 * 3600 => plural(s / 3600, "hour"),
         s => plural(s / 86_400, "day"),
     }
-}
-
-async fn cached_counts(cache: &Arc<Mutex<Cache>>, id: &str) -> (i32, i32) {
-    cached_row(cache, id)
-        .await
-        .map(|r| (r.players, r.max_players))
-        .unwrap_or((0, 0))
 }
 
 // ---------------------------------------------------------------------------

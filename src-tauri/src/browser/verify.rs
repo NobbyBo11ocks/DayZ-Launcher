@@ -50,6 +50,13 @@ pub struct Target {
     pub addr: SocketAddr,
     pub reported: i32,
     pub max_players: i32,
+    /// Unix seconds at which `reported` was read. The automatic pass skips INFO
+    /// because Steam's is "a minute old at most" (D-047) — true of the default
+    /// refresh, not of the full one D-141 made every Refresh, which takes minutes;
+    /// an older count is re-read (D-236). 0 when the age is unknown.
+    pub reported_at: i64,
+    /// The cached verdict was "synthetic", which R11 must not forget at a restart.
+    pub was_synthetic: bool,
 }
 
 impl Target {
@@ -60,9 +67,18 @@ impl Target {
             addr,
             reported: r.players,
             max_players: r.max_players,
+            reported_at: r.last_seen,
+            was_synthetic: r.verdict.as_deref() == Some("synthetic"),
         })
     }
 }
+
+/// A count read from INFO longer ago than this is read again before it is judged.
+/// Steam's own list is at most a minute old when the default refresh completes; a
+/// full refresh reaches its verification pass minutes after the populated partition
+/// was listed, and a restart or ordinary churn in between read as "INFO 60 vs PLAYER
+/// 4" — Inflated, and hidden until the next Refresh (D-236).
+const INFO_FRESH_SECS: i64 = 60;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -257,6 +273,14 @@ const CONTINUITY_SHIFT_WINDOW_SECS: f32 = 120.0;
 const CONTINUITY_SLACK_SECS: f32 = 3.0;
 /// Consecutive failed comparisons before the verdict changes.
 const CONTINUITY_STRIKES: u8 = 2;
+/// Checks further apart than this are not compared. Churn alone takes a steady,
+/// honest server under the one-in-five floor over an hour or two — sessions average
+/// about 58 minutes on docs/11's figure (91 % still there after 5½ minutes) — so two
+/// refreshes 90 minutes apart could strike it twice. At 30 minutes ~60 % remain (D-236).
+const CONTINUITY_MAX_GAP_SECS: f32 = 1800.0;
+/// The reason given while a standing R11 verdict waits for a check it can compare.
+const CONTINUITY_STANDING: &str =
+    "sessions did not carry over at earlier checks; none since was close enough to compare";
 
 /// How many of `prev` reappear in `now` advanced by exactly `shift`, each entry used once.
 pub fn carried_over(prev: &[f32], now: &[f32], shift: f32, slack: f32) -> usize {
@@ -308,28 +332,41 @@ pub fn best_carried_over(prev: &[f32], now: &[f32], dt: f32, window: f32, slack:
 /// restart is exempt (every session younger than the gap), and so is a list that
 /// halved, which is a wipe or a mass leave and not a lie. A later check that carries
 /// over clears the strikes, so the verdict heals itself (D-233).
-pub fn continuity(id: &str, durations: &[f32]) -> Option<String> {
+///
+/// A verdict stands until a comparison overturns it (D-236). The first sample after a
+/// restart, a check inside the minimum gap and a check beyond the maximum one all used
+/// to answer "no opinion", which the caller published as Verified: a farm got its
+/// fabricated count back at every launch and every time its row was opened. A cached
+/// "synthetic" verdict now starts at the full strike count, and comparisons that are
+/// exempt (restart, halved list) or impossible (too close, too far) keep the strikes
+/// they found — resetting them let a list that alternated sizes, halving every other
+/// check, never be flagged.
+pub fn continuity(id: &str, durations: &[f32], was_synthetic: bool) -> Option<String> {
+    continuity_at(id, durations, was_synthetic, Instant::now())
+}
+
+fn continuity_at(id: &str, durations: &[f32], was_synthetic: bool, now: Instant) -> Option<String> {
     if durations.len() < 5 {
         return None;
     }
-    let now = Instant::now();
     let Ok(mut map) = LAST_SEEN.lock() else {
         return None;
     };
     if map.len() > 20_000 {
         map.clear();
     }
-    let mut strikes = 0u8;
+    let mut strikes = if was_synthetic { CONTINUITY_STRIKES } else { 0 };
     let mut reason = None;
     if let Some(prev) = map.get(id) {
-        let dt = now.duration_since(prev.at).as_secs_f32();
+        strikes = prev.strikes;
+        let dt = now.saturating_duration_since(prev.at).as_secs_f32();
         if dt < CONTINUITY_MIN_GAP_SECS {
-            // Too soon to tell: keep the earlier sample and its strikes.
-            return None;
+            // Too soon to tell: keep the earlier sample, its strikes and its verdict.
+            return (prev.strikes >= CONTINUITY_STRIKES).then(|| CONTINUITY_STANDING.to_string());
         }
         let restarted = durations.iter().all(|&d| d < dt);
         let halved = durations.len() * 2 < prev.durations.len();
-        if prev.durations.len() >= 5 && !restarted && !halved {
+        if dt <= CONTINUITY_MAX_GAP_SECS && prev.durations.len() >= 5 && !restarted && !halved {
             let matched = best_carried_over(
                 &prev.durations,
                 durations,
@@ -340,13 +377,13 @@ pub fn continuity(id: &str, durations: &[f32]) -> Option<String> {
             let floor = (prev.durations.len() / 5).max(1);
             if matched <= floor {
                 strikes = prev.strikes.saturating_add(1);
-                if strikes >= CONTINUITY_STRIKES {
-                    reason = Some(format!(
-                        "{matched} of {} sessions carried over between checks {:.0} s apart",
-                        prev.durations.len(),
-                        dt
-                    ));
-                }
+                reason = Some(format!(
+                    "{matched} of {} sessions carried over between checks {:.0} s apart",
+                    prev.durations.len(),
+                    dt
+                ));
+            } else {
+                strikes = 0;
             }
         }
     }
@@ -358,33 +395,52 @@ pub fn continuity(id: &str, durations: &[f32]) -> Option<String> {
             strikes,
         },
     );
-    reason
+    (strikes >= CONTINUITY_STRIKES)
+        .then(|| reason.unwrap_or_else(|| CONTINUITY_STANDING.to_string()))
 }
 
-pub async fn verify_one(client: &Client, t: Target, with_info: bool) -> Verification {
-    let info = if with_info {
-        client.info(t.addr).await.ok()
-    } else {
-        None
-    };
-    let players = client.players(t.addr).await;
-    let (mut verdict, verified, mut reason) = judge(
-        info.as_ref().map(|r| &r.value),
-        players.as_ref().map(|r| &r.value),
-        t.reported,
-        t.max_players,
-    );
+/// `judge` plus the continuity rule, for every caller that publishes a verdict. The
+/// details pane called `judge` alone, so opening a row wrote "verified" over a
+/// standing R11 verdict, in the UI and in the cache (D-236).
+pub fn judge_with_continuity(
+    id: &str,
+    info: Option<&Info>,
+    players: Result<&Players, &A2sError>,
+    fallback_reported: i32,
+    fallback_max: i32,
+    was_synthetic: bool,
+) -> (Verdict, Option<i32>, String) {
+    let (mut verdict, verified, mut reason) = judge(info, players, fallback_reported, fallback_max);
     // R11 runs only on a list R2 and R5 have already passed; it is the check those
     // two cannot make from one sample (D-233).
     if verdict == Verdict::Verified {
-        if let Ok(p) = players.as_ref() {
-            let durations: Vec<f32> = p.value.players.iter().map(|x| x.duration_secs).collect();
-            if let Some(why) = continuity(&t.id, &durations) {
+        if let Ok(p) = players {
+            let durations: Vec<f32> = p.players.iter().map(|x| x.duration_secs).collect();
+            if let Some(why) = continuity(id, &durations, was_synthetic) {
                 verdict = Verdict::Synthetic;
                 reason = why;
             }
         }
     }
+    (verdict, verified, reason)
+}
+
+pub async fn verify_one(client: &Client, t: Target, with_info: bool) -> Verification {
+    let stale = ServerRow::now_unix().saturating_sub(t.reported_at) > INFO_FRESH_SECS;
+    let info = if with_info || stale {
+        client.info(t.addr).await.ok()
+    } else {
+        None
+    };
+    let players = client.players(t.addr).await;
+    let (verdict, verified, reason) = judge_with_continuity(
+        &t.id,
+        info.as_ref().map(|r| &r.value),
+        players.as_ref().map(|r| &r.value),
+        t.reported,
+        t.max_players,
+        t.was_synthetic,
+    );
     let (reported, max_players) = info
         .as_ref()
         .map(|r| (r.value.players as i32, r.value.max_players as i32))
@@ -450,10 +506,73 @@ mod tests {
         // neither strikes nor replaces the sample.
         let a: Vec<f32> = (0..10).map(|i| 500.0 + i as f32 * 50.0).collect();
         let b: Vec<f32> = (0..10).map(|i| (i * 977 % 10_000) as f32).collect();
-        assert!(continuity("test:1", &a).is_none());
-        assert!(continuity("test:1", &b).is_none());
+        assert!(continuity("test:1", &a, false).is_none());
+        assert!(continuity("test:1", &b, false).is_none());
         // Fewer than five entries never take part.
-        assert!(continuity("test:2", &[1.0, 2.0, 3.0]).is_none());
+        assert!(continuity("test:2", &[1.0, 2.0, 3.0], false).is_none());
+    }
+
+    /// A re-drawn list is struck twice in a row; the verdict then survives a check too
+    /// soon to compare, a check too far apart and an exempt one, and only a list that
+    /// carries over clears it (D-236).
+    #[test]
+    fn continuity_verdict_stands_until_a_comparison_clears_it() {
+        let t0 = Instant::now();
+        let at = |secs: u64| t0 + std::time::Duration::from_secs(secs);
+        // docs/11 T2: a fresh `random() × 10 000` list on every query (xorshift64).
+        let fake = |seed: u64, n: usize| -> Vec<f32> {
+            let mut x = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+            (0..n)
+                .map(|_| {
+                    x ^= x << 13;
+                    x ^= x >> 7;
+                    x ^= x << 17;
+                    (x % 10_000) as f32
+                })
+                .collect()
+        };
+        let id = "test:r11";
+        assert!(continuity_at(id, &fake(1, 20), false, at(0)).is_none());
+        assert!(
+            continuity_at(id, &fake(2, 20), false, at(120)).is_none(),
+            "one strike"
+        );
+        assert!(
+            continuity_at(id, &fake(3, 20), false, at(240)).is_some(),
+            "two strikes"
+        );
+        // Inside the minimum gap: nothing to compare, the verdict stands.
+        assert!(continuity_at(id, &fake(4, 20), false, at(250)).is_some());
+        // Beyond the maximum gap: re-baselined on this sample, the verdict stands.
+        assert!(continuity_at(id, &fake(5, 20), false, at(4_000)).is_some());
+        // A list that halved is exempt from comparison, and exempt is not cleared.
+        let half = fake(6, 9);
+        assert!(continuity_at(id, &half, false, at(4_200)).is_some());
+        // Real sessions carrying over, advanced by the gap, clear it.
+        let carried: Vec<f32> = half.iter().map(|d| d + 150.0).collect();
+        assert!(continuity_at(id, &carried, false, at(4_350)).is_none());
+    }
+
+    /// Churn on an honest server over a long gap is not evidence: two checks 90
+    /// minutes apart that share almost no sessions are not compared (D-236).
+    #[test]
+    fn continuity_does_not_compare_across_long_gaps() {
+        let t0 = Instant::now();
+        let at = |secs: u64| t0 + std::time::Duration::from_secs(secs);
+        let a: Vec<f32> = (0..20).map(|i| 300.0 + i as f32 * 97.0).collect();
+        let b: Vec<f32> = (0..20).map(|i| 50.0 + i as f32 * 211.0).collect();
+        let c: Vec<f32> = (0..20).map(|i| 70.0 + i as f32 * 173.0).collect();
+        assert!(continuity_at("test:gap", &a, false, at(0)).is_none());
+        assert!(continuity_at("test:gap", &b, false, at(5_400)).is_none());
+        assert!(continuity_at("test:gap", &c, false, at(10_800)).is_none());
+    }
+
+    /// A verdict cached before a restart stands until a comparison can overturn it.
+    #[test]
+    fn continuity_keeps_a_cached_synthetic_verdict() {
+        let a: Vec<f32> = (0..10).map(|i| 500.0 + i as f32 * 50.0).collect();
+        assert!(continuity("test:cached", &a, true).is_some());
+        assert!(continuity("test:fresh", &a, false).is_none());
     }
 
     fn players(durations: &[f32], name: &str) -> Players {

@@ -1027,17 +1027,27 @@ class ServersStore {
       const r = this.rows.get(v.id);
       if (!r) continue;
       this.#pending.delete(v.id);
+      // Mirrors `apply_verifications` (cache.rs), rule for rule (D-236).
+      const infoAnswered = v.pingMs != null;
+      const synthetic = v.verdict === "synthetic";
       this.rows.set(v.id, {
         ...r,
-        players: v.reported,
-        maxPlayers: v.maxPlayers,
+        // Only a fresh INFO moves the claim: the fallback is the count the check
+        // started from, which a later Steam batch may already have replaced.
+        players: infoAnswered ? v.reported : r.players,
+        maxPlayers: infoAnswered ? v.maxPlayers : r.maxPlayers,
         pingMs: v.pingMs ?? r.pingMs,
         tags: v.tags ?? r.tags,
-        // Keep the last real count when this check could not produce one (D-160),
-        // matching what the cache now stores.
-        verifiedPlayers: v.verified ?? r.verifiedPlayers,
-        verifiedAt: v.verified == null ? r.verifiedAt : v.verifiedAt,
+        // Keep the last real count when this check could not produce one (D-160) —
+        // but a list judged synthetic is not a count, and must not become the "last
+        // head-count" R6 trusts.
+        verifiedPlayers: synthetic ? null : (v.verified ?? r.verifiedPlayers),
+        verifiedAt: synthetic ? null : v.verified == null ? r.verifiedAt : v.verifiedAt,
         verdict: v.verdict,
+        // Our own count of real players beats Steam's "empty" from a listing that
+        // also said 0; a farm's listing claimed its number and keeps R0.
+        steamEmpty:
+          r.steamEmpty === true && r.players === 0 && infoAnswered && v.verdict === "verified" && (v.verified ?? 0) > 0 ? null : r.steamEmpty,
       });
     }
     this.#markDirty();

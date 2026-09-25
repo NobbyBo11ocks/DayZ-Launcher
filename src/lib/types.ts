@@ -158,7 +158,10 @@ export const isUntrusted = (r: ServerRow): boolean =>
  * exactly the gap a server that answers INFO and firewalls PLAYER relies on.
  */
 export const isUnchecked = (r: ServerRow): boolean =>
-  r.verifiedPlayers == null && (r.verdict === "unverifiable" || r.verdict === "offline" || r.verdict == null);
+  r.verifiedPlayers == null &&
+  // A fabricated list is no head-count either (D-236): the cell shows the server's own
+  // claim under the warning, not a count nobody took.
+  (r.verdict === "unverifiable" || r.verdict === "offline" || r.verdict === "synthetic" || r.verdict == null);
 
 /**
  * Population a player may rely on (mirrors `judge` in browser/verify.rs). This is
@@ -173,8 +176,9 @@ export const trustedPlayers = (r: ServerRow): number => {
   if (r.verifiedPlayers != null) return r.verifiedPlayers;
   if (isInflated(r)) return 0;
   // A server that refuses PLAYER has a claim, not a count. The cell still shows the
-  // claim, dimmed and marked "?"; the sort must not reward it (D-233).
-  if (r.verdict === "unverifiable") return 0;
+  // claim, dimmed and marked "?"; the sort must not reward it (D-233). Nor may a list
+  // judged fabricated, whose length is the claim again (D-236).
+  if (r.verdict === "unverifiable" || r.verdict === "synthetic") return 0;
   return r.players;
 };
 

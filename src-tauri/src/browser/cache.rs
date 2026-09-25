@@ -600,12 +600,31 @@ impl Cache {
             // which the UI fell back to the server's own — possibly inflated — number
             // with no marking at all. The verdict still records why it could not be
             // refreshed, and `verified_at` only advances when there is a fresh count.
+            //
+            // Three more rules, all D-236; every expression reads the row as it was
+            // before this UPDATE, which is how SQLite evaluates SET.
+            // * A list judged synthetic is not a head-count: keeping it as one let R6's
+            //   "counted before" exemption trust a farm again at its fabricated number
+            //   the first time its PLAYER timed out.
+            // * `players` and `max_players` change only when INFO answered (`?7`, the
+            //   ping, is set exactly then). The fallback is the count the check started
+            //   from, which a later Steam batch may already have replaced.
+            // * Our own count of real players beats Steam's "empty" from when the row
+            //   was listed: a server listed by `noplayers` and filled since read as R0
+            //   the moment we counted it, and was hidden. Only when that listing said 0
+            //   too — a farm's listing claimed its fabricated number, and keeps R0.
             let mut stmt = tx.prepare_cached(
                 "UPDATE servers SET
-                   verified_players = COALESCE(?2, verified_players),
-                   verified_at = CASE WHEN ?2 IS NULL THEN verified_at ELSE ?3 END,
+                   verified_players = CASE WHEN ?4 = 'synthetic' THEN NULL
+                                           ELSE COALESCE(?2, verified_players) END,
+                   verified_at = CASE WHEN ?4 = 'synthetic' THEN NULL
+                                      WHEN ?2 IS NULL THEN verified_at ELSE ?3 END,
                    verdict = ?4,
-                   players = ?5, max_players = ?6,
+                   players = CASE WHEN ?7 IS NULL THEN players ELSE ?5 END,
+                   max_players = CASE WHEN ?7 IS NULL THEN max_players ELSE ?6 END,
+                   steam_empty = CASE WHEN steam_empty = 1 AND players = 0 AND ?7 IS NOT NULL
+                                           AND ?4 = 'verified' AND ?2 > 0 THEN NULL
+                                      ELSE steam_empty END,
                    ping_ms = COALESCE(?7, ping_ms), keywords = COALESCE(?8, keywords),
                    last_seen = CASE WHEN ?7 IS NULL THEN last_seen ELSE ?3 END
                  WHERE id = ?1",
@@ -624,6 +643,17 @@ impl Cache {
             }
         }
         tx.commit()
+    }
+
+    /// Servers whose last verdict was "synthetic". Steam's batch rows carry no verdict,
+    /// so without this the first check after a launch judged every farm afresh and
+    /// published it as verified (R11 remembers only for the life of the process, D-236).
+    pub fn synthetic_ids(&self) -> rusqlite::Result<std::collections::HashSet<String>> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT id FROM servers WHERE verdict = 'synthetic'")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        rows.collect()
     }
 
     /// Withdraws Steam's vouch from every server the populated partition did not
@@ -1019,5 +1049,58 @@ mod tests {
             (33, Some("offline"), Some(1_000), Some(0)),
             "verdict updates; the count and its timestamp survive a check that could not count"
         );
+    }
+
+    /// D-236: a stale fallback never moves the claim; a list judged synthetic is not a
+    /// head-count; our own count of real players clears a listing's "empty" only when
+    /// that listing said 0 too.
+    #[test]
+    fn verification_keeps_claims_fresh_and_counts_real() {
+        let mut c = Cache::open_in_memory().unwrap();
+        let v = |id: &str, verdict, reported, verified, ping_ms| Verification {
+            id: id.to_string(),
+            verdict,
+            reported,
+            verified,
+            max_players: 50,
+            ping_ms,
+            keywords: None,
+            tags: None,
+            verified_at: 1_000,
+            reason: "test".into(),
+        };
+        // Listed by `noplayers` at 0 and filled since.
+        let mut empty = row(27017, 0);
+        empty.steam_empty = Some(true);
+        // Listed by `noplayers` claiming 60: a farm, whatever its PLAYER list says.
+        let mut farm = row(27018, 60);
+        farm.steam_empty = Some(true);
+        c.upsert(&[empty.clone(), farm.clone()]).unwrap();
+        c.apply_verifications(&[
+            v(&empty.id, Verdict::Verified, 12, Some(12), Some(30)),
+            v(&farm.id, Verdict::Verified, 60, Some(60), Some(30)),
+        ])
+        .unwrap();
+        let e = c.get(&empty.id).unwrap().unwrap();
+        assert_eq!(
+            (e.players, e.steam_empty),
+            (12, None),
+            "our count beats a stale empty"
+        );
+        let f = c.get(&farm.id).unwrap().unwrap();
+        assert_eq!((f.players, f.steam_empty), (60, Some(true)), "R0 stays");
+        // Without a fresh INFO the claim stays what the cache last had.
+        c.apply_verifications(&[v(&empty.id, Verdict::Verified, 3, Some(12), None)])
+            .unwrap();
+        assert_eq!(c.get(&empty.id).unwrap().unwrap().players, 12);
+        // A fabricated list leaves no "last head-count" behind for R6 to trust.
+        c.apply_verifications(&[v(&farm.id, Verdict::Synthetic, 60, Some(60), Some(30))])
+            .unwrap();
+        let f = c.get(&farm.id).unwrap().unwrap();
+        assert_eq!(
+            (f.verified_players, f.verified_at, f.verdict.as_deref()),
+            (None, None, Some("synthetic"))
+        );
+        assert!(c.synthetic_ids().unwrap().contains(&farm.id));
     }
 }
