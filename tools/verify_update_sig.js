@@ -4,8 +4,12 @@
 // signature against the app's public key. Tauri signs with minisign's prehashed "ED"
 // algorithm: Ed25519 over BLAKE2b-512 of the file, plus a global signature over
 // (file signature || trusted comment). No dependencies beyond node:crypto.
-// Usage: node tools/verify_update_sig.js [manifest-url-or-file] [--installer <local-file>]
-// Exit code 0 only when the key ids match and both signatures verify.
+// Usage: node tools/verify_update_sig.js [manifest-url-or-file] [--installer <local-file>] [--expect <version>]
+// Exit code 0 only when the key ids match, both signatures verify, and the manifest
+// and its signed trusted comment both name the expected version (by default the one in
+// tauri.conf.json). The last check is what the app enforces too (`requireSignedVersion`,
+// D-163), and without it a cached copy of the previous release's manifest — which
+// verifies perfectly — passed the release gate on its first attempt (D-240).
 import { createHash, createPublicKey, verify } from "node:crypto";
 import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -16,18 +20,22 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
 let manifestSrc;
 let installerPath;
+let expected;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--installer") installerPath = args[++i];
+  else if (args[i] === "--expect") expected = args[++i];
   else if (args[i].startsWith("--")) fail(`unknown option ${args[i]}`);
   else manifestSrc = args[i];
 }
 
 const conf = JSON.parse(readFileSync(path.join(root, "src-tauri", "tauri.conf.json"), "utf8"));
 manifestSrc ??= conf.plugins.updater.endpoints[0];
+expected ??= conf.version;
 
 const manifest = JSON.parse(await readText(manifestSrc));
-const win = manifest.platforms?.["windows-x86_64"];
-if (!win?.url || !win?.signature) fail("manifest lacks platforms.windows-x86_64.url/signature");
+// The updater looks for `<os>-<arch>-<installer>` first and falls back to `<os>-<arch>`.
+const win = manifest.platforms?.["windows-x86_64-nsis"] ?? manifest.platforms?.["windows-x86_64"];
+if (!win?.url || !win?.signature) fail("manifest lacks platforms.windows-x86_64[-nsis].url/signature");
 console.log(`manifest  ${manifestSrc}`);
 console.log(`version   ${manifest.version}  pub_date ${manifest.pub_date ?? "-"}`);
 console.log(`installer ${win.url}`);
@@ -36,7 +44,9 @@ let downloaded = false;
 if (!installerPath) {
   downloaded = true;
   installerPath = path.join(os.tmpdir(), `dayz-launcher-verify-${process.pid}.exe`);
-  writeFileSync(installerPath, Buffer.from(await (await fetchOk(win.url)).arrayBuffer()));
+  // The header the updater sends: an api.github.com asset URL answers it with the file
+  // and anything else with JSON metadata (D-147, D-240).
+  writeFileSync(installerPath, Buffer.from(await (await fetchOk(win.url, { Accept: "application/octet-stream" })).arrayBuffer()));
 }
 const file = readFileSync(installerPath);
 if (downloaded) unlinkSync(installerPath);
@@ -70,13 +80,16 @@ console.log(`algorithm ${alg}  key id ${pubKeyId.toString("hex")} (${keyOk ? "ma
 console.log(`trusted   ${trusted}`);
 console.log(`file signature   ${fileOk ? "valid" : "INVALID"}`);
 console.log(`global signature ${globalOk ? "valid" : "INVALID"}`);
-process.exit(fileOk && globalOk && keyOk ? 0 : 1);
+const signedVersion = /(?:^|\t)version:([^\t]*)/.exec(trusted)?.[1] ?? null;
+const versionOk = manifest.version === expected && signedVersion === expected;
+console.log(`version          ${versionOk ? "matches" : "MISMATCH"} (expected ${expected}, manifest ${manifest.version}, signed ${signedVersion ?? "-"})`);
+process.exit(fileOk && globalOk && keyOk && versionOk ? 0 : 1);
 
 async function readText(src) {
   return /^https?:\/\//.test(src) ? (await fetchOk(src)).text() : readFileSync(src, "utf8");
 }
-async function fetchOk(url) {
-  const res = await fetch(url, { redirect: "follow" });
+async function fetchOk(url, headers = {}) {
+  const res = await fetch(url, { redirect: "follow", headers });
   if (!res.ok) fail(`${url} → HTTP ${res.status}`);
   return res;
 }

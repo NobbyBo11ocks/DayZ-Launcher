@@ -200,6 +200,12 @@
   aria-activedescendant={selectedId ? `row-${selectedId}` : undefined}
   tabindex="0"
   onkeydown={onKey}
+  onfocusin={(e) => {
+    // Focus lives on the grid (D-224). A click focused the row itself (tabindex -1),
+    // and once that row scrolled past the overscan the virtual window removed it:
+    // focus fell to <body> and the arrows, Enter and F stopped working (D-240).
+    if (e.target !== e.currentTarget) (e.currentTarget as HTMLElement).focus({ preventScroll: true });
+  }}
 >
   <div class="head" role="row" aria-rowindex="1">
     {#each columns as c (c.key)}

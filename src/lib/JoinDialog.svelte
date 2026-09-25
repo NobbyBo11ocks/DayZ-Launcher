@@ -22,10 +22,31 @@
   let exit = $state<LaunchExited | null>(null);
   let autoLaunch = false;
   const job = Date.now();
+  const exited = new Map<number, LaunchExited>();
+  /** When the plan was made. A plan outlives a long wait for a slot, and a server that
+   *  restarts meanwhile can add or update a mod (D-240). */
+  let plannedAt = 0;
+  const PLAN_MAX_AGE_MS = 2 * 60_000;
+
+  /** Asks the host for a fresh plan; false when it could not answer. */
+  async function replan(): Promise<boolean> {
+    try {
+      plan = await invoke<JoinPlan>("join_plan", { id: serverId });
+      plannedAt = Date.now();
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   // Saved launch profiles (D-088): one can be picked for this launch only.
   let profiles = $state<LaunchProfile[]>([]);
   let profile = $state("");
+  /** The name DayZ will be started with: the picked profile's, not the settings' (D-240). */
+  const shownProfileName = $derived.by(() => {
+    const picked = profile ? profiles.find((p) => p.name === profile) : undefined;
+    return picked ? picked.profileName.trim() : (plan?.profileName ?? "");
+  });
   $effect(() => {
     invoke<Settings>("settings_get")
       .then((s) => (profiles = s.launchProfiles ?? []))
@@ -120,6 +141,9 @@
         }
       }),
       listen<LaunchExited>("launch:exited", (ev) => {
+        // Kept whoever it is for: an instant BattlEye exit (D-165) can be emitted
+        // before `launch_game` has replied, while `launched` is still unset (D-240).
+        exited.set(ev.payload.pid, ev.payload);
         if (launched && ev.payload.pid === launched.pid) {
           exit = ev.payload;
           phase = "exited";
@@ -130,6 +154,7 @@
       void refreshSlots();
       try {
         plan = await invoke<JoinPlan>("join_plan", { id: serverId });
+        plannedAt = Date.now();
         phase = "ready";
       } catch (e) {
         error = String(e);
@@ -202,12 +227,29 @@
     if (!plan) return;
     error = null;
     phase = "launching";
+    // The plan was never made again, so a mod the server added or updated while this
+    // dialog waited for a slot sent the launch into "not installed; sync mods first",
+    // with only Join — the same failure — on offer (D-240).
+    if (Date.now() - plannedAt > PLAN_MAX_AGE_MS && (await replan()) && toSync.length > 0) {
+      error = "The server's mods changed while you waited. Download them to join.";
+      phase = "ready";
+      return;
+    }
     try {
       launched = await invoke<Launched>("launch_game", { id: serverId, password: password || null, profile: profile || null });
-      phase = "running";
+      const early = exited.get(launched.pid);
+      if (early) {
+        exit = early;
+        phase = "exited";
+      } else {
+        phase = "running";
+      }
     } catch (e) {
       error = String(e);
       phase = "error";
+      // So the footer offers what the failure asks for (a download) rather than the
+      // same Join again.
+      void replan();
     }
   }
 
@@ -350,7 +392,7 @@
       {/if}
 
       <p class="muted small">
-        Profile name: <strong>{plan.profileName || "(Steam persona)"}</strong> · change it in Settings
+        Profile name: <strong>{shownProfileName || "(Steam persona)"}</strong> · change it in Settings
         {#if profiles.length}
           · launch with
           <select class="pick" bind:value={profile} disabled={busy || phase === "waiting" || phase === "running"} aria-label="Launch profile">

@@ -183,8 +183,12 @@ jobs:
         if: always() && env.PUBLISH == 'true'
         shell: pwsh
         run: |
+          # The verifier now also requires the manifest and its signed comment to name
+          # this release's version, so a cached copy of the previous manifest — which
+          # GitHub serves for minutes after a release (D-147) — is waited out instead of
+          # passing on the first attempt (D-240). Twelve attempts: four minutes.
           $ok = $false
-          foreach ($attempt in 1..6) {
+          foreach ($attempt in 1..12) {
             node tools/verify_update_sig.js
             if ($LASTEXITCODE -eq 0) { $ok = $true; break }
             "attempt $attempt failed; waiting for the release assets to propagate"

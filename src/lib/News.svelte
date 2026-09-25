@@ -8,6 +8,7 @@
   // command name before it is rethrown (D-158).
   import { invokeLogged as invoke } from "./log";
   import { openUrl } from "@tauri-apps/plugin-opener";
+  import { untrack } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { news, type NewsView } from "./state/news.svelte";
   import { servers } from "./state/servers.svelte";
@@ -15,7 +16,10 @@
   import type { NewsItem } from "./types";
 
   $effect(() => {
-    news.beginVisit();
+    // Untracked: `beginVisit` reads the seen mark, so the effect depended on it, and
+    // `markSeen` below moving the mark re-ran it — which re-froze the boundary past
+    // every post, and no "New" pill ever showed (D-100, D-240).
+    untrack(() => news.beginVisit());
     return () => news.endVisit();
   });
   $effect(() => {

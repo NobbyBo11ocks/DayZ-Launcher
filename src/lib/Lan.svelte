@@ -38,6 +38,7 @@
 
   const busy = $derived(scanning || servers.steam?.refreshing === true);
   const lastScan = $derived(servers.done?.source === "lan" ? servers.done : null);
+  /** Only a selection this page shows drives the grid and the pane (D-240), as on Favourites. */
   const selected = $derived(servers.lanRows.find((r) => r.id === servers.selectedId) ?? null);
 </script>
 
@@ -49,14 +50,16 @@
       </button>
       <input class="search" type="search" placeholder="Search…" value={typed} oninput={(e) => (typed = e.currentTarget.value, box.set(typed))} aria-label="Search LAN servers" />
       <span class="muted">
-        {servers.lanRows.length} server{servers.lanRows.length === 1 ? "" : "s"} on your network
+        {servers.lanRows.length}{#if servers.lanRows.length !== servers.lanTotal} of {servers.lanTotal}{/if} server{servers.lanTotal === 1 ? "" : "s"} on your network
         {#if lastScan}· scan answered {lastScan.responded} in {(lastScan.elapsedMs / 1000).toFixed(1)} s{#if scannedAt} at {scannedAt}{/if}{/if}
       </span>
       {#if servers.steam && !servers.steam.initialized}<span class="warn">Steam is not running; LAN discovery needs it and works once it is up.</span>{/if}
       {#if servers.error}<span class="error">{servers.error}</span>{/if}
     </div>
   </div>
-  {#if servers.lanRows.length === 0}
+  <!-- The unfiltered count: with a search typed on the Servers page (the box is shared),
+       "No LAN servers yet" appeared over servers the search was only hiding (D-240). -->
+  {#if servers.lanTotal === 0}
     <div class="empty">
       <p>No LAN servers yet.</p>
       <p class="muted">Scan LAN asks Steam for DayZ servers on this network: a server on this PC or behind the same router. Servers found stay in this list until the cache expires. For a known address elsewhere, use Direct connect in Servers.</p>
@@ -65,7 +68,7 @@
     <div class="main" class:with-pane={selected != null}>
       <ServerTable
         rows={servers.lanRows}
-        selectedId={servers.selectedId}
+        selectedId={selected?.id ?? null}
         sort={servers.sort}
         localVersion={servers.localVersion}
         favourites={servers.favourites}
@@ -78,6 +81,7 @@
         onFavourite={(id) => servers.toggleFavourite(id)}
         friendsOn={servers.friendsOn}
         modsByServer={servers.modsByServer}
+        empty={`No LAN server matches "${servers.filters.search.trim()}". The search box is shared with the Servers page.`}
       />
       {#if selected}
         <DetailsPane row={selected} localVersion={servers.localVersion} />

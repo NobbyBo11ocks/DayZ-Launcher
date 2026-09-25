@@ -155,7 +155,10 @@
   <main class="content" class:padded={!listViews.has(active)}>
     <!-- One page failing must not blank the whole window (D-160): the boundary keeps
          the title bar and the sidebar alive so the user can switch away, and the
-         error reaches launcher.log like any other. -->
+         error reaches launcher.log like any other. Keyed on the section, because a
+         boundary that has failed stays failed: switching away kept "This page stopped
+         working" on screen for every other page until Try again (D-240). -->
+    {#key active}
     <svelte:boundary onerror={(e) => logError("view", `${active} failed to render: ${describe(e)}`)}>
     {#if active === "news" && prefs.news}
       <News />
@@ -184,6 +187,7 @@
         </div>
       {/snippet}
     </svelte:boundary>
+    {/key}
   </main>
 </div>
 

@@ -380,7 +380,14 @@ const DETAILS_PAGE: usize = 50;
 const SYNC_EMIT_INTERVAL: Duration = Duration::from_millis(250);
 /// Re-issue `DownloadItem` when Steam has not started within this time.
 const SYNC_KICK_INTERVAL: Duration = Duration::from_secs(5);
-const SYNC_TIMEOUT: Duration = Duration::from_secs(45 * 60);
+/// A download is given up when Steam has moved nothing for this long. It used to be 45
+/// minutes from the start whatever was happening, and a first join to a big modded
+/// server — the project's own twelve-mod set is 5.91 GB (D-120) — needs 17.5 Mbit/s to
+/// finish in that, so a slower line failed a healthy download while the dialog's
+/// estimate said an hour to go (D-240).
+const SYNC_STALL: Duration = Duration::from_secs(15 * 60);
+/// …and a ceiling that still ends a download Steam keeps trickling forever.
+const SYNC_CAP: Duration = Duration::from_secs(8 * 3600);
 /// Steam normally answers an unsubscribe within a second; ids still silent after this are reported as failed.
 const UNSUBSCRIBE_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -687,6 +694,9 @@ struct ActiveSync {
     job: u64,
     ids: Vec<u64>,
     started: Instant,
+    /// When the bytes downloaded or the items installed last changed, and what they were.
+    progressed: Instant,
+    progress_mark: (u64, usize),
     last_emit: Instant,
     /// Subscribe results arrive through Steam call-result callbacks on this thread.
     sub_results: mpsc::Receiver<(u64, Result<(), String>)>,
@@ -714,6 +724,8 @@ fn start_sync(ugc: &UGC, job: u64, ids: Vec<u64>) -> ActiveSync {
         job,
         ids,
         started: Instant::now(),
+        progressed: Instant::now(),
+        progress_mark: (0, 0),
         last_emit: Instant::now() - SYNC_EMIT_INTERVAL,
         sub_results: rx,
         failed: HashMap::new(),
@@ -783,11 +795,17 @@ fn tick_sync(
         }
     }
     let installed = items.iter().filter(|p| p.state == "installed").count();
+    let downloaded: u64 = items.iter().map(|p| p.downloaded).sum();
+    if (downloaded, installed) != sync.progress_mark {
+        sync.progress_mark = (downloaded, installed);
+        sync.progressed = Instant::now();
+    }
     let elapsed_ms = sync.started.elapsed().as_millis() as u64;
     let finished = installed == items.len();
     let failed = !sync.failed.is_empty();
-    let timed_out = sync.started.elapsed() > SYNC_TIMEOUT;
-    if finished || failed || timed_out {
+    let stalled = sync.progressed.elapsed() > SYNC_STALL;
+    let capped = sync.started.elapsed() > SYNC_CAP;
+    if finished || failed || stalled || capped {
         return Some(SyncDone {
             job: sync.job,
             ok: finished,
@@ -795,8 +813,16 @@ fn tick_sync(
                 None
             } else if failed {
                 sync.failed.values().next().cloned()
+            } else if stalled {
+                Some(format!(
+                    "Steam made no progress on the download for {} minutes",
+                    SYNC_STALL.as_secs() / 60
+                ))
             } else {
-                Some("Steam did not finish the download within 45 minutes".into())
+                Some(format!(
+                    "Steam did not finish the download within {} hours",
+                    SYNC_CAP.as_secs() / 3600
+                ))
             },
             items,
             elapsed_ms,

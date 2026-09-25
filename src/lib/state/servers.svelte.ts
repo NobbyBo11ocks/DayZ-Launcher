@@ -555,7 +555,15 @@ class ServersStore {
     }
     const idx = new Uint32Array(n);
     for (let i = 0; i < n; i++) idx[i] = i;
+    // Unscanned servers (-1) go below every scanned one whichever way the column
+    // sorts, as D-146 says; multiplied by `dir` like the rest, an ascending sort put
+    // every one of them first (D-240).
+    const unscannedLast = key === "mods";
     idx.sort((x, y) => {
+      if (unscannedLast) {
+        const u = +(k1[x]! < 0) - +(k1[y]! < 0);
+        if (u !== 0) return u;
+      }
       const d = k1[x]! - k1[y]! || k2[x]! - k2[y]!;
       if (d !== 0) return dir * d;
       const a = out[x]!.id;
@@ -641,6 +649,14 @@ class ServersStore {
     }
     this.#sortInPlace(out);
     return out;
+  });
+
+  /** LAN rows before the search, so the tab can tell "none found" from "none match" (D-240). */
+  lanTotal = $derived.by(() => {
+    void this.#rowSetVersion;
+    let n = 0;
+    for (const r of this.rows.values()) if (isLanIp(r.ip)) n++;
+    return n;
   });
 
   /** Rows with a local-network address (LAN tab, D-087), search-filtered, busiest first. */

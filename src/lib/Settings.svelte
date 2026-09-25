@@ -66,6 +66,8 @@
       if (!launch) return;
       try {
         await invoke("settings_set", { settings: launch });
+        // A failure from an earlier save stayed on screen beside "Saved" (D-240).
+        saveError = null;
         saved = true;
         setTimeout(() => (saved = false), 1200);
       } catch (e) {

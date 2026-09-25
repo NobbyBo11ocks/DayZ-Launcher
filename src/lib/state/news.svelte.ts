@@ -48,6 +48,9 @@ class NewsStore {
   #thumbPending = new Set<string>();
   #thumbFailed = new Set<string>();
   #started = false;
+  /** Which `start()` is current: a switch-off and on during the first fetch left two
+   *  of them running, each arming its own timer, and `stop()` cleared one (D-240). */
+  #run = 0;
   #timer: ReturnType<typeof setInterval> | undefined;
   #visiting = false;
 
@@ -58,6 +61,7 @@ class NewsStore {
   async start() {
     if (this.#started) return;
     this.#started = true;
+    const run = ++this.#run;
     try {
       const c = await invoke<NewsCached>("news_cached");
       this.items = c.items;
@@ -65,13 +69,16 @@ class NewsStore {
       /* nothing cached yet */
     }
     const u = await uiPrefs.ready;
-    this.seen = u.newsSeen ?? 0;
+    // `ready` holds the file as it was at start-up: taken alone, a switch-off and on
+    // later in the session put back a mark the user had since moved, and posts read
+    // meanwhile counted as unread again (D-240).
+    this.seen = Math.max(this.seen, u.newsSeen ?? 0);
     // A switch-off between here and now must not be overtaken by this first fetch.
-    if (!this.#started) return;
+    if (!this.#started || run !== this.#run) return;
     await this.refresh();
     // `stop()` may have run while that was in flight; arming now would leave an
-    // interval nothing can clear (D-197).
-    if (!this.#started) return;
+    // interval nothing can clear (D-197), and so would a newer `start()`.
+    if (!this.#started || run !== this.#run) return;
     this.#timer = setInterval(() => void this.refresh(), REFRESH_MS);
   }
 

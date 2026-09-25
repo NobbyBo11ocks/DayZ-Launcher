@@ -28,7 +28,9 @@
 
   let importing = $state(false);
   let imported = $state<ImportResult | null>(null);
-  /** The pane follows the selection only while it is one of these rows. */
+  /** The pane follows the selection only while it is one of these rows — and so do the
+   *  grid's highlight and keys: given the global one, Enter and F acted on a server from
+   *  the Servers page this grid does not show (D-240). */
   const selected = $derived(servers.favouriteRows.find((r) => r.id === servers.selectedId) ?? null);
 
   async function importOfficial() {
@@ -61,7 +63,7 @@
     <div class="main" class:with-pane={selected != null}>
       <ServerTable
         rows={servers.favouriteRows}
-        selectedId={servers.selectedId}
+        selectedId={selected?.id ?? null}
         sort={servers.sort}
         localVersion={servers.localVersion}
         favourites={servers.favourites}

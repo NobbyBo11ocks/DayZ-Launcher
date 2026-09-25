@@ -15,6 +15,9 @@
   let logPath = $state<string | null>(null);
   let onlyProblems = $state(false);
   let error = $state<string | null>(null);
+  /** Its own line: `load()` clears `error` every five seconds, which erased this message
+   *  and left the chips disabled with nothing to say why (D-197, D-240). */
+  let settingsError = $state<string | null>(null);
   let copied = $state(false);
 
   // Recording can be switched off entirely (D-169): nothing is written to the file
@@ -26,12 +29,13 @@
   async function loadSettings() {
     try {
       settings = await invoke<Settings>("settings_get");
+      settingsError = null;
       recording = settings.logging;
       muted = settings.logMuted ?? [];
     } catch (e) {
       // The chips guard on `settings` and would otherwise click with no effect and
       // no message, which reads as "logging is off" when it is not (D-197).
-      error = `Log settings could not be read (${String(e)}); recording cannot be changed.`;
+      settingsError = `Log settings could not be read (${String(e)}); recording cannot be changed.`;
     }
   }
   /**
@@ -155,6 +159,7 @@
     </div>
   </header>
 
+  {#if settingsError}<p class="note bad">{settingsError}</p>{/if}
   {#if error}<p class="note bad">{error}</p>{/if}
 
   <!-- One chip per area; switching one off stops it being recorded at all, in the
