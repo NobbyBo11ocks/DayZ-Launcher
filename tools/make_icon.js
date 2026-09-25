@@ -209,8 +209,11 @@ function ico(images) {
 }
 
 // 20, 40 and 96 are what Windows asks for at 125 % and 150 % scaling; without them it
-// scales the next size down itself, softly.
-const icoSizes = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256];
+// scales the next size down itself, softly. 32 goes first: Tauri's codegen embeds the
+// ICO's first entry as the window icon, which the taskbar draws at 32 px, and a 16 px
+// first entry reached the taskbar as a blurred double (D-260). Windows itself picks
+// from the group by size, whatever the order.
+const icoSizes = [32, 16, 20, 24, 40, 48, 64, 96, 128, 256];
 const images = [];
 for (const size of icoSizes) images.push({ size, data: await png(size) });
 const icoFile = ico(images);

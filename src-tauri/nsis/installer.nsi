@@ -1076,7 +1076,16 @@ Section Install
     Call CreateOrUpdateDesktopShortcut
   ${EndIf}
 
+; >>> dzl-change:   !ifmacrodef NSIS_HOOK_POSTINSTALL
+  ; Explorer keeps the icons it has drawn for a shortcut in its icon cache, keyed by
+  ; the target's path, so after an in-place update the Start menu and desktop
+  ; shortcuts kept the previous icon (D-260). SHCNE_ASSOCCHANGED is the documented
+  ; way to tell it that cached icons are stale; SHCNF_IDLIST (0) is the flag the
+  ; documentation requires with it.
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
+
   !ifmacrodef NSIS_HOOK_POSTINSTALL
+; <<< dzl-change
     !insertmacro NSIS_HOOK_POSTINSTALL
   !endif
 
