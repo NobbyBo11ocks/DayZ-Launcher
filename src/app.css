@@ -152,9 +152,10 @@ button {
   gap: 2px;
 }
 
-/* Every item wears the accent since D-250 (user request); the section you are on is
-   the one with the surface, the bar and the heavier weight. A fixed 36 px, so the rows
-   keep one rhythm whatever the font does with a label. */
+/* The icons wear the accent (RailIcon) and the labels the default text colour, on the
+   user's call (D-253; D-250 had put the labels in the accent too). The section you are
+   on is the one with the surface, the bar and the heavier weight. A fixed 36 px, so
+   the rows keep one rhythm whatever the font does with a label. */
 .rail-item {
   all: unset;
   box-sizing: border-box;
@@ -166,7 +167,7 @@ button {
   height: 36px;
   padding: 0 10px;
   border-radius: var(--radius);
-  color: var(--accent-ink);
+  color: var(--fg);
   font-weight: 500;
   transition: background-color 120ms, color 120ms;
   white-space: nowrap;
@@ -200,9 +201,9 @@ button {
   outline-offset: -2px;
 }
 
-/* The one item that is not a place, so it sits apart at the foot of the rail. D-216
-   gave it the accent, which every item wears now (D-250), so it has an accent tint
-   behind it as well. The rule D-216 described was never written: it stood straight
+/* The one item that is not a place, so it sits apart at the foot of the rail, with an
+   accent tint behind it: D-216 marked it with the accent, which every icon wears now
+   (D-250, D-253). The rule D-216 described was never written: it stood straight
    under Logs in the muted grey of every other item. */
 .rail-item.update {
   margin-top: auto;

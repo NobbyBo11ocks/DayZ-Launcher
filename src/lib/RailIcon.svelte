@@ -3,10 +3,11 @@
 </script>
 
 <script lang="ts">
-  // The section rail's icons (D-250): one 24-unit grid, one stroke, round ends, drawn in
-  // `currentColor` so they take the item's accent. They replaced Unicode glyphs whose
-  // size and weight changed with whichever font happened to have them. Drawn here
-  // rather than taken from an icon set: nothing is added to the bundle but these paths.
+  // The section rail's icons (D-250): one 24-unit grid, one stroke, round ends, in the
+  // accent while the labels beside them keep the default text colour (D-253). They
+  // replaced Unicode glyphs whose size and weight changed with whichever font happened
+  // to have them. Drawn here rather than taken from an icon set: nothing is added to
+  // the bundle but these paths.
   let { name }: { name: RailIconName } = $props();
 </script>
 
@@ -49,7 +50,8 @@
 </svg>
 
 <style>
-  .icon { flex: none; display: block; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  /* The accent whatever the label does: the labels are the default text colour (D-253). */
+  .icon { flex: none; display: block; width: 18px; height: 18px; color: var(--accent-ink); fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   /* Status lights on the rack: a dot needs more ink than a line to read at 18 px. */
   .dot { stroke-width: 2.6; }
 </style>
