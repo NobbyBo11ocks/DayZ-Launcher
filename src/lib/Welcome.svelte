@@ -1,6 +1,7 @@
 <script lang="ts">
   // First-run overlay (docs/06 §6). Shown once; the flag lives in settings.json (localStorage is only the legacy migration).
   import { servers } from "./state/servers.svelte";
+  import logoUrl from "../assets/logo.png";
 
   let { onDone }: { onDone: () => void } = $props();
   let importing = $state(false);
@@ -47,6 +48,7 @@
 
 <div class="backdrop" role="presentation">
   <div class="card" role="dialog" aria-modal="true" aria-labelledby="welcome-title" bind:this={cardEl} tabindex="-1" onkeydown={trap}>
+    <img class="logo" src={logoUrl} alt="" width="132" height="132" draggable="false" />
     <h2 id="welcome-title">Welcome to DZSA CrayZ Launcher</h2>
     <ol>
       <li><strong>Steam stays in charge.</strong> The server list comes from Steam, mods download through the Workshop, and the game starts through BattlEye exactly like the official launcher. Keep Steam running.</li>
@@ -67,7 +69,9 @@
 <style>
   .backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 60; }
   .card { width: min(560px, calc(100vw - 32px)); background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; padding: 22px 24px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45); }
-  h2 { margin: 0; font-size: 18px; font-weight: 600; }
+  /* The logo, lit from behind in its own green (D-258). */
+  .logo { align-self: center; width: 132px; height: 132px; margin: -8px 0 -6px; filter: drop-shadow(0 8px 24px rgb(125 255 42 / 0.18)); }
+  h2 { margin: 0; font-size: 18px; font-weight: 600; text-align: center; }
   ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
   .row { display: flex; align-items: center; gap: 10px; }
   footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 4px; }

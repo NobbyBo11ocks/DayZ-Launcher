@@ -5,6 +5,7 @@
   // it carries accent-coloured live counts with icons (servers with players, friends
   // in DayZ; D-103, D-105, D-106). The update notice lives at the foot of the rail (D-216).
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import emblemUrl from "../assets/emblem.png";
 
   let {
     servers = null,
@@ -16,6 +17,9 @@
 </script>
 
 <header class="titlebar" data-tauri-drag-region>
+  <!-- The app's mark, where a framed window shows its icon (D-258). Part of the drag
+       handle, like the rest of the bar. -->
+  <img class="mark" src={emblemUrl} alt="" width="18" height="20" draggable="false" data-tauri-drag-region />
   {#if servers != null}
     <span class="stat" data-tauri-drag-region title="Servers with a verified player count above zero">
       <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.4" /><path d="M1.6 8h12.8M8 1.6c2.6 2.6 2.6 10.2 0 12.8M8 1.6C5.4 4.2 5.4 11.8 8 14.4" /></svg>
@@ -47,13 +51,14 @@
   /* Above every overlay (D-151): modal backdrops are fixed and used to paint over the
      bar, which left minimise, maximise, close and the drag region dead while a dialog
      was open — with no native frame to fall back on. */
-  .titlebar { grid-area: top; position: relative; z-index: 80; display: flex; align-items: center; gap: 16px; height: 30px; padding: 0 0 0 14px; background: var(--bg-elev); border-bottom: 1px solid var(--border); user-select: none; }
+  .titlebar { grid-area: top; position: relative; z-index: 80; display: flex; align-items: center; gap: 16px; height: 30px; padding: 0 0 0 10px; background: var(--bg-elev); border-bottom: 1px solid var(--border); user-select: none; }
   /* Accent-coloured so the counts read as part of the theme (user request, D-103). */
   .stat { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--accent-ink); white-space: nowrap; }
   .stat + .stat { margin-left: 16px; }
   .icon { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; flex: none; }
   /* The welcome line lives here now (D-173), in the accent like the counts beside it. */
   .greeting { min-width: 0; margin-right: 12px; font-size: 12px; font-weight: 500; color: var(--accent-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mark { flex: none; width: 18px; height: 20px; margin-right: -6px; }
   .spacer { flex: 1; height: 100%; }
   .controls { display: flex; height: 100%; }
   .wbtn { all: unset; width: 40px; height: 100%; display: inline-flex; align-items: center; justify-content: center; color: var(--fg-muted); cursor: default; }

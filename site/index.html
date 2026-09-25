@@ -91,7 +91,6 @@
       .brand img {
         width: 26px;
         height: 26px;
-        border-radius: 6px;
       }
 
       .top nav {
@@ -151,6 +150,15 @@
       .hero {
         padding: 72px 0 8px;
         text-align: center;
+      }
+
+      /* The logo over the headline, lit from behind in its own green (D-258). */
+      .hero .logo {
+        display: block;
+        width: min(220px, 56vw);
+        height: auto;
+        margin: -20px auto 10px;
+        filter: drop-shadow(0 10px 36px rgb(125 255 42 / 0.2));
       }
 
       .hero h1 {
@@ -374,6 +382,7 @@
 
     <main id="top">
       <div class="wrap hero">
+        <img class="logo" src="logo.png" width="220" height="220" alt="DZSA CrayZ Launcher: a skull in a gas mask on a biohazard sign, over the name" />
         <h1>Player counts you can <span class="accent">actually trust</span></h1>
         <p class="lede">
           A Windows launcher for DayZ Standalone. Every populated server is queried directly and cross-checked against
@@ -384,7 +393,7 @@
           <a class="btn" href="https://github.com/NobbyBo11ocks/DayZ-Launcher/releases/latest">Download for Windows</a>
           <a class="btn ghost" href="https://github.com/NobbyBo11ocks/DayZ-Launcher">Source on GitHub</a>
         </div>
-        <p class="under">Free · Windows 10 and 11 · 4.7 MB installer · no account, no telemetry</p>
+        <p class="under">Free · Windows 10 and 11 · 7.5 MB installer · no account, no telemetry</p>
 
         <div class="shot"><img src="servers.png" alt="The server browser: country flags, verified player counts, filters, and a details pane showing the server's mods and population history." /></div>
       </div>

@@ -1,10 +1,6 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/art/banner-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/art/banner-light.png">
-  <img src="docs/art/banner-dark.png" width="880" alt="DZSA CrayZ Launcher — a fast, honest server browser for DayZ Standalone. Player counts verified against the servers themselves; Workshop mods synced and the game started in one click; no accounts, no API keys, no telemetry.">
-</picture>
+<img src="docs/art/banner.png" width="880" alt="DZSA CrayZ Launcher — a fast, honest server browser for DayZ Standalone. Player counts verified against the servers themselves; Workshop mods synced and the game started in one click; no accounts, no API keys, no telemetry.">
 
 <br><br>
 
@@ -12,7 +8,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/NobbyBo11ocks/DayZ-Launcher/ci.yml?branch=main&label=CI&labelColor=1d2530)](https://github.com/NobbyBo11ocks/DayZ-Launcher/actions/workflows/ci.yml)
 [![Downloads](https://img.shields.io/github/downloads/NobbyBo11ocks/DayZ-Launcher/total?color=2ea44f&labelColor=1d2530)](https://github.com/NobbyBo11ocks/DayZ-Launcher/releases)
 [![Platform](https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-0078d4?labelColor=1d2530)](#install)
-[![Installer](https://img.shields.io/badge/installer-4.7%20MB-8957e5?labelColor=1d2530)](#install)
+[![Installer](https://img.shields.io/badge/installer-7.5%20MB-8957e5?labelColor=1d2530)](#install)
 [![Telemetry](https://img.shields.io/badge/telemetry-none-2ea44f?labelColor=1d2530)](#what-it-talks-to)
 
 ### [⬇ Download for Windows](https://github.com/NobbyBo11ocks/DayZ-Launcher/releases/latest)
@@ -50,7 +46,7 @@ Every populated server queried directly with A2S and cross-checked against Steam
 
 ### ⚡ Quick
 
-Rust host, plain Svelte 5, a virtualised table and a SQLite cache. First screen under half a second, installer under 5 MB.
+Rust host, plain Svelte 5, a virtualised table and a SQLite cache. First screen under half a second, installer about 7.5 MB, a third of it the setup's own artwork.
 
 </td><td width="33%" align="center">
 
@@ -63,9 +59,9 @@ No accounts, no API keys, no telemetry. Every destination it contacts is listed 
 
 | Installer | Cold start to first frame | Refresh, then verify | Idle CPU | Memory, whole app |
 |:-:|:-:|:-:|:-:|:-:|
-| **4.7 MB** | **0.43 s** | **≈ 35 s + ≈ 25 s** | **0.2 %** of one core | **≈ 306 MB** |
+| **≈ 7.5 MB** | **0.43 s** | **≈ 35 s + ≈ 25 s** | **0.2 %** of one core | **≈ 306 MB** |
 
-<sub>Installer measured at v0.1.37; memory and idle CPU at v0.1.23; cold start at v0.1.19 (D-136). The refresh figure is the list arriving, with verified counts following it: five real passes on 2026-09-23 ran 31.9–36.3 s for 2 273–2 619 servers, then 19.6–41.4 s to verify them. Budgets, method and history in [docs/05 §6](docs/05-architecture-and-optimisation.md).</sub>
+<sub>Installer: v0.1.37's measured 4.75 MB plus the 2.71 MB the themed setup's artwork adds, measured on the same NSIS toolchain (D-258); the next release confirms it. Memory and idle CPU at v0.1.23; cold start at v0.1.19 (D-136). The refresh figure is the list arriving, with verified counts following it: five real passes on 2026-09-23 ran 31.9–36.3 s for 2 273–2 619 servers, then 19.6–41.4 s to verify them. Budgets, method and history in [docs/05 §6](docs/05-architecture-and-optimisation.md).</sub>
 
 ---
 
@@ -258,7 +254,7 @@ npm run tauri build
 
 Output: `src-tauri/target/release/bundle/nsis/` (`DZSA CrayZ Launcher_<version>_x64-setup.exe` plus a `.sig` for the updater).
 
-`src-tauri/nsis/installer.nsi` is a copy of Tauri's stock template carrying **seven deviations in eight marked blocks**, plus one new file (`nsis/hooks.nsh`) on Tauri's own extension point. Each deviation is bracketed by `; >>> dzl-change:` and carries the upstream lines it replaces, so `node tools/nsis_template_check.js` puts them all back and compares against the real thing rather than keeping a second copy of what we wrote (D-205):
+`src-tauri/nsis/installer.nsi` is a copy of Tauri's stock template carrying **eight deviations in fifteen marked blocks**, plus one new file (`nsis/hooks.nsh`) on Tauri's own extension point. Each deviation is bracketed by `; >>> dzl-change:` and carries the upstream lines it replaces, so `node tools/nsis_template_check.js` puts them all back and compares against the real thing rather than keeping a second copy of what we wrote (D-205):
 
 1. The per-user default install directory is `%LOCALAPPDATA%\Programs\<product>` rather than `%LOCALAPPDATA%\<product>`, which collided with the official DayZ Launcher's data folder under this app's original name (D-067).
 2. An options page before anything is written, so the news question is answered before the launcher has ever run (D-206), and `/NONEWS` for silent installs.
@@ -267,12 +263,13 @@ Output: `src-tauri/target/release/bundle/nsis/` (`DZSA CrayZ Launcher_<version>_
 5. The Add/Remove Programs entry survives an upgrade, so an interrupted one still leaves a way back (D-214).
 6. The install waits for the old binary's lock to clear before overwriting it, because WebView2's children outlive the host (D-214).
 7. `AllowSkipFiles off`: NSIS otherwise skips a locked file, and a silent install exited 0 having changed nothing while writing the new version to Add/Remove Programs (D-205).
+8. The launcher's own look on every page, uninstaller included: its dark surfaces, light text and lime accent, the logo beside the welcome and finish pages, the gas mask in the header, and a splash for an interactive install that silent, passive and update runs never show. Each picture comes in seven sizes, one per common display scale, and the installer loads the one made for the screen it is on (D-258).
 
 Auto-updates were never affected by any of this — the updater always passes `/UPDATE`.
 
 After upgrading `@tauri-apps/cli`, run the check (add `--write` to refresh the copy from the new tag and re-apply every marked change).
 
-The installer's header and sidebar artwork comes from `node tools/nsis_art.js`, and the README banner from `node tools/readme_banner.js` — both drawn from the same mark as the app icon, so the three cannot drift apart.
+The logo is cut out of its source picture (`docs/art/logo-source.jpg`) by `node tools/logo_cutout.js`, and everything else is made from the result: the app icon and its gas-mask emblem by `tools/make_icon.js`, the installer's artwork by `tools/nsis_art.js`, the README banner by `tools/readme_banner.js`. So none of them can drift from the others.
 
 Updater artifacts are signed with a minisign key. The private key lives outside the repository (`%USERPROFILE%\.tauri\dayz-launcher.key`); set it before building:
 
@@ -377,7 +374,9 @@ tools/               Node scripts: A2S probe and capture, GeoIP and flag builder
 | `node tools/make_latest.js vX.Y.Z --notes notes.md` | Build `latest.json` from the uploaded release asset |
 | `node tools/nsis_template_check.js` | Diff our NSIS template against the installed Tauri CLI's |
 | `node tools/geoip_build.js` · `node tools/flags_build.js` | Rebuild the offline GeoIP table and the flag sprite |
-| `node tools/make_icon.js` | Redraw the app icon and write `icon.ico` plus the PNG sizes. Needs `sharp`, which is deliberately not a project dependency: `npm i --no-save sharp` first, and note that `npm ci` removes it again. `tools/nsis_art.js` and `tools/readme_banner.js` need it too |
+| `node tools/logo_cutout.js` | Cut the logo out of `docs/art/logo-source.jpg` into `docs/art/logo.png`; only needed for a new source picture. Needs `sharp`, which is deliberately not a project dependency: `npm i --no-save sharp` first, and note that `npm ci` removes it again. The next three need it too |
+| `node tools/make_icon.js` | Cut the gas mask out of the logo as the app icon and write `icon.ico` plus the PNG sizes |
+| `node tools/nsis_art.js` · `node tools/readme_banner.js` | Rebuild the installer's artwork and the README banner from the logo |
 
 </details>
 

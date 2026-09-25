@@ -1,11 +1,13 @@
-// The README banner (D-202), drawn from the same mark and palette as the app icon and
-// the installer artwork so all three stay one thing. Two files, because GitHub serves a
-// different one to readers in dark and light mode via `<picture>`.
+// The README banner (D-202, D-258): the launcher's logo on its own dark surfaces, with
+// the three things it does. One picture for GitHub's light and dark modes alike: the
+// logo is drawn for a dark ground, and the card's corners are cut away so it sits on
+// either page.
 //
 // Rasterised to PNG rather than shipped as SVG: GitHub renders a referenced SVG with
-// whatever fonts the reader has, and the layout here is tuned to the text widths.
+// whatever fonts the reader has, and the layout here is tuned to the text widths. The
+// text is Bebas Neue (tools/fonts, SIL OFL), as in the installer art.
 //
-// Usage: npm i --no-save sharp && node tools/readme_banner.js
+// Usage: npm i --no-save sharp && node tools/readme_banner.js   (after tools/logo_cutout.js)
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
@@ -20,77 +22,72 @@ try {
 }
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const OUT = path.join(ROOT, "docs", "art");
+const OUT = path.join(ROOT, "docs", "art", "banner.png");
+const LOGO = path.join(ROOT, "docs", "art", "logo.png");
+const FONT = path.join(ROOT, "tools", "fonts", "BebasNeue-Regular.ttf");
 
+const FG = "#e6e9ee";
+const BODY = "#c9d1d9";
+const MUTED = "#8b949e";
 const ACCENT = "#a3e635";
-const ACCENT_DIM = "#6f9e1f";
+const GLOW = "#7dff2a";
+const EMBER = "#ff7a1a";
 
-const THEMES = {
-  dark: { bg0: "#0f1216", bg1: "#161b22", tile0: "#1d2530", tile1: "#0f1216", edge: "#2f3947", fg: "#e6e9ee", muted: "#8b949e", rule: "#262d37", ink: ACCENT },
-  light: { bg0: "#ffffff", bg1: "#f6f8fa", tile0: "#1d2530", tile1: "#0f1216", edge: "#cfd6de", fg: "#1f2328", muted: "#59636e", rule: "#d9dee5", ink: "#476f10" },
-};
+// Drawn at 2x, so it stays crisp on the displays most people read GitHub on.
+const S = 2;
+const W = 880 * S;
+const H = 232 * S;
+const u = (n) => Math.round(n * S);
 
-const W = 880;
-const H = 232;
+async function text(str, px, colour, spacing = 0) {
+  const esc = str.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const markup = `<span foreground="${colour}" letter_spacing="${Math.round(spacing * 1024)}">${esc}</span>`;
+  const buf = await sharp({ text: { text: markup, font: `Bebas Neue ${px}`, fontfile: FONT, rgba: true, dpi: 72 } }).png().toBuffer();
+  const { width, height } = await sharp(buf).metadata();
+  return { buf, width, height };
+}
 
-function svg(t) {
-  // The icon's mark, scaled and placed on the left.
-  const markSize = 104;
-  const mx = 56;
-  const my = (H - markSize) / 2;
-  const s = markSize / 256;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+const card = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
   <defs>
-    <linearGradient id="page" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="${t.bg0}" />
-      <stop offset="1" stop-color="${t.bg1}" />
-    </linearGradient>
-    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="${t.tile0}" />
-      <stop offset="1" stop-color="${t.tile1}" />
-    </linearGradient>
-    <linearGradient id="stroke" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="${ACCENT}" />
-      <stop offset="1" stop-color="${ACCENT_DIM}" />
-    </linearGradient>
-    <linearGradient id="fade" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="${ACCENT}" stop-opacity="0.85" />
-      <stop offset="1" stop-color="${ACCENT}" stop-opacity="0" />
-    </linearGradient>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#161b22"/><stop offset="1" stop-color="#0b0e12"/></linearGradient>
+    <radialGradient id="g1" cx="0.14" cy="0.5" r="0.32"><stop offset="0" stop-color="${GLOW}" stop-opacity="0.22"/><stop offset="1" stop-color="${GLOW}" stop-opacity="0"/></radialGradient>
+    <radialGradient id="g2" cx="0.14" cy="0.42" r="0.2"><stop offset="0" stop-color="${EMBER}" stop-opacity="0.14"/><stop offset="1" stop-color="${EMBER}" stop-opacity="0"/></radialGradient>
+    <linearGradient id="fade" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${ACCENT}" stop-opacity="0.9"/><stop offset="1" stop-color="${ACCENT}" stop-opacity="0"/></linearGradient>
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.45" numOctaves="2" seed="11"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.06"/></feComponentTransfer>
+    </filter>
+    <clipPath id="round"><rect width="${W}" height="${H}" rx="${u(16)}"/></clipPath>
   </defs>
-
-  <rect width="${W}" height="${H}" rx="14" fill="url(#page)" />
-  <rect width="${W}" height="${H}" rx="14" fill="none" stroke="${t.rule}" />
-  <rect x="0" y="0" width="${W}" height="3" fill="url(#fade)" />
-
-  <g transform="translate(${mx} ${my}) scale(${s})">
-    <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#tile)" stroke="${t.edge}" stroke-width="4" />
-    <circle cx="128" cy="128" r="84" fill="none" stroke="${ACCENT_DIM}" stroke-width="5" opacity="0.32" />
-    <path d="M74 74 H182 L74 182 H182" fill="none" stroke="url(#stroke)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round" />
+  <g clip-path="url(#round)">
+    <rect width="${W}" height="${H}" fill="url(#bg)"/>
+    <rect width="${W}" height="${H}" fill="url(#g1)"/>
+    <rect width="${W}" height="${H}" fill="url(#g2)"/>
+    <rect width="${W}" height="${H}" filter="url(#grain)"/>
+    <rect x="0" y="0" width="${W}" height="${u(3)}" fill="url(#fade)"/>
+    <rect x="${u(250)}" y="${u(104)}" width="${u(300)}" height="${u(1.5)}" fill="url(#fade)"/>
+    ${[0, 1, 2].map((k) => `<rect x="${u(252)}" y="${u(124 + k * 26)}" width="${u(7)}" height="${u(7)}" rx="${u(1.5)}" fill="${ACCENT}"/>`).join("")}
+    <rect x="${W - u(186)}" y="${H - u(44)}" width="${u(166)}" height="${u(26)}" rx="${u(13)}" fill="none" stroke="#2f3947" stroke-width="${S}"/>
   </g>
-
-  <text x="196" y="88" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="34" font-weight="700" fill="${t.fg}" letter-spacing="-0.6">DZSA CrayZ Launcher</text>
-  <text x="196" y="120" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="16" font-weight="500" fill="${t.ink}">A fast, honest server browser for DayZ Standalone</text>
-
-  <g font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="13" fill="${t.muted}">
-    <text x="196" y="158">Player counts verified against the servers themselves</text>
-    <text x="196" y="178">Workshop mods synced and the game started in one click</text>
-    <text x="196" y="198">No accounts, no API keys, no telemetry</text>
-  </g>
-
-  <g transform="translate(${W - 196} ${H - 34})" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="12" fill="${t.muted}">
-    <rect x="-14" y="-17" width="176" height="25" rx="12.5" fill="none" stroke="${t.rule}" />
-    <text x="0" y="0">Windows 10 / 11 · 4.7 MB</text>
-  </g>
+  <rect x="${S / 2}" y="${S / 2}" width="${W - S}" height="${H - S}" rx="${u(16)}" fill="none" stroke="#262d37" stroke-width="${S}"/>
 </svg>`;
-}
 
-for (const [name, t] of Object.entries(THEMES)) {
-  const file = path.join(OUT, `banner-${name}.png`);
-  // 2x, so it stays crisp on the displays most people read GitHub on.
-  await sharp(Buffer.from(svg(t)), { density: 144 })
-    .resize(W * 2, H * 2, { fit: "fill" })
-    .png({ compressionLevel: 9 })
-    .toFile(file);
-  console.log(`readme_banner: wrote ${file} (${W * 2}x${H * 2})`);
+const logo = await sharp(LOGO).resize(u(210), u(210), { kernel: "lanczos3" }).png().toBuffer();
+const layers = [{ input: logo, left: u(22), top: u(11) }];
+const title = await text("DZSA CRAYZ LAUNCHER", u(50), FG, u(0.8));
+layers.push({ input: title.buf, left: u(248), top: u(26) });
+const sub = await text("A FAST, HONEST SERVER BROWSER FOR DAYZ STANDALONE", u(21), ACCENT, u(1.6));
+layers.push({ input: sub.buf, left: u(250), top: u(76) });
+const lines = ["Player counts verified against the servers themselves", "Workshop mods synced and the game started in one click", "No accounts, no API keys, no telemetry"];
+for (const [k, line] of lines.entries()) {
+  const t = await text(line.toUpperCase(), u(19), BODY, u(0.7));
+  layers.push({ input: t.buf, left: u(268), top: u(119 + k * 26) });
 }
+const pill = await text("WINDOWS 10 / 11 · FREE", u(15), MUTED, u(1.4));
+layers.push({ input: pill.buf, left: W - u(186) + Math.round((u(166) - pill.width) / 2), top: H - u(44) + Math.round((u(26) - pill.height) / 2) + S });
+
+// Quantised: the grain and the logo's detail make a full-colour PNG about 1 MB.
+const flat = await sharp(Buffer.from(card)).composite(layers).png().toBuffer();
+await sharp(flat).png({ palette: true, quality: 92, effort: 10, dither: 0.6, compressionLevel: 9 }).toFile(OUT);
+console.log(`readme_banner: wrote ${path.relative(ROOT, OUT)} (${W}x${H})`);
