@@ -81,7 +81,21 @@ CREATE TABLE IF NOT EXISTS server_mods_at (
   scanned_at INTEGER NOT NULL,
   mod_count INTEGER NOT NULL
 );
+-- Servers whose RULES read failed, so the next scans wait before asking again (D-244).
+CREATE TABLE IF NOT EXISTS server_mods_failed (
+  server_id TEXT PRIMARY KEY,
+  failed_at INTEGER NOT NULL,
+  failures INTEGER NOT NULL
+);
 ";
+
+/// How long a server waits after its `failures`-th failed mod read in a row: 6 h, then
+/// 12 h, then the scan's own `max_age_secs` (a day), which a server that answers waits
+/// anyway. Short enough that a server back from a bad hour is read the same day (D-244).
+fn scan_retry_after(failures: i64, max_age_secs: i64) -> i64 {
+    let first = 6 * 3600;
+    (first << (failures.clamp(1, 3) - 1)).min(max_age_secs)
+}
 
 const SELECT_COLUMNS: &str = "id, ip, game_port, query_port, name, map, description, players, max_players, bots, password, secure,
                     server_version, ping_ms, keywords, steam_id, last_seen, verified_players, steam_empty, verified_at, verdict";
@@ -217,7 +231,8 @@ impl Cache {
             conn.execute_batch(
                 "DROP TABLE IF EXISTS servers;
                  DROP TABLE IF EXISTS server_mods;
-                 DROP TABLE IF EXISTS server_mods_at;",
+                 DROP TABLE IF EXISTS server_mods_at;
+                 DROP TABLE IF EXISTS server_mods_failed;",
             )?;
             conn.execute_batch(SCHEMA)?;
             conn.execute(
@@ -519,16 +534,23 @@ impl Cache {
     /// The rules match the browser exactly: modded, not rule-R0 inflated, with real
     /// players (a verified head-count, or Steam's own `hasplayers` answer when it has
     /// not been verified yet), and not scanned inside `max_age_secs`.
+    ///
+    /// A server whose last read failed waits `scan_retry_after` before it is asked
+    /// again, unless `force`: the same ~170 servers that never answer RULES were
+    /// re-queried on every pass, one NAT flow each, for nothing (D-244). Returns the
+    /// targets and how many were held back that way.
     pub fn scan_targets(
         &self,
         force: bool,
         now: i64,
         max_age_secs: i64,
-    ) -> rusqlite::Result<Vec<(String, std::net::SocketAddr)>> {
+    ) -> rusqlite::Result<(Vec<(String, std::net::SocketAddr)>, usize)> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT s.id, s.ip, s.query_port, s.keywords, s.players, s.verified_players,
-                    s.steam_empty, a.scanned_at
-             FROM servers s LEFT JOIN server_mods_at a ON a.server_id = s.id",
+                    s.steam_empty, a.scanned_at, f.failed_at, f.failures
+             FROM servers s
+             LEFT JOIN server_mods_at a ON a.server_id = s.id
+             LEFT JOIN server_mods_failed f ON f.server_id = s.id",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok((
@@ -540,11 +562,25 @@ impl Cache {
                 r.get::<_, Option<i32>>(5)?,
                 r.get::<_, Option<bool>>(6)?,
                 r.get::<_, Option<i64>>(7)?,
+                r.get::<_, Option<i64>>(8)?,
+                r.get::<_, Option<i64>>(9)?,
             ))
         })?;
         let mut out = Vec::new();
+        let mut held_back = 0;
         for row in rows {
-            let (id, ip, port, keywords, players, verified, steam_empty, scanned_at) = row?;
+            let (
+                id,
+                ip,
+                port,
+                keywords,
+                players,
+                verified,
+                steam_empty,
+                scanned_at,
+                failed_at,
+                failures,
+            ) = row?;
             if !keywords.split(',').any(|t| t.trim() == "mod") {
                 continue;
             }
@@ -557,12 +593,36 @@ impl Cache {
             if !force && scanned_at.is_some_and(|at| now - at <= max_age_secs) {
                 continue;
             }
+            if !force
+                && failed_at.is_some_and(|at| {
+                    now - at < scan_retry_after(failures.unwrap_or(1), max_age_secs)
+                })
+            {
+                held_back += 1;
+                continue;
+            }
             let Ok(addr) = ip.parse::<std::net::IpAddr>() else {
                 continue;
             };
             out.push((id, std::net::SocketAddr::new(addr, port)));
         }
-        Ok(out)
+        Ok((out, held_back))
+    }
+
+    /// Records servers whose RULES read failed, for `scan_targets` to hold back (D-244).
+    pub fn record_scan_failures(&mut self, ids: &[String], now: i64) -> rusqlite::Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached(
+                "INSERT INTO server_mods_failed (server_id, failed_at, failures) VALUES (?1, ?2, 1)
+                 ON CONFLICT(server_id) DO UPDATE SET failed_at = excluded.failed_at,
+                   failures = server_mods_failed.failures + 1",
+            )?;
+            for id in ids {
+                stmt.execute(params![id, now])?;
+            }
+        }
+        tx.commit()
     }
 
     pub fn get(&self, id: &str) -> rusqlite::Result<Option<ServerRow>> {
@@ -731,7 +791,8 @@ impl Cache {
             // A failed sweep leaves rows nothing reads, and the next prune retries it.
             if let Err(e) = self.conn.execute_batch(
                 "DELETE FROM server_mods WHERE server_id NOT IN (SELECT id FROM servers);
-                 DELETE FROM server_mods_at WHERE server_id NOT IN (SELECT id FROM servers);",
+                 DELETE FROM server_mods_at WHERE server_id NOT IN (SELECT id FROM servers);
+                 DELETE FROM server_mods_failed WHERE server_id NOT IN (SELECT id FROM servers);",
             ) {
                 crate::log_warn!("cache", "mod lists of pruned servers not swept: {e}");
             }
@@ -757,8 +818,12 @@ impl Cache {
                 "INSERT INTO server_mods_at (server_id, scanned_at, mod_count) VALUES (?1, ?2, ?3)
                  ON CONFLICT(server_id) DO UPDATE SET scanned_at = excluded.scanned_at, mod_count = excluded.mod_count",
             )?;
+            // A read that succeeds ends any wait a failed one started (D-244).
+            let mut ok =
+                tx.prepare_cached("DELETE FROM server_mods_failed WHERE server_id = ?1")?;
             for (id, mods) in list {
                 del.execute(params![id])?;
+                ok.execute(params![id])?;
                 for (mid, name) in mods {
                     ins.execute(params![id, *mid as i64, name])?;
                 }
@@ -964,6 +1029,61 @@ mod tests {
 
     /// A favourite must survive the 30-day prune (D-159): losing the row empties the
     /// Favourites view for anything that has been offline for a month.
+    #[test]
+    fn a_failed_mod_read_waits_before_it_is_asked_again() {
+        let mut c = Cache::open_in_memory().unwrap();
+        let mut r = row(27017, 10);
+        r.keywords = "battleye,mod,lqs0".into();
+        r.verified_players = Some(10);
+        c.upsert(std::slice::from_ref(&r)).unwrap();
+        let day = 24 * 3600;
+        let now = 1_000_000;
+        let ids = |t: (Vec<(String, std::net::SocketAddr)>, usize)| (t.0.len(), t.1);
+
+        assert_eq!(ids(c.scan_targets(false, now, day).unwrap()), (1, 0));
+        c.record_scan_failures(std::slice::from_ref(&r.id), now)
+            .unwrap();
+        assert_eq!(
+            ids(c.scan_targets(false, now + 3600, day).unwrap()),
+            (0, 1),
+            "held back"
+        );
+        assert_eq!(
+            ids(c.scan_targets(true, now + 3600, day).unwrap()),
+            (1, 0),
+            "a forced scan asks anyway"
+        );
+        assert_eq!(
+            ids(c.scan_targets(false, now + 6 * 3600, day).unwrap()),
+            (1, 0),
+            "6 h after the first"
+        );
+
+        c.record_scan_failures(std::slice::from_ref(&r.id), now)
+            .unwrap();
+        c.record_scan_failures(std::slice::from_ref(&r.id), now)
+            .unwrap();
+        assert_eq!(
+            ids(c.scan_targets(false, now + 12 * 3600, day).unwrap()),
+            (0, 1),
+            "a day after the third"
+        );
+        assert_eq!(ids(c.scan_targets(false, now + day, day).unwrap()), (1, 0));
+
+        // A read that succeeds clears the wait; the list is then fresh for a day anyway.
+        c.replace_server_mods_many(&[(r.id.clone(), vec![(1_559_212_036, "CF".into())])], now)
+            .unwrap();
+        assert_eq!(
+            ids(c.scan_targets(false, now + day + 1, day).unwrap()),
+            (1, 0)
+        );
+        let failed: i64 = c
+            .conn
+            .query_row("SELECT COUNT(*) FROM server_mods_failed", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(failed, 0);
+    }
+
     #[test]
     fn prune_keeps_favourites() {
         let mut c = Cache::open_in_memory().unwrap();

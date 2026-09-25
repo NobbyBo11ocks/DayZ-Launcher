@@ -628,7 +628,7 @@ pub async fn run_mod_scan(
     };
     let t0 = Instant::now();
     let now = ServerRow::now_unix();
-    let targets: Vec<(String, SocketAddr)> = {
+    let (targets, held_back): (Vec<(String, SocketAddr)>, usize) = {
         let c = Arc::clone(&cache);
         tauri::async_runtime::spawn_blocking(move || {
             // Modded servers with real players, not scanned recently. The fake ones
@@ -653,6 +653,12 @@ pub async fn run_mod_scan(
     };
     let _ = app.emit("servers:mods-start", &summary);
     if targets.is_empty() {
+        if held_back > 0 {
+            crate::log_info!(
+                "mods",
+                "scan: nothing to read, {held_back} held back after failing"
+            );
+        }
         let _ = app.emit("servers:mods-done", &summary);
         return summary;
     }
@@ -678,16 +684,18 @@ pub async fn run_mod_scan(
             });
         }
         let mut batch: Vec<(String, Vec<(u64, String)>)> = Vec::with_capacity(chunk.len());
+        let mut failed: Vec<String> = Vec::new();
         // `while let Some(Ok(..))` stopped at the first cancelled task and dropped the
         // rest of the chunk on the floor; `verify_many` already had the right shape.
         while let Some(joined) = set.join_next().await {
             let Ok((id, mods)) = joined else { continue };
             match mods {
                 Some(m) => batch.push((id, m)),
-                None => summary.failed += 1,
+                None => failed.push(id),
             }
         }
         summary.scanned += batch.len();
+        summary.failed += failed.len();
         let payload: Vec<ServerMods> = batch
             .iter()
             .map(|(id, mods)| ServerMods {
@@ -721,17 +729,22 @@ pub async fn run_mod_scan(
                         batch.len()
                     );
                 }
+                // So the next pass waits on them instead of asking again (D-244).
+                if let Err(e) = c.record_scan_failures(&failed, now) {
+                    crate::log_warn!("cache", "failed mod reads not recorded: {e}");
+                }
             }
         })
         .await;
     }
     summary.elapsed_ms = t0.elapsed().as_millis() as u64;
-    if summary.total > 0 {
+    if summary.total > 0 || held_back > 0 {
         crate::log_info!(
             "mods",
-            "scan: {} server(s) read, {} failed, in {} ms",
+            "scan: {} server(s) read, {} failed, {} held back after failing, in {} ms",
             summary.scanned,
             summary.failed,
+            held_back,
             summary.elapsed_ms
         );
     }
