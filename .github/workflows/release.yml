@@ -1,5 +1,7 @@
 # Builds, signs and publishes a release when a `v<version>` tag is pushed (D-071).
-# Manual runs build only (dry run) unless `publish` is ticked.
+# The release is created as a draft and made public only after the smoke test passes
+# (D-241). Manual runs build only: a manual publishing run skipped the tag-version
+# check and could replace a shipped release's installer with a build of main.
 #
 # Required repository secret:
 #   TAURI_SIGNING_PRIVATE_KEY          content of the minisign private key
@@ -12,11 +14,6 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
-    inputs:
-      publish:
-        description: "Create the GitHub release (otherwise build only)"
-        type: boolean
-        default: false
 
 permissions:
   contents: write
@@ -30,7 +27,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     env:
-      PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+      PUBLISH: ${{ github.event_name == 'push' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -93,7 +90,9 @@ jobs:
             Existing installs update themselves from Settings, or automatically within 24 hours.
             The installer is not code-signed yet, so Windows SmartScreen shows an "unknown publisher" warning on first run: choose "More info", then "Run anyway".
           generateReleaseNotes: ${{ env.PUBLISH == 'true' }}
-          releaseDraft: false
+          # A draft until the smoke test below has passed: published here, a build that
+          # failed it was already `releases/latest` and every install offered it (D-241).
+          releaseDraft: true
           prerelease: false
           updaterJsonPreferNsis: true
           uploadUpdaterJson: ${{ env.PUBLISH == 'true' }}
@@ -124,7 +123,17 @@ jobs:
           $app = Start-Process -FilePath (Join-Path $dir 'dayz-launcher.exe') -PassThru
           Start-Sleep -Seconds 15
           if ($app.HasExited) { throw "app exited within 15 s with code $($app.ExitCode)" }
-          "app running after 15 s (pid $($app.Id)); stopping it"
+          # Still running is not the same as started: a failed start stops on its fatal
+          # dialog (D-194) and waits there for a click nobody makes on a runner (D-241).
+          $app.Refresh()
+          if ($app.MainWindowTitle -like '*could not start*') { throw "the app is showing its fatal-error dialog" }
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $log = Join-Path $env:LOCALAPPDATA 'com.dayzlauncher.desktop\logs\launcher.log'
+          if (-not (Test-Path $log)) { throw "no launcher.log after 15 s" }
+          $text = Get-Content $log -Raw
+          if ($text -match 'ERROR\s+app\s+panic:') { throw "the app panicked: $($Matches[0])" }
+          if ($text -notmatch "start v$([regex]::Escape($version))") { throw "launcher.log has no 'start v$version' line" }
+          "app running after 15 s (pid $($app.Id)), started v$version; stopping it"
           # The whole tree, not just the parent. Tauri's WebView2 children outlive a
           # kill of the host process and hold the install directory open, which is what
           # left dayz-launcher.exe and steam_api64.dll behind for the uninstaller on
@@ -168,10 +177,19 @@ jobs:
       # metadata rather than the installer unless the caller sends an octet-stream Accept
       # header; the signature check then fails (v0.1.21, D-147). Our own generator takes
       # the browser download URL from the release listing, so rewrite the manifest with it.
-      # `always()`: whatever the smoke test decides, a published release must not be
-      # left advertising an installer URL the updater cannot fetch (D-160).
+      # After publishing: a draft's asset URLs change when it is published. No longer
+      # `always()` (D-160): a release that failed the smoke test stays an unpublished
+      # draft, so there is no public manifest to repair (D-241).
+      # Only now does the release become `releases/latest` (D-241).
+      - name: Publish the release
+        if: success() && env.PUBLISH == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit '${{ github.ref_name }}' --draft=false
+
       - name: Rewrite latest.json with the browser download URL
-        if: always() && env.PUBLISH == 'true'
+        if: success() && env.PUBLISH == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -180,7 +198,7 @@ jobs:
           gh release upload '${{ github.ref_name }}' 'src-tauri/target/release/bundle/nsis/latest.json' --clobber
 
       - name: Verify the published manifest and signature
-        if: always() && env.PUBLISH == 'true'
+        if: success() && env.PUBLISH == 'true'
         shell: pwsh
         run: |
           # The verifier now also requires the manifest and its signed comment to name
