@@ -71,6 +71,7 @@
         "headerImage": "nsis/header.bmp",
         "sidebarImage": "nsis/sidebar.bmp",
         "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
         "installerHooks": "nsis/hooks.nsh"
       }
     },

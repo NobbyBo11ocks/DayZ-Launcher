@@ -177,7 +177,44 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 !define MUI_LANGDLL_REGISTRY_KEY "${MANUPRODUCTKEY}"
 !define MUI_LANGDLL_REGISTRY_VALUENAME "Installer Language"
 
+; >>> dzl-change: ; Installer pages, must be ordered as they appear
+; The launcher's own look on every page (D-258): its dark surfaces, light text and lime
+; accent, the logo beside the welcome and finish pages, the gas mask in the header, and
+; a splash for an interactive install. MUI colours what it draws (the header band, the
+; welcome and finish pages); the pages it leaves to Windows are coloured from their
+; SHOW callbacks (DzlDark, after the pages below). Check boxes, radio buttons, group
+; boxes and the progress bar ignore colours while themed (NSIS bug #443), so on a dark
+; page they are drawn classic; push buttons keep the system look. Areas are told apart
+; the way the launcher does it, by surface rather than by line: the header band and the
+; welcome and finish pages are its raised surface, a page body its base, and the etched
+; dividers MUI draws (white on a dark window) are hidden. English only, like the
+; installer: the page texts below are not in the language files.
+!define DZL_BG 0F1216
+!define DZL_HEAD 161B22
+!define DZL_SURFACE 1B222C
+!define DZL_TEXT E6E9EE
+!define DZL_MUTED 8B949E
+!define DZL_ACCENT A3E635
+!define MUI_BGCOLOR ${DZL_HEAD}
+!define MUI_TEXTCOLOR ${DZL_TEXT}
+!define MUI_FORCECLASSICCONTROLS
+!define MUI_HEADERIMAGE_RIGHT
+!define MUI_INSTFILESPAGE_COLORS "${DZL_TEXT} ${DZL_SURFACE}"
+!define MUI_CUSTOMFUNCTION_GUIINIT DzlGuiInit
+!define MUI_CUSTOMFUNCTION_UNGUIINIT un.DzlGuiInit
+; The rest of the artwork sits beside the sidebar image Tauri was given (src-tauri/nsis).
+!searchreplace DZL_ART "${SIDEBARIMAGE}" "sidebar.bmp" ""
+!define MUI_WELCOMEPAGE_TITLE "Welcome to ${PRODUCTNAME}"
+!define MUI_WELCOMEPAGE_TEXT "The DayZ server browser that checks every player count with the server itself, syncs the Workshop mods a server needs and gets you in with one click.$\r$\n$\r$\nThis installs version ${VERSION} for your Windows account; no administrator rights are needed.$\r$\n$\r$\nClick Next to continue."
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW DzlWelcomeShow
+Var DzlHwnd
+Var DzlChild
+Var DzlClass
+Var DzlStyle
+Var DzlWidth
+Var DzlBitmap
 ; Installer pages, must be ordered as they appear
+; <<< dzl-change
 ; 1. Welcome Page
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
 !insertmacro MUI_PAGE_WELCOME
@@ -322,8 +359,13 @@ Function PageReinstall
       SendMessage $R3 ${BM_SETCHECK} ${BST_CHECKED} 0
     ${EndIf}
 
+; >>> dzl-change:     ${NSD_SetFocus} $R2\n    nsDialogs::Show
+    ; Dark like every other page (D-258).
+    StrCpy $DzlHwnd $R4
+    Call DzlDarkIn
     ${NSD_SetFocus} $R2
     nsDialogs::Show
+; <<< dzl-change
   ${EndIf}
 FunctionEnd
 Function PageReinstallUpdateSelection
@@ -426,8 +468,12 @@ Function PageLeaveReinstall
 FunctionEnd
 
 ; 5. Choose install directory page
+; >>> dzl-change: !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive\n!insertmacro MUI_PAGE_DIRECTORY
+; Dark like every other page (D-258).
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW DzlDark
 !insertmacro MUI_PAGE_DIRECTORY
+; <<< dzl-change
 
 ; 6. Start menu shortcut page
 Var AppStartMenuFolder
@@ -458,6 +504,7 @@ Function PageOptions
   ${If} $0 == error
     Abort
   ${EndIf}
+  StrCpy $DzlHwnd $0
   ${NSD_CreateCheckbox} 0 8u 100% 12u "Do not show the DayZ news page"
   Pop $OptNewsCheckbox
   ${If} $OptNewsState = 1
@@ -465,6 +512,7 @@ Function PageOptions
   ${EndIf}
   ${NSD_CreateLabel} 12u 24u 96% 34u "With the news page off, the launcher never contacts Steam's news feed, its picture CDN or YouTube. It can be turned back on at any time in Settings."
   Pop $0
+  Call DzlDarkIn
   nsDialogs::Show
 FunctionEnd
 Function PageLeaveOptions
@@ -478,10 +526,18 @@ Function DisableNews
 FunctionEnd
 
 ; 7. Installation page
+; Dark, with a lime progress bar (D-258).
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW DzlDark
 !insertmacro MUI_PAGE_INSTFILES
 ; <<< dzl-change
 
+; >>> dzl-change: ; 8. Finish page
+; In the launcher's words and colours (D-258).
+!define MUI_FINISHPAGE_TITLE "Ready to drop in"
+!define MUI_FINISHPAGE_TEXT "${PRODUCTNAME} is installed. Keep Steam running while you use it: the server list and your mods come through Steam."
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW DzlFinishShow
 ; 8. Finish page
+; <<< dzl-change
 ;
 ; Don't auto jump to finish page after installation page,
 ; because the installation page has useful info that can be used debug any issues with the installer.
@@ -533,8 +589,12 @@ Function un.ConfirmShow ; Add add a `Delete app data` check box
   System::Call 'user32::CreateWindowEx(i r3, w "${__NSD_CheckBox_CLASS}", w "$(deleteAppData)", i ${__NSD_CheckBox_STYLE}, i r4, i r5, i r6, i r7, p r1, i0, i0, i0) i .s'
   Pop $DeleteAppDataCheckbox
   SendMessage $HWNDPARENT ${WM_GETFONT} 0 0 $1
+; >>> dzl-change:   SendMessage $DeleteAppDataCheckbox ${WM_SETFONT} $1 1\nFunctionEnd
   SendMessage $DeleteAppDataCheckbox ${WM_SETFONT} $1 1
+  ; Dark like the installer (D-258).
+  Call un.DzlDark
 FunctionEnd
+; <<< dzl-change
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE un.ConfirmLeave
 Function un.ConfirmLeave
   SendMessage $DeleteAppDataCheckbox ${BM_GETCHECK} 0 0 $DeleteAppDataCheckboxState
@@ -543,9 +603,153 @@ FunctionEnd
 !insertmacro MUI_UNPAGE_CONFIRM
 
 ; 2. Uninstalling Page
+; >>> dzl-change: !insertmacro MUI_UNPAGE_INSTFILES
+; Dark, with a lime progress bar (D-258).
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW un.DzlDark
 !insertmacro MUI_UNPAGE_INSTFILES
+; <<< dzl-change
+
+; >>> dzl-change: ;Languages
+; The theme's functions (D-258). Here, after the pages, because they use variables
+; the pages declare. They keep to their own variables: the reinstall page holds its
+; controls in $R2 and $R3 across the call.
+
+; Each picture comes in seven sizes, one per common display scale. MUI loads a single
+; bitmap and Windows stretches it to the control by dropping or doubling pixels, so
+; DzlPick measures the control and the size made for that scale is loaded instead.
+!macro DZL_EXTRACT_ART UN
+  InitPluginsDir
+  !if "${UN}" == ""
+    File "/oname=$PLUGINSDIR\dzl-sidebar-100.bmp" "${DZL_ART}sidebar.bmp"
+    File "/oname=$PLUGINSDIR\dzl-sidebar-125.bmp" "${DZL_ART}sidebar-125.bmp"
+    File "/oname=$PLUGINSDIR\dzl-sidebar-150.bmp" "${DZL_ART}sidebar-150.bmp"
+    File "/oname=$PLUGINSDIR\dzl-sidebar-175.bmp" "${DZL_ART}sidebar-175.bmp"
+    File "/oname=$PLUGINSDIR\dzl-sidebar-200.bmp" "${DZL_ART}sidebar-200.bmp"
+    File "/oname=$PLUGINSDIR\dzl-sidebar-250.bmp" "${DZL_ART}sidebar-250.bmp"
+    File "/oname=$PLUGINSDIR\dzl-sidebar-300.bmp" "${DZL_ART}sidebar-300.bmp"
+  !endif
+  File "/oname=$PLUGINSDIR\dzl-header-100.bmp" "${DZL_ART}header.bmp"
+  File "/oname=$PLUGINSDIR\dzl-header-125.bmp" "${DZL_ART}header-125.bmp"
+  File "/oname=$PLUGINSDIR\dzl-header-150.bmp" "${DZL_ART}header-150.bmp"
+  File "/oname=$PLUGINSDIR\dzl-header-175.bmp" "${DZL_ART}header-175.bmp"
+  File "/oname=$PLUGINSDIR\dzl-header-200.bmp" "${DZL_ART}header-200.bmp"
+  File "/oname=$PLUGINSDIR\dzl-header-250.bmp" "${DZL_ART}header-250.bmp"
+  File "/oname=$PLUGINSDIR\dzl-header-300.bmp" "${DZL_ART}header-300.bmp"
+!macroend
+
+; One step of DzlPick: this scale, if its picture still covers the control ($1 spare).
+!macro _DZL_TRY SCALE
+  IntOp $1 $DzlStyle * ${SCALE}
+  IntOp $1 $1 / 100
+  IntOp $1 $1 + 2
+  ${If} $1 >= $DzlWidth
+    StrCpy $DzlClass ${SCALE}
+  ${EndIf}
+!macroend
+
+!macro DZL_FUNCTIONS UN
+  ; In: $DzlHwnd the picture control, $DzlStyle the picture's width at 100 %.
+  ; Out: $DzlClass, the smallest scale whose picture covers the control.
+  Function ${UN}DzlPick
+    Push $0
+    Push $1
+    System::Call '*(i, i, i, i) p.r1'
+    System::Call 'user32::GetClientRect(p $DzlHwnd, p r1)'
+    System::Call '*$1(i, i, i .r0, i)'
+    System::Free $1
+    StrCpy $DzlWidth $0
+    StrCpy $DzlClass 300
+    !insertmacro _DZL_TRY 250
+    !insertmacro _DZL_TRY 200
+    !insertmacro _DZL_TRY 175
+    !insertmacro _DZL_TRY 150
+    !insertmacro _DZL_TRY 125
+    !insertmacro _DZL_TRY 100
+    Pop $1
+    Pop $0
+  FunctionEnd
+
+  ; The window around the pages: its background, the branding line, the header's
+  ; picture at the display scale's own size, the page title in the accent.
+  Function ${UN}DzlGuiInit
+    !insertmacro DZL_EXTRACT_ART "${UN}"
+    SetCtlColors $HWNDPARENT "" ${DZL_BG}
+    SetCtlColors $mui.Branding.Text ${DZL_MUTED} ${DZL_BG}
+    SetCtlColors $mui.Branding.Background "" ${DZL_BG}
+    SetCtlColors $mui.Header.Text ${DZL_ACCENT} ${DZL_HEAD}
+    SetCtlColors $mui.Header.SubText ${DZL_TEXT} ${DZL_HEAD}
+    GetDlgItem $DzlHwnd $HWNDPARENT 1046
+    StrCpy $DzlStyle 150
+    Call ${UN}DzlPick
+    SetBrandingImage /IMGID=1046 /RESIZETOFIT "$PLUGINSDIR\dzl-header-$DzlClass.bmp"
+  FunctionEnd
+
+  ; The SHOW callback of a page MUI builds: by then the page is the window's dialog.
+  Function ${UN}DzlDark
+    FindWindow $DzlHwnd "#32770" "" $HWNDPARENT
+    Call ${UN}DzlDarkIn
+  FunctionEnd
+
+  ; The page dialog in $DzlHwnd and every static, edit, check box, radio button, group
+  ; box and progress bar on it; and no divider under the header.
+  Function ${UN}DzlDarkIn
+    ShowWindow $mui.Line.Standard ${SW_HIDE}
+    SetCtlColors $DzlHwnd ${DZL_TEXT} ${DZL_BG}
+    StrCpy $DzlChild 0
+    ${Do}
+      FindWindow $DzlChild "" "" $DzlHwnd $DzlChild
+      ${If} $DzlChild = 0
+        ${Break}
+      ${EndIf}
+      System::Call 'user32::GetClassName(p $DzlChild, t .s, i 64)'
+      Pop $DzlClass
+      ${If} $DzlClass == "Button"
+        System::Call 'user32::GetWindowLong(p $DzlChild, i -16) i .s'
+        Pop $DzlStyle
+        IntOp $DzlStyle $DzlStyle & 0xF
+        ; 0 and 1 are push buttons, 8 is owner-drawn; the rest check, choose or group.
+        ${If} $DzlStyle >= 2
+        ${AndIf} $DzlStyle <= 9
+        ${AndIf} $DzlStyle <> 8
+          System::Call 'uxtheme::SetWindowTheme(p $DzlChild, w " ", w " ")'
+          SetCtlColors $DzlChild ${DZL_TEXT} ${DZL_BG}
+        ${EndIf}
+      ${ElseIf} $DzlClass == "Static"
+        SetCtlColors $DzlChild ${DZL_TEXT} ${DZL_BG}
+      ${ElseIf} $DzlClass == "Edit"
+        SetCtlColors $DzlChild ${DZL_TEXT} ${DZL_SURFACE}
+      ${ElseIf} $DzlClass == "msctls_progress32"
+        System::Call 'uxtheme::SetWindowTheme(p $DzlChild, w " ", w " ")'
+        ; COLORREF is 0x00BBGGRR: lime A3E635 on the surface 1B222C.
+        SendMessage $DzlChild ${PBM_SETBARCOLOR} 0 0x0035E6A3
+        SendMessage $DzlChild ${PBM_SETBKCOLOR} 0 0x002C221B
+      ${EndIf}
+    ${Loop}
+  FunctionEnd
+!macroend
+!insertmacro DZL_FUNCTIONS ""
+!insertmacro DZL_FUNCTIONS "un."
+
+; The welcome and finish pages: the logo at the display scale's size, title in lime.
+!macro DZL_SIDEBAR IMAGE BITMAP TITLE
+  StrCpy $DzlHwnd ${IMAGE}
+  StrCpy $DzlStyle 164
+  Call DzlPick
+  ${NSD_SetStretchedImage} ${IMAGE} "$PLUGINSDIR\dzl-sidebar-$DzlClass.bmp" $DzlBitmap
+  ${NSD_FreeImage} ${BITMAP}
+  StrCpy ${BITMAP} $DzlBitmap
+  SetCtlColors ${TITLE} ${DZL_ACCENT} ${DZL_HEAD}
+  ShowWindow $mui.Line.FullWindow ${SW_HIDE}
+!macroend
+Function DzlWelcomeShow
+  !insertmacro DZL_SIDEBAR $mui.WelcomePage.Image $mui.WelcomePage.Image.Bitmap $mui.WelcomePage.Title
+FunctionEnd
+Function DzlFinishShow
+  !insertmacro DZL_SIDEBAR $mui.FinishPage.Image $mui.FinishPage.Image.Bitmap $mui.FinishPage.Title
+FunctionEnd
 
 ;Languages
+; <<< dzl-change
 {{#each languages}}
 !insertmacro MUI_LANGUAGE "{{this}}"
 {{/each}}
@@ -576,6 +780,16 @@ Function .onInit
   ${GetOptions} $CMDLINE "/UPDATE" $UpdateMode
   ${IfNot} ${Errors}
     StrCpy $UpdateMode 1
+  ${EndIf}
+  ; The logo for a moment before the first page (D-258). Never for a silent, passive
+  ; or update run: the updater should not flash a picture across someone's game.
+  ${IfNot} ${Silent}
+  ${AndIf} $PassiveMode <> 1
+  ${AndIf} $UpdateMode <> 1
+    InitPluginsDir
+    File "/oname=$PLUGINSDIR\dzl-splash.bmp" "${DZL_ART}splash.bmp"
+    advsplash::show 900 250 300 0xFF00FF "$PLUGINSDIR\dzl-splash"
+    Pop $0
   ${EndIf}
 ; <<< dzl-change
 
