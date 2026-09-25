@@ -133,9 +133,10 @@ button {
 }
 
 /* The sections, the Servers filters under them while that page is open (D-249), and
-   the update item at the foot. `min-height: 0` holds the rail to the window, so a
-   short one scrolls the filters instead of growing the grid row. The 12 px sides are
-   matched by the filter panel's scrolling body (FilterPanel.svelte). */
+   the update item at the foot. `min-height: 0` holds the rail to the window; a window
+   too short for the sections and every filter shows the sections as a row of icons
+   instead (below), so the filters never scroll (D-259). The 12 px sides are matched by
+   the filter panel's body (FilterPanel.svelte). */
 .rail {
   grid-area: rail;
   display: flex;
@@ -154,8 +155,9 @@ button {
 
 /* The icons wear the accent (RailIcon) and the labels the default text colour, on the
    user's call (D-253; D-250 had put the labels in the accent too). The section you are
-   on is the one with the surface, the pill and the heavier weight. A fixed 36 px, so
-   the rows keep one rhythm whatever the font does with a label. */
+   on is the one with the surface, the pill and the heavier weight. A fixed 32 px, so
+   the rows keep one rhythm whatever the font does with a label; 36 until the filters
+   had to fit under them at the default window height (D-259). */
 .rail-item {
   all: unset;
   box-sizing: border-box;
@@ -164,7 +166,7 @@ button {
   display: flex;
   align-items: center;
   gap: 11px;
-  height: 36px;
+  height: 32px;
   padding: 0 10px;
   border-radius: var(--radius);
   color: var(--fg);
@@ -358,6 +360,60 @@ h1 {
     position: absolute;
     top: 1px;
     right: 0;
+    margin-left: 0;
+    font-size: 10px;
+    line-height: 16px;
+    min-width: 16px;
+    padding: 0 4px;
+  }
+}
+
+/* A window too short for the nine sections and every filter under them (they need
+   770 px together) shows the sections as one row of icons across the top of the rail,
+   the way the narrow-window rail above already shows them on the other pages, and the
+   filters keep the height: nothing scrolls down to the 600 px minimum (D-259). Nine
+   24 px cells fill the rail's 216 px exactly. */
+@media (max-height: 769px) {
+  .shell.filters .sections {
+    flex-direction: row;
+    justify-content: space-between;
+    gap: 0;
+  }
+
+  .shell.filters .sections .rail-item {
+    justify-content: center;
+    width: 24px;
+    height: 28px;
+    padding: 0 3px;
+  }
+
+  .shell.filters .sections .rail-item .text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* The marker under the icon, since there is no left edge to sit on. */
+  .shell.filters .sections .rail-item.active::before {
+    left: 50%;
+    top: auto;
+    bottom: 0;
+    width: 16px;
+    height: 3px;
+    transform: translateX(-50%);
+    animation: none;
+  }
+
+  .shell.filters .sections .rail-item .badge {
+    position: absolute;
+    top: -2px;
+    right: -4px;
     margin-left: 0;
     font-size: 10px;
     line-height: 16px;
