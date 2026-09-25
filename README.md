@@ -46,7 +46,7 @@ Every populated server queried directly with A2S and cross-checked against Steam
 
 ### ⚡ Quick
 
-Rust host, plain Svelte 5, a virtualised table and a SQLite cache. First screen under half a second, installer about 7.5 MB, a third of it the setup's own artwork.
+Rust host, plain Svelte 5, a virtualised table and a SQLite cache. First screen under half a second, installer 7.5 MB, a third of it the setup's own artwork.
 
 </td><td width="33%" align="center">
 
@@ -59,9 +59,9 @@ No accounts, no API keys, no telemetry. Every destination it contacts is listed 
 
 | Installer | Cold start to first frame | Refresh, then verify | Idle CPU | Memory, whole app |
 |:-:|:-:|:-:|:-:|:-:|
-| **≈ 7.5 MB** | **0.43 s** | **≈ 35 s + ≈ 25 s** | **0.2 %** of one core | **≈ 306 MB** |
+| **7.5 MB** | **0.43 s** | **≈ 35 s + ≈ 25 s** | **0.2 %** of one core | **≈ 306 MB** |
 
-<sub>Installer: v0.1.37's measured 4.75 MB plus the 2.71 MB the themed setup's artwork adds, measured on the same NSIS toolchain (D-258); the next release confirms it. Memory and idle CPU at v0.1.23; cold start at v0.1.19 (D-136). The refresh figure is the list arriving, with verified counts following it: five real passes on 2026-09-23 ran 31.9–36.3 s for 2 273–2 619 servers, then 19.6–41.4 s to verify them. Budgets, method and history in [docs/05 §6](docs/05-architecture-and-optimisation.md).</sub>
+<sub>Installer measured at v0.1.49, 2.71 MB of it the themed setup's artwork (D-258); memory and idle CPU at v0.1.23; cold start at v0.1.19 (D-136). The refresh figure is the list arriving, with verified counts following it: five real passes on 2026-09-23 ran 31.9–36.3 s for 2 273–2 619 servers, then 19.6–41.4 s to verify them. Budgets, method and history in [docs/05 §6](docs/05-architecture-and-optimisation.md).</sub>
 
 ---
 
