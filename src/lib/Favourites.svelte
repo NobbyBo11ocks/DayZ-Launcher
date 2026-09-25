@@ -105,8 +105,9 @@
      the right edge between 1001 and 1239 px — at 1101 px about 40 % of it, including
      the Join button. It floats over the list now instead of being clipped or hidden,
      which is D-153's open recommendation: at the 960 px minimum a row click used to
-     select the row and visibly do nothing (D-189). */
-  @media (max-width: 1240px) {
+     select the row and visibly do nothing (D-189). 1300 is the 240 px rail plus
+     those 1060 (D-249); with the 180 px rail it was 1240. */
+  @media (max-width: 1300px) {
     .main { position: relative; }
     .main.with-pane { grid-template-columns: minmax(0, 1fr); }
     .main > :global(aside) {

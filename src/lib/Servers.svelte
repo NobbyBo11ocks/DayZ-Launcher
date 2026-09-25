@@ -1,11 +1,13 @@
 <script lang="ts">
-  // Server browser view (docs/06, D-108): one compact header block (a primary
-  // filter row with Refresh at the right, a row of quick filters, a thin status
-  // line), then the virtualised table and the details pane. Direct connect lives
-  // in a small popover next to Refresh.
+  // Server browser view (docs/06, D-108, D-249): a compact header (the search, with
+  // Direct connect and Refresh at the right, over a thin status line), then the
+  // virtualised table and the details pane. The filters live in the left rail under
+  // the sections (FilterPanel, mounted by App.svelte while this page is open). Direct
+  // connect lives in a small popover next to Refresh.
+  import { untrack } from "svelte";
   import DetailsPane from "./DetailsPane.svelte";
-  import FilterBar from "./FilterBar.svelte";
   import ServerTable from "./ServerTable.svelte";
+  import { searchBox } from "./search";
   import { servers } from "./state/servers.svelte";
   // Every command through the logging wrapper: a failure is recorded with its
   // command name before it is rethrown (D-158).
@@ -13,7 +15,31 @@
 
   /** Per mount; the backend keeps only the first mark it ever receives. */
 
-  let filterBar = $state<FilterBar | null>(null);
+  // The shared search filter, written on a pause rather than on every keystroke: every
+  // write re-filters and re-sorts up to 20 000 rows (D-152, D-222). `typed` keeps the
+  // field responsive while the filter lags behind it.
+  const box = searchBox();
+  let typed = $state(servers.filters.search);
+  let searchEl = $state<HTMLInputElement | null>(null);
+  $effect(() => box.dispose);
+  // A reset from elsewhere (the Reset button in the rail) has to show up in the field
+  // and cancel a pending write, or the list stays filtered by an invisible term
+  // (D-159). Only the store is tracked: with `typed` tracked too, every keystroke
+  // blanked the field while the write still went through (D-230).
+  $effect(() => {
+    const stored = servers.filters.search;
+    untrack(() => {
+      if (stored === "" && typed !== "") {
+        box.dispose();
+        typed = "";
+      }
+    });
+  });
+  function focusSearch() {
+    searchEl?.focus();
+    searchEl?.select();
+  }
+
   let direct = $state("");
   let connecting = $state(false);
   let connectOpen = $state(false);
@@ -54,7 +80,7 @@
     const typing = target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA");
     if (e.key === "/" && !typing) {
       e.preventDefault();
-      filterBar?.focusSearch();
+      focusSearch();
     } else if (e.key === "Escape" && connectOpen) {
       closeConnect();
     } else if (e.key === "Escape" && !typing && servers.selectedId) {
@@ -85,7 +111,7 @@
     void servers.rowsTick;
     if (servers.rows.size > 0)
       return servers.hasEmptyServers
-        ? "No server matches these filters. Clear the search, or widen the filters above."
+        ? "No server matches these filters. Clear the search, or widen the filters on the left."
         : "No server matches these filters — and servers with nobody on them have not been fetched. Press Refresh to include them; it takes a few minutes.";
     const s = servers.steam;
     if (s?.refreshing || servers.dzsaLoading) return "Fetching the list…";
@@ -132,7 +158,27 @@
 <div class="servers">
   <div class="top">
     <div class="row">
-      <FilterBar bind:this={filterBar} part="primary" />
+      <label class="searchwrap">
+        <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="M10.5 10.5L14 14" /></svg>
+        <input
+          class="search"
+          type="search"
+          placeholder="Search name, map or IP"
+          value={typed}
+          bind:this={searchEl}
+          aria-label="Search servers (press / to focus)"
+          spellcheck="false"
+          oninput={(e) => ((typed = e.currentTarget.value), box.set(typed))}
+          onkeydown={(e) => {
+            if (e.key === "Escape") {
+              typed = "";
+              box.set("");
+              e.currentTarget.blur();
+            }
+          }}
+        />
+        <kbd aria-hidden="true">/</kbd>
+      </label>
       <div class="actions">
         <div class="connect">
           <button class="iconbtn" bind:this={connectBtn} class:on={connectOpen} onclick={toggleConnect} aria-expanded={connectOpen} aria-label="Direct connect" title="Direct connect to an address">
@@ -153,10 +199,6 @@
           {servers.steam?.refreshing ? "Refreshing…" : "Refresh"}
         </button>
       </div>
-    </div>
-
-    <div class="row">
-      <FilterBar part="chips" />
     </div>
 
     <div class="statusline">
@@ -213,11 +255,14 @@
   .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
   .servers { display: flex; flex-direction: column; height: 100%; min-height: 0; }
   .top { display: flex; flex-direction: column; gap: 6px; padding: 8px 16px 6px; border-bottom: 1px solid var(--border); background: var(--bg-elev); }
-  /* The filter block wraps inside itself; the buttons at the right stay on the first line. */
-  .row { display: flex; align-items: flex-start; flex-wrap: nowrap; gap: 8px; }
-  .row > :global(.filters) { flex: 1 1 0; min-width: 0; }
+  .row { display: flex; align-items: center; gap: 8px; }
   .actions { display: flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
 
+  .searchwrap { position: relative; display: inline-flex; align-items: center; flex: 0 1 340px; min-width: 180px; }
+  .searchwrap .icon { position: absolute; left: 9px; width: 14px; height: 14px; fill: none; stroke: var(--fg-muted); stroke-width: 1.5; stroke-linecap: round; pointer-events: none; }
+  .search { width: 100%; box-sizing: border-box; height: 28px; padding: 0 28px 0 28px; border-radius: var(--radius); border: 1px solid var(--border-control); background: var(--bg-row); color: var(--fg); font-size: 12.5px; }
+  .search:focus-visible { outline: 2px solid var(--accent-ink); }
+  .searchwrap kbd { position: absolute; right: 7px; padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; font-size: 10.5px; line-height: 15px; color: var(--fg-muted); background: var(--bg-elev); pointer-events: none; }
 
   .iconbtn { all: unset; cursor: pointer; box-sizing: border-box; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); border: 1px solid var(--border-control); background: var(--bg-row); color: var(--fg-muted); }
   .iconbtn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; }
@@ -247,8 +292,9 @@
      the right edge between 1001 and 1239 px — at 1101 px about 40 % of it, including
      the Join button. It floats over the list now instead of being clipped or hidden,
      which is D-153's open recommendation: at the 960 px minimum a row click used to
-     select the row and visibly do nothing (D-189). */
-  @media (max-width: 1240px) {
+     select the row and visibly do nothing (D-189). 1300 is the 240 px rail plus
+     those 1060 (D-249); with the 180 px rail it was 1240. */
+  @media (max-width: 1300px) {
     .main { position: relative; }
     .main.with-pane { grid-template-columns: minmax(0, 1fr); }
     .main > :global(aside) {

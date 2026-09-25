@@ -266,7 +266,7 @@
         <button class="star" aria-label={servers.favourites.has(row.id) ? "Remove from favourites" : "Add to favourites"} class:on={servers.favourites.has(row.id)} onclick={() => servers.toggleFavourite(row.id)} aria-pressed={servers.favourites.has(row.id)} title="Favourite (F)">
           {servers.favourites.has(row.id) ? "★" : "☆"}
         </button>
-        <!-- Below 1240 px the pane is an overlay; without this its only exit by mouse
+        <!-- Below 1300 px the pane is an overlay; without this its only exit by mouse
              was the selected row underneath it (D-248). -->
         <button class="star" aria-label="Close server details" title="Close (Esc)" onclick={() => servers.select(null)}>✕</button>
       </div>

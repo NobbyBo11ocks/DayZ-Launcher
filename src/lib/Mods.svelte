@@ -392,7 +392,9 @@
   .pick { width: 26px; padding-right: 0; }
   .pick input { accent-color: var(--accent); cursor: pointer; }
   .name { font-weight: 500; }
-  .num { text-align: right; }
+  /* A size never splits from its unit: with the 240 px rail (D-249) the table meets
+     its narrow widths sooner, and "1.58" over "GB" read as two values. */
+  .num { text-align: right; white-space: nowrap; }
   .act { text-align: right; white-space: nowrap; }
   .act .btn + .btn { margin-left: 4px; }
   tr.picked td { background: color-mix(in srgb, var(--accent) 10%, transparent); }

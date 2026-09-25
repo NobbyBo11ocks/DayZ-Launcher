@@ -2,6 +2,7 @@
   import { listen } from "@tauri-apps/api/event";
   import { describe, installErrorHooks, logError } from "./lib/log";
   import Favourites from "./lib/Favourites.svelte";
+  import FilterPanel from "./lib/FilterPanel.svelte";
   import Friends from "./lib/Friends.svelte";
   import JoinDialog from "./lib/JoinDialog.svelte";
   import Lan from "./lib/Lan.svelte";
@@ -121,24 +122,45 @@
   });
 </script>
 
-<div class="shell">
+<!-- `filters` keeps the rail at full width below 1100 px while it carries them (app.css). -->
+<div class="shell" class:filters={active === "servers"}>
   <!-- Title-bar counts (D-103, D-105, D-106): servers with players live from the row cache, friends in DayZ. -->
   <TitleBar servers={servers.rowsTick >= 0 && servers.rows.size > 0 ? servers.populatedCount : null} friends={servers.friendsInDayz} {greeting} />
 
-  <nav class="rail" aria-label="Sections">
-    {#each sections as s (s.id)}
-      <button class="rail-item" class:active={active === s.id} aria-current={active === s.id ? "page" : undefined} onclick={() => (active = s.id)} title={s.label}>
-        <span class="glyph" aria-hidden="true">{s.glyph}</span>
-        <span class="text">{s.label}</span>
-        {#if s.id === "news" && news.unread > 0}<span class="badge" aria-label="{news.unread} new posts">{news.unread > 99 ? "99+" : news.unread}</span>{/if}
-        {#if s.id === "mods" && modUpdates.count > 0}<span class="badge" aria-label="{modUpdates.count} mods have an update waiting" title="{modUpdates.count} mod{modUpdates.count === 1 ? "" : "s"} can be updated">{modUpdates.count > 99 ? "99+" : modUpdates.count}</span>{/if}
-      </button>
-    {/each}
+  <div class="rail">
+    <nav class="sections" aria-label="Sections">
+      {#each sections as s (s.id)}
+        <button class="rail-item" class:active={active === s.id} aria-current={active === s.id ? "page" : undefined} onclick={() => (active = s.id)} title={s.label}>
+          <span class="glyph" aria-hidden="true">{s.glyph}</span>
+          <span class="text">{s.label}</span>
+          {#if s.id === "news" && news.unread > 0}<span class="badge" aria-label="{news.unread} new posts">{news.unread > 99 ? "99+" : news.unread}</span>{/if}
+          {#if s.id === "mods" && modUpdates.count > 0}<span class="badge" aria-label="{modUpdates.count} mods have an update waiting" title="{modUpdates.count} mod{modUpdates.count === 1 ? "" : "s"} can be updated">{modUpdates.count > 99 ? "99+" : modUpdates.count}</span>{/if}
+        </button>
+      {/each}
+    </nav>
+
+    <!-- The server filters sit under the sections while the Servers page is open, the
+         one page they apply to (user's sketch, D-249). They are outside the page's
+         boundary below, so they get one of their own: a failure here must not take
+         the rail and the window with it (D-160). -->
+    {#if active === "servers"}
+      <svelte:boundary onerror={(e) => logError("view", `filters failed to render: ${describe(e)}`)}>
+        <FilterPanel />
+        {#snippet failed(error, reset)}
+          <div class="rail-crashed">
+            <p>The filters stopped working.</p>
+            <p class="crashed-why">{describe(error)}</p>
+            <button class="crashed-retry" onclick={reset}>Try again</button>
+          </div>
+        {/snippet}
+      </svelte:boundary>
+    {/if}
 
     <!-- The update is applied in Settings, so this is a way there rather than a
          label: a notice in the title bar could only be read, and the title bar is
          for what is true right now (counts, who you are) rather than for something
-         to act on (D-216). `margin-top: auto` puts it at the foot of the rail. -->
+         to act on (D-216). `margin-top: auto` in app.css puts it at the foot of the
+         rail, under the filters when they are showing (D-249). -->
     {#if updates.state === "available"}
       <button
         class="rail-item update"
@@ -150,7 +172,7 @@
         <span class="text">Update Available</span>
       </button>
     {/if}
-  </nav>
+  </div>
 
   <main class="content" class:padded={!listViews.has(active)}>
     <!-- One page failing must not blank the whole window (D-160): the boundary keeps

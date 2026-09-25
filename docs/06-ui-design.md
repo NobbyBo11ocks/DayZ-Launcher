@@ -8,24 +8,30 @@ Goal: the fastest way from "open launcher" to "in game", in a dark, quiet, infor
 - Three regions:
 
 ```text
-┌──────────────────────────────────────────────────────────────────┐
-│ (drag region)                              update notice │ ▭ ✕   │
-├──────────┬───────────────────────────────┬────────────────────────┤
-│ News ③   │ filter bar                    │                        │
-│ Servers  │ virtualised table             │ details pane           │
-│ LAN      │ name · map · players/queue    │ header + JOIN          │
-│ Favs     │ time · ping · flags           │ info grid              │
-│ Friends  │ (sortable columns)            │ mods (state per mod)   │
-│ Recent   │                               │ population sparkline   │
-│ Mods     │                               │                        │
-│ Settings │                               │                        │
-│ Logs   │                               │                        │
-└──────────┴───────────────────────────────┴────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│ counts · greeting (drag region)                                  ─ ▭ ✕  │
+├──────────────┬────────────────────────────────┬─────────────────────────┤
+│ News ③       │ search · status  ⌖ Refresh     │                         │
+│ Servers      │ virtualised table              │ details pane            │
+│ LAN          │ name · map · players/queue     │ header + JOIN           │
+│ Favs         │ time · ping · flags            │ info grid               │
+│ Friends      │ (sortable columns)             │ mods (state per mod)    │
+│ Recent       │                                │ population sparkline    │
+│ Mods         │                                │                         │
+│ Settings     │                                │                         │
+│ Logs         │                                │                         │
+│ ──────────── │                                │                         │
+│ FILTERS Reset│                                │                         │
+│ (Servers page│                                │                         │
+│  only, §4)   │                                │                         │
+│ ↑ Update     │                                │                         │
+└──────────────┴────────────────────────────────┴─────────────────────────┘
 ```
 
 - News (D-099) sits first with an unread badge (③ above); it is a padded view of cards that scrolls inside, not a table.
 
-- Responsive: rail collapses to icons < 1100 px; details pane hidden < 1000 px. The third breakpoint specified here — dropping "time" and "version" below 900 px — was never built and is unreachable anyway: the window minimum is 960 px. D-189 did it: below 1240 px the pane is an overlay at small widths rather than hiding it, so Join is reachable at the minimum size.
+- The rail is 240 px wide (180 px until D-249 widened it for the filters). It holds the sections, the Servers filters under them while that page is open (§4), and the update item at its foot (D-216).
+- Responsive: rail collapses to icons < 1100 px, except on the Servers page, whose filters keep it at full width at every size (720 px of table at the 960 px minimum, against a 700 px floor); details pane hidden < 1000 px. The third breakpoint specified here — dropping "time" and "version" below 900 px — was never built and is unreachable anyway: the window minimum is 960 px. D-189 did it: below 1240 px the pane is an overlay at small widths rather than hiding it, so Join is reachable at the minimum size. With the 240 px rail that breakpoint is 1300 px (D-249).
 - Only the server list views scroll their table. Recent, Mods, Settings, Logs (the Diagnostics page was replaced by it in D-168) and Friends fit the viewport (`.content.padded` is `overflow: hidden`); when the window is smaller than their content, a table or a column scrolls on its own, never the page (D-094).
 
 ## 2. Server table
@@ -50,7 +56,7 @@ Header: name, map, version (red badge if it differs from the local client), JOIN
 
 ## 4. Filters
 
-Chips above the table: Perspective (1PP/3PP), Map, Country (D-073), Not full, Not empty, Has queue, No password, Official / Community hive (D-195), Modded/Vanilla, Day only, Playstyle (PVE / PVP / RP, D-208), Max ping (with presets, D-208), Mod (one, chosen from the union of seen mods, D-080), Version = mine, Friends (D-128) and Hide inflated. All filters persist. Two specified here were never built: a time-acceleration filter, and multi-select on mods — one mod answers "which servers run this", which is the question people actually ask.
+A column in the left rail, under the sections, while the Servers page is open (D-249, from a design sketch; until then they were two rows of chips above the table, D-108). Top to bottom: Perspective (Any / 1PP / 3PP); Playstyle (PVE / PVP / RP, D-208); Status, as checkboxes — Not empty, Not full, Has queue, No password, Day only ("Daytime"), Version = mine, then Friends playing (D-128) and Hide inflated with their counts; Official / Community hive (D-195); Map and Country (D-073); Max ping (with presets, D-208); Mods — Modded / Vanilla and one specific mod, chosen from the union of seen mods (D-080). The heading carries a Reset button with the number of filters in effect, and only the groups scroll when the window is too short for them. The search stays in the page header with Direct connect and Refresh; it is shared with Favourites and LAN, which apply nothing else. All filters persist. Two specified here were never built: a time-acceleration filter, and multi-select on mods — one mod answers "which servers run this", which is the question people actually ask.
 
 ## 5. Visual system
 

@@ -5,8 +5,10 @@ import { servers } from "./state/servers.svelte";
  *
  * `servers.filters.search` drives `list`, `favouriteRows`, `lanRows` and `filterKey`,
  * so a synchronous write per keystroke re-filters and re-sorts every row and re-arms
- * the table’s visibility effect. FilterBar has debounced this since D-152; the
- * Favourites and LAN boxes bound straight through and did not (D-222).
+ * the table’s visibility effect. The Servers box has debounced this since D-152; the
+ * Favourites and LAN boxes bound straight through and did not (D-222). All three use
+ * this now: the Servers box moved out of FilterBar when the filters went to the rail
+ * (D-249).
  *
  * Clearing the field applies at once — waiting to see the full list again reads as lag.
  */

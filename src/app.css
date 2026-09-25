@@ -120,24 +120,36 @@ button {
   font: inherit;
 }
 
+/* The rail was 180 px; it is 240 since the Servers filters moved into it, on the
+   user's request for a wider, tidier side panel (D-249). */
 .shell {
   display: grid;
   height: 100vh;
-  grid-template-columns: 180px 1fr;
+  grid-template-columns: 240px 1fr;
   grid-template-rows: 30px 1fr;
   grid-template-areas:
     "top top"
     "rail main";
 }
 
+/* The sections, the Servers filters under them while that page is open (D-249), and
+   the update item at the foot. `min-height: 0` holds the rail to the window, so a
+   short one scrolls the filters instead of growing the grid row. The 12 px sides are
+   matched by the filter panel's scrolling body (FilterPanel.svelte). */
 .rail {
   grid-area: rail;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 8px;
+  min-height: 0;
+  padding: 10px 12px;
   background: var(--bg-elev);
   border-right: 1px solid var(--border);
+}
+
+.sections {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .rail-item {
@@ -188,6 +200,32 @@ button {
   outline-offset: -2px;
 }
 
+/* The one item that is not a place, so it sits apart at the foot of the rail and
+   wears the accent. D-216 described both and the rule was never written: it stood
+   straight under Logs in the muted grey of every other item. */
+.rail-item.update {
+  margin-top: auto;
+  color: var(--accent-ink);
+}
+
+.rail-item.update:hover {
+  color: var(--fg);
+}
+
+/* The filters' own error boundary (App.svelte, D-249). */
+.rail-crashed {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.rail-crashed p {
+  margin: 0;
+}
 
 .content {
   grid-area: main;
@@ -256,12 +294,20 @@ h1 {
   background-clip: padding-box;
 }
 
+/* Except on the Servers page, whose filters need the rail's width at every size
+   (D-249): 240 px of rail at the 960 px minimum still leaves the table 720 px against
+   its 700 px floor (D-189). */
 @media (max-width: 1100px) {
-  .shell {
+  .shell:not(.filters) {
     grid-template-columns: 52px 1fr;
   }
 
-  .rail-item .text {
+  /* 8 px sides, so an item keeps its 36 px for the glyph in the 52 px rail. */
+  .shell:not(.filters) .rail {
+    padding: 8px;
+  }
+
+  .shell:not(.filters) .rail-item .text {
     /* Hidden from sight, kept in the accessibility tree: `display: none` removed the
        button’s name, and the News and Mods badges then supplied it instead (D-224). */
     position: absolute;
@@ -276,7 +322,7 @@ h1 {
   }
 
 
-  .rail-item .badge {
+  .shell:not(.filters) .rail-item .badge {
     margin-left: 0;
     font-size: 10px;
     line-height: 16px;
