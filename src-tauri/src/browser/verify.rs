@@ -19,9 +19,10 @@ use super::ServerRow;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Verdict {
-    /// R2: PLAYER agrees with INFO (difference ≤ 2).
+    /// R2: PLAYER agrees with INFO (difference ≤ 4, D-233).
     Verified,
-    /// R3: INFO exceeds PLAYER by ≥ 5 or ≥ 20 % of max.
+    /// R3: INFO exceeds PLAYER by ≥ 5 or ≥ 20 % of max; R12: the list carries entries
+    /// no clock produced (D-238).
     Inflated,
     /// R4: INFO answers with players > 0 but PLAYER never answers.
     Unverifiable,
@@ -133,6 +134,30 @@ pub fn judge(
             }
         }
         Ok(p) => {
+            // R12: sessions no clock produced. The one published tool that fakes
+            // A2S_PLAYER (docs/11 T2) has, since its second commit, appended its fake
+            // entries with the duration bytes `00 00 00 01` — 2.35e-38 s — while the
+            // random durations it still draws go unused. A real connection is never
+            // that young twice over, and those entries are not sessions: they are left
+            // out of the count, and a server that sends them is inflating by exactly
+            // that many. R5 caught the tool only with no real player on, R11 only when
+            // four fifths of the list were fake; with four real players it verified at
+            // fourteen (D-238).
+            let fabricated = p
+                .players
+                .iter()
+                .filter(|x| x.duration_secs > 0.0 && x.duration_secs < 0.001)
+                .count();
+            if fabricated >= 2 {
+                let v = (p.players.len() - fabricated) as i32;
+                return (
+                    Verdict::Inflated,
+                    Some(v),
+                    format!(
+                        "INFO {reported}, {v} real sessions: {fabricated} listed entries are zero-length, which no connected player is"
+                    ),
+                );
+            }
             let v = p.players.len() as i32;
             if v >= 5 {
                 let distinct: HashSet<i64> = p
@@ -596,6 +621,54 @@ mod tests {
             panic!()
         };
         info::parse(p).unwrap() // 2/100 players
+    }
+
+    /// docs/11 T2 as it ships (anatolykopyl/server-query-fake-player-count, every
+    /// commit since c539ddc): `amount` entries appended to the real reply, each with
+    /// index 0, no name, score 0 and the duration bytes `00 00 00 01`, and the count
+    /// byte raised to match. Rebuilt byte for byte on the four-player live capture, which
+    /// the rules before R12 verified at fourteen (D-238).
+    #[test]
+    fn the_published_player_faker_is_counted_out() {
+        let honest: &[u8] = include_bytes!("../../tests/fixtures/a2s/volatile.player.bin");
+        let mut forged = honest.to_vec();
+        forged[5] += 10; // the count, after FF FF FF FF 44
+        for _ in 0..10 {
+            forged.extend_from_slice(&[0x00, 0x00, 0, 0, 0, 0, 0x00, 0x00, 0x00, 0x01]);
+        }
+        let parse = |bytes: &[u8]| {
+            let Datagram::Single(payload) = classify(bytes).unwrap() else {
+                panic!("single")
+            };
+            crate::a2s::players::parse(payload).unwrap()
+        };
+        let fake = parse(&forged);
+        assert_eq!(fake.players.len(), 14);
+        let mut i = live_info();
+        i.max_players = 60;
+        i.players = 14;
+        let (v, n, _) = judge(Some(&i), Ok(&fake), 0, 0);
+        assert_eq!(
+            (v, n),
+            (Verdict::Inflated, Some(4)),
+            "the four real sessions, not fourteen"
+        );
+        // No real player at all: ten zero-length entries, a count of nothing.
+        let mut empty = vec![0xff, 0xff, 0xff, 0xff, 0x44, 10];
+        for _ in 0..10 {
+            empty.extend_from_slice(&[0x00, 0x00, 0, 0, 0, 0, 0x00, 0x00, 0x00, 0x01]);
+        }
+        i.players = 10;
+        assert_eq!(judge(Some(&i), Ok(&parse(&empty)), 0, 0).1, Some(0));
+        // The honest capture itself is untouched.
+        i.players = 4;
+        assert_eq!(
+            judge(Some(&i), Ok(&parse(honest)), 0, 0),
+            (Verdict::Verified, Some(4), "INFO 4 vs PLAYER 4".into())
+        );
+        // One very young entry alone is a player who has just connected.
+        let p = players(&[1963.8, 946.1, 0.0004, 300.0], "");
+        assert_eq!(judge(Some(&i), Ok(&p), 0, 0).0, Verdict::Verified);
     }
 
     #[test]

@@ -16,7 +16,7 @@ Windows-only DayZ Standalone launcher: Tauri 2 (Rust) + Svelte 5, key-free serve
 | [08-sources.md](08-sources.md) | Every source with access date and confidence |
 | [09-decisions-log.md](09-decisions-log.md) | Append-only decisions and verifications |
 | [10-open-questions.md](10-open-questions.md) | Unresolved items and how to resolve them |
-| [11-fake-population-detection.md](11-fake-population-detection.md) | Spoofed player counts: mechanism, live measurement, detection rules R1–R7 |
+| [11-fake-population-detection.md](11-fake-population-detection.md) | Spoofed player counts: mechanism, live measurement, detection rules R0–R12 |
 | [12-code-signing.md](12-code-signing.md) | Windows code signing: options, Tauri wiring, workflow steps, checklist (not yet done, Q11) |
 | [../tools/a2s_probe.js](../tools/a2s_probe.js) | Live A2S probe used to verify the protocol (`node tools/a2s_probe.js <ip> <queryPort>`) |
 

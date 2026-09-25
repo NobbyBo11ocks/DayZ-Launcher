@@ -226,8 +226,12 @@
       </div>
     </header>
 
-    <section class="trust" class:bad={verdict && verdict !== "verified" && !(vouched && counted)} class:good={verdict === "verified"}>
-      {#if isInflated(row) && !v}
+    <section class="trust" class:bad={row.clone || (verdict && verdict !== "verified" && !(vouched && counted))} class:good={verdict === "verified" && !row.clone}>
+      <!-- R10 hid the row with nothing here to say why (D-238). -->
+      {#if row.clone}
+        <strong>Name taken from another server</strong>
+        <span class="muted">A server with exactly this name has verified players at another address; this copy has never been counted.</span>
+      {:else if isInflated(row) && !v}
         <strong>Inflated player count</strong>
         <span class="muted">Steam reports 0 authenticated players; the server claims {row.players}.</span>
       {:else if v && vouched && counted}

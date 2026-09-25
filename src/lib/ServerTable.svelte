@@ -290,6 +290,10 @@
                 ? "Same name as a server that verified on another address; this copy never has"
                 : isInflated(r)
                   ? `Steam reports 0 authenticated players; the server claims ${r.players}`
+                : r.players > 127
+                  ? "Claims more players than the 127 a DayZ server can hold"
+                : r.verifiedPlayers == null && (r.bots ?? 0) > 0 && r.bots === r.players
+                  ? "Reports as many bots as players, the mark of a patched player count, and has never been counted"
                 : r.verdict === "inflated"
                   ? `Inflated: server claims ${r.players}, ${r.verifiedPlayers ?? 0} actually connected`
                   : r.verdict === "unverifiable"
