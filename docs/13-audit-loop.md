@@ -3,6 +3,7 @@
 Standing rule (2026-09-25): **one important audit at a time — audit, then fix, then the next audit, then fix.** One area per round. This file is the loop's record: read it first, update it as you go, and keep it short.
 
 **Statuses:** `todo` · `IN PROGRESS since <UTC time>` · `done <date>` · `awaiting merge` · `blocked: <why>`.
+Mark a row `IN PROGRESS` before starting it, and leave notes there if work stops mid-way.
 
 ## Queue (in order of importance)
 
