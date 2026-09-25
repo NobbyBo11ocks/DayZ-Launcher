@@ -5,6 +5,7 @@
 //! is an instant-start cache (D-070).
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -162,6 +163,43 @@ impl Settings {
 pub struct SettingsStore {
     path: PathBuf,
     current: Mutex<Settings>,
+    /// The file exists but could not be read at start — a sharing violation, a
+    /// permission. The defaults in memory are not the user's settings, so nothing may
+    /// be written over the file until a read succeeds (D-239).
+    unread: AtomicBool,
+}
+
+/// A settings file is a JSON object. Anything else is corruption, whatever serde is
+/// willing to make of it.
+fn parse_settings(bytes: &[u8]) -> Result<Settings, String> {
+    let value: Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+    if !value.is_object() {
+        return Err("the file is not a JSON object".into());
+    }
+    if let Some(ui) = value.get("ui") {
+        if !ui.is_object() {
+            return Err("\"ui\" is not a JSON object".into());
+        }
+    }
+    serde_json::from_value(value).map_err(|e| e.to_string())
+}
+
+/// Keeps a copy of a file that could not be parsed, stamped so a second bad start
+/// cannot overwrite the first copy.
+fn set_aside(path: &Path, bytes: &[u8], e: &str) {
+    let aside = path.with_extension(format!(
+        "json.unreadable-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs())
+    ));
+    let saved = std::fs::write(&aside, bytes).is_ok();
+    crate::log_error!(
+        "settings",
+        "{} is unreadable ({e}); starting from defaults, copy kept: {saved} ({})",
+        path.display(),
+        aside.display()
+    );
 }
 
 impl SettingsStore {
@@ -169,44 +207,27 @@ impl SettingsStore {
         // Defaults are the right answer for a first run, but silently defaulting on an
         // unreadable file meant the next preference change wrote them over the user's
         // launch profiles for good (D-160). Keep a copy and say so.
-        // A settings file is a JSON object. Anything else is corruption, whatever
-        // serde is willing to make of it.
-        let parse = |bytes: &[u8]| -> Result<Settings, String> {
-            let value: Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
-            if !value.is_object() {
-                return Err("the file is not a JSON object".into());
-            }
-            if let Some(ui) = value.get("ui") {
-                if !ui.is_object() {
-                    return Err("\"ui\" is not a JSON object".into());
-                }
-            }
-            serde_json::from_value(value).map_err(|e| e.to_string())
-        };
+        let mut unread = false;
         let mut current = match std::fs::read(path) {
-            Ok(bytes) => match parse(&bytes) {
+            Ok(bytes) => match parse_settings(&bytes) {
                 Ok(s) => s,
                 Err(e) => {
-                    // Stamped, so a second bad start cannot overwrite the first copy.
-                    let aside = path.with_extension(format!(
-                        "json.unreadable-{}",
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map_or(0, |d| d.as_secs())
-                    ));
-                    let saved = std::fs::write(&aside, &bytes).is_ok();
-                    crate::log_error!(
-                        "settings",
-                        "{} is unreadable ({e}); starting from defaults, copy kept: {saved} ({})",
-                        path.display(),
-                        aside.display()
-                    );
+                    set_aside(path, &bytes, &e);
                     Settings::default()
                 }
             },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Settings::default(),
+            // D-160 covered the file that reads but does not parse. A file that does not
+            // read at all — held open by a scanner, a permission — kept no copy, and the
+            // front end's first preference patch, a second after start, wrote the
+            // defaults over it (D-239).
             Err(e) => {
-                crate::log_error!("settings", "{} could not be read: {e}", path.display());
+                crate::log_error!(
+                    "settings",
+                    "{} could not be read: {e}; it will not be written until it can be",
+                    path.display()
+                );
+                unread = true;
                 Settings::default()
             }
         };
@@ -214,6 +235,7 @@ impl SettingsStore {
         let store = Self {
             path: path.to_path_buf(),
             current: Mutex::new(current),
+            unread: AtomicBool::new(unread),
         };
         store.apply_install_choices();
         store
@@ -245,6 +267,9 @@ impl SettingsStore {
             let Ok(mut cur) = self.current.lock() else {
                 return;
             };
+            if self.settle(&mut cur).is_err() {
+                return; // still unreadable: the value stays for the next start
+            }
             cur.ui.news.then(|| {
                 cur.ui.news = false;
                 cur.clone()
@@ -260,6 +285,41 @@ impl SettingsStore {
         let _ = key.delete_value("DisableNews");
     }
 
+    /// Before the first write after a failed read: reads the file again and adopts it
+    /// when it reads now, and refuses the write when it still does not (D-239).
+    /// Returns whether the settings in memory were just replaced by the file's.
+    fn settle(&self, cur: &mut Settings) -> std::io::Result<bool> {
+        if !self.unread.load(Ordering::Acquire) {
+            return Ok(false);
+        }
+        let adopted = match std::fs::read(&self.path) {
+            Ok(bytes) => match parse_settings(&bytes) {
+                Ok(mut s) => {
+                    s.ui.normalise();
+                    *cur = s;
+                    true
+                }
+                // Corrupt after all: what `load` would have done with it.
+                Err(e) => {
+                    set_aside(&self.path, &bytes, &e);
+                    false
+                }
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+            Err(e) => {
+                crate::log_warn!(
+                    "settings",
+                    "{} is still unreadable ({e}); not writing over it",
+                    self.path.display()
+                );
+                return Err(e);
+            }
+        };
+        self.unread.store(false, Ordering::Release);
+        crate::log_info!("settings", "{} readable again", self.path.display());
+        Ok(adopted)
+    }
+
     pub fn get(&self) -> Settings {
         self.current
             .lock()
@@ -271,6 +331,13 @@ impl SettingsStore {
     /// caller sent (the Settings view round-trips a possibly stale copy).
     pub fn set_launch(&self, mut s: Settings) -> std::io::Result<()> {
         let mut cur = self.current.lock().unwrap_or_else(|e| e.into_inner());
+        // The caller's copy was built from the defaults the failed read left in memory;
+        // saving it would replace the launch profiles the file has just shown it holds.
+        if self.settle(&mut cur)? {
+            return Err(std::io::Error::other(
+                "the settings file could not be read at start and has just been read; reopen Settings to see it",
+            ));
+        }
         s.ui = cur.ui.clone();
         self.persist(&s)?;
         *cur = s;
@@ -287,6 +354,7 @@ impl SettingsStore {
             ));
         };
         let mut cur = self.current.lock().unwrap_or_else(|e| e.into_inner());
+        self.settle(&mut cur)?;
         let mut merged = serde_json::to_value(&cur.ui).map_err(invalid)?;
         if let Value::Object(base) = &mut merged {
             for (k, v) in patch {
@@ -416,6 +484,40 @@ mod tests {
         let again = SettingsStore::load(&path);
         assert_eq!(again.get().profile_name, "Survivor");
         assert_eq!(again.get().extra_args, "-cpuCount=8");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A file that exists but cannot be read is never written over with the defaults:
+    /// the first patch is refused while it stays unreadable, and adopts the file the
+    /// moment it reads (D-239). A directory in its place fails the read with an error
+    /// other than NotFound on every platform.
+    #[test]
+    fn an_unreadable_file_is_not_overwritten() {
+        let path = temp_path("unread");
+        std::fs::create_dir_all(&path).unwrap();
+        let store = SettingsStore::load(&path);
+        assert!(
+            store.patch_ui(json!({ "theme": "light" })).is_err(),
+            "refused while unreadable"
+        );
+        assert!(path.is_dir(), "nothing was written in its place");
+        std::fs::remove_dir(&path).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"profileName":"Survivor","ui":{"accent":"teal"}}"#,
+        )
+        .unwrap();
+        let ui = store.patch_ui(json!({ "theme": "light" })).unwrap();
+        assert_eq!(
+            (ui.theme.as_str(), ui.accent.as_str()),
+            ("light", "teal"),
+            "the file's prefs, patched"
+        );
+        let on_disk = SettingsStore::load(&path).get();
+        assert_eq!(
+            on_disk.profile_name, "Survivor",
+            "the launch options survived"
+        );
         let _ = std::fs::remove_file(&path);
     }
 

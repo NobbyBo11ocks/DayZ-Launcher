@@ -713,18 +713,6 @@ impl Cache {
 
     // ----- mod lists (D-080) ---------------------------------------------------
 
-    /// The mod list last read from this server, newest scan wins. Used when a launch
-    /// cannot reach the server for a fresh list (D-190).
-    pub fn mods_for(&self, id: &str) -> rusqlite::Result<Vec<(u64, String)>> {
-        let mut stmt = self
-            .conn
-            .prepare_cached("SELECT mod_id, name FROM server_mods WHERE server_id = ?1")?;
-        let rows = stmt.query_map(params![id], |r| {
-            Ok((r.get::<_, i64>(0)? as u64, r.get::<_, String>(1)?))
-        })?;
-        rows.collect()
-    }
-
     /// Replaces the stored mod lists of many servers in one transaction (DZSA import).
     pub fn replace_server_mods_many(
         &mut self,
@@ -769,9 +757,15 @@ impl Cache {
         let Some(scanned_at) = scanned_at else {
             return Ok(None);
         };
-        let mut stmt = self
-            .conn
-            .prepare_cached("SELECT mod_id, name FROM server_mods WHERE server_id = ?1")?;
+        // Two things the live RULES path already did, which this fallback did not (D-239):
+        // Workshop id 0 is a server-side mod nobody can download, which left a join
+        // dialog offering a download that could never succeed and a launch that refused
+        // with "mod (0) is not installed" (D-221); and `-mod=` goes in the order the
+        // server reports (D-008), where the primary key's index returned them by id.
+        // Each list is deleted before it is written again, so rowid is that order.
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT mod_id, name FROM server_mods WHERE server_id = ?1 AND mod_id > 0 ORDER BY rowid",
+        )?;
         let rows = stmt.query_map(params![id], |r| {
             Ok((r.get::<_, i64>(0)? as u64, r.get::<_, String>(1)?))
         })?;
@@ -1048,6 +1042,29 @@ mod tests {
             ),
             (33, Some("offline"), Some(1_000), Some(0)),
             "verdict updates; the count and its timestamp survive a check that could not count"
+        );
+    }
+
+    /// The cached list a launch falls back to keeps the server's order and leaves out
+    /// id 0, the way the live RULES path does (D-008, D-221, D-239).
+    #[test]
+    fn cached_mod_lists_keep_the_servers_order_and_drop_id_0() {
+        let mut c = Cache::open_in_memory().unwrap();
+        let r = row(27017, 5);
+        c.upsert(std::slice::from_ref(&r)).unwrap();
+        let list = vec![
+            (1_559_212_036, "CF".to_string()),
+            (2_545_327_648, "Dabs Framework".to_string()),
+            (0, "server side".to_string()),
+            (1_198_726_386, "Trader".to_string()),
+        ];
+        c.replace_server_mods_many(&[(r.id.clone(), list)], 100)
+            .unwrap();
+        let (at, mods) = c.server_mods(&r.id).unwrap().unwrap();
+        assert_eq!(at, 100);
+        assert_eq!(
+            mods.iter().map(|m| m.0).collect::<Vec<_>>(),
+            vec![1_559_212_036, 2_545_327_648, 1_198_726_386]
         );
     }
 

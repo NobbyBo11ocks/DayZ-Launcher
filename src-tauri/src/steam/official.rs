@@ -29,8 +29,34 @@ pub fn favourites_path() -> Option<PathBuf> {
 }
 
 pub fn read_favourites(path: &Path) -> std::io::Result<Vec<OfficialFavourite>> {
-    let text = std::fs::read_to_string(path)?;
-    Ok(parse_favourites(&text))
+    Ok(parse_favourites(&decode(&std::fs::read(path)?)))
+}
+
+/// The official launcher declares `encoding="windows-1252"` and means it: "Café" is
+/// the single byte 0xE9, which `read_to_string` refused as invalid UTF-8 — one such
+/// name anywhere failed the whole import (D-239). UTF-8 is taken as it is; anything
+/// else is Windows-1252, which maps every byte to a character. Every delimiter the
+/// scanner looks for is ASCII in both.
+fn decode(bytes: &[u8]) -> String {
+    let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
+    match std::str::from_utf8(bytes) {
+        Ok(s) => s.to_string(),
+        Err(_) => bytes.iter().map(|&b| cp1252(b)).collect(),
+    }
+}
+
+fn cp1252(b: u8) -> char {
+    // 0x80–0x9F are the only bytes where Windows-1252 differs from Latin-1; the five
+    // it leaves undefined keep their C1 code points.
+    const HIGH: [char; 32] = [
+        '€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8D}', 'Ž',
+        '\u{8F}', '\u{90}', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u{9D}',
+        'ž', 'Ÿ',
+    ];
+    match b {
+        0x80..=0x9F => HIGH[usize::from(b - 0x80)],
+        _ => char::from(b),
+    }
 }
 
 pub fn parse_favourites(xml: &str) -> Vec<OfficialFavourite> {
@@ -141,12 +167,49 @@ fn parse_attrs(s: &str) -> HashMap<String, String> {
     out
 }
 
+/// XML entities, in one pass. Characters outside Windows-1252 — every Cyrillic name —
+/// arrive as character references (`&#1057;`), which were left on screen as they
+/// were; and chained `replace` calls decoded `&amp;lt;` twice (D-239).
 fn unescape(s: &str) -> String {
-    s.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .replace("&amp;", "&")
+    if !s.contains('&') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find('&') {
+        out.push_str(&rest[..i]);
+        let tail = &rest[i..];
+        let decoded = tail.find(';').and_then(|end| {
+            let entity = &tail[1..end];
+            let c = match entity {
+                "lt" => Some('<'),
+                "gt" => Some('>'),
+                "quot" => Some('"'),
+                "apos" => Some('\''),
+                "amp" => Some('&'),
+                _ => entity.strip_prefix('#').and_then(|n| {
+                    match n.strip_prefix(['x', 'X']) {
+                        Some(hex) => u32::from_str_radix(hex, 16).ok(),
+                        None => n.parse().ok(),
+                    }
+                    .and_then(char::from_u32)
+                }),
+            };
+            c.map(|c| (c, end))
+        });
+        match decoded {
+            Some((c, end)) => {
+                out.push(c);
+                rest = &tail[end + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = &tail[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 #[cfg(test)]
@@ -187,6 +250,29 @@ mod tests {
         assert_eq!(f[0].name, "A & B \"x\"");
         assert!(f[0].password);
         assert_eq!((f[1].query_port, f[1].game_port), (2303, 2302));
+    }
+
+    /// What the official launcher actually writes (`encoding="windows-1252"`): a
+    /// Latin-1 letter as its single byte, and anything outside the code page as a
+    /// character reference. Either one failed or garbled the import (D-239).
+    #[test]
+    fn windows_1252_bytes_and_character_references() {
+        let mut xml =
+            br#"<?xml version="1.0" encoding="windows-1252"?><FavoriteServers><Server Name="Caf"#
+                .to_vec();
+        xml.push(0xE9);
+        xml.push(0x96); // en dash in Windows-1252
+        xml.extend_from_slice(
+            br#" &#1057;&#x435;&#1088;&#1074;&#1077;&#1088; &amp;lt;" QueryEndPoint="1.2.3.4:27016"/></FavoriteServers>"#,
+        );
+        let f = parse_favourites(&decode(&xml));
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].name, "Café– Сервер &lt;");
+        // UTF-8 stays UTF-8, with or without a byte-order mark.
+        let utf8 = "\u{feff}<Server Name=\"Café\" QueryEndPoint=\"1.2.3.4:27016\"/>";
+        assert_eq!(parse_favourites(&decode(utf8.as_bytes()))[0].name, "Café");
+        // A stray ampersand is kept rather than eaten.
+        assert_eq!(unescape("A & B &bogus; &#xZZ;"), "A & B &bogus; &#xZZ;");
     }
 
     /// A name with non-ASCII bytes used to stop the attribute scan mid-character and

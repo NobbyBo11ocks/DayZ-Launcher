@@ -77,6 +77,36 @@ pub fn read(library: &Path) -> AppResult<Option<Workshop>> {
     Ok(Some(ws))
 }
 
+/// The named items as their content folders show them, without the manifest: what a
+/// launch falls back to when `appworkshop_221100.acf` will not parse. The manifest
+/// adds sizes and update times; the folders are what the junctions point at (D-194,
+/// D-239).
+pub fn from_folders(library: &Path, ids: &[u64]) -> Workshop {
+    let mut ws = Workshop {
+        acf_path: acf_path(library),
+        needs_update: false,
+        needs_download: false,
+        last_build_id: String::new(),
+        size_on_disk: 0,
+        items: ids
+            .iter()
+            .map(|&id| WorkshopItem {
+                id,
+                size: 0,
+                time_updated: 0,
+                latest_time_updated: None,
+                manifest: String::new(),
+                folder: None,
+                meta_name: None,
+                meta_published_id: None,
+                mod_name: None,
+            })
+            .collect(),
+    };
+    enrich(&mut ws, &content_dir(library));
+    ws
+}
+
 /// Pure parser over the ACF text.
 pub fn parse_appworkshop(text: &str, path: &Path) -> AppResult<Workshop> {
     let doc = vdf::parse(text, path)?;

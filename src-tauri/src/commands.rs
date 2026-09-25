@@ -126,7 +126,9 @@ pub fn settings_get(state: State<'_, AppState>) -> Settings {
 
 /// Replaces the launch options only; UI preferences are written through `ui_prefs_set`.
 /// The Steam idle timeout (D-077) is pushed to the running worker at the same time.
-#[tauri::command]
+/// `async`: a plain command runs on the main thread, and this one ends in an fsync
+/// and a rename (D-239).
+#[tauri::command(async)]
 pub fn settings_set(state: State<'_, AppState>, settings: Settings) -> AppResult<()> {
     let idle = settings.steam_idle_timeout();
     // Applied before the write, so turning logging off cannot be the last thing the
@@ -143,7 +145,8 @@ pub fn settings_set(state: State<'_, AppState>, settings: Settings) -> AppResult
 
 /// Merges a partial UI-preferences object (theme, accent, filters, onboarded,
 /// lastUpdateCheckMs) into the settings file and returns the stored result (D-070).
-#[tauri::command]
+/// Off the main thread for the same reason as `settings_set` (D-239).
+#[tauri::command(async)]
 pub fn ui_prefs_set(state: State<'_, AppState>, patch: serde_json::Value) -> AppResult<UiPrefs> {
     state
         .settings
@@ -1540,32 +1543,29 @@ pub async fn launch_game(
             // "0 mod link(s)". RULES is the lossiest of the three queries, and the join
             // dialog plans against a *different* one, so a plan that listed twelve mods
             // could still launch with none (D-190).
-            let cached = {
-                let c = Arc::clone(&state.cache);
-                let want = id.clone();
-                tauri::async_runtime::spawn_blocking(move || {
-                    c.lock().ok().and_then(|c| c.mods_for(&want).ok())
-                })
-                .await
-                .ok()
-                .flatten()
-                .unwrap_or_default()
-            };
-            if cached.is_empty() && row.tags.modded {
-                return Err(AppError::Internal(format!(
-                    "Could not read {}'s mod list ({e}), and nothing is cached for it. \
-                     Starting without mods would be rejected by the server, so nothing was started — try again in a moment.",
-                    row.name
-                )));
+            // "Never scanned" and "scanned, and every mod on it is server-side" are
+            // different answers: the second launches without mods, as the join plan
+            // already said it would (D-239).
+            match cached_mods(&state.cache, &id).await {
+                Some((_, mods)) => {
+                    if !mods.is_empty() {
+                        crate::log_warn!(
+                            "launch",
+                            "the server did not answer RULES ({e}); using the {} mod(s) from the last scan",
+                            mods.len()
+                        );
+                    }
+                    mods
+                }
+                None if row.tags.modded => {
+                    return Err(AppError::Internal(format!(
+                        "Could not read {}'s mod list ({e}), and nothing is cached for it. \
+                         Starting without mods would be rejected by the server, so nothing was started — try again in a moment.",
+                        row.name
+                    )));
+                }
+                None => Vec::new(),
             }
-            if !cached.is_empty() {
-                crate::log_warn!(
-                    "launch",
-                    "the server did not answer RULES ({e}); using the {} mod(s) from the last scan",
-                    cached.len()
-                );
-            }
-            cached
         }
     };
     // A saved launch profile can override the current launch settings for this
@@ -1599,7 +1599,25 @@ pub async fn launch_game(
         let libs = locate::libraries(&path)?;
         let game = locate::find_dayz(&libs)?
             .ok_or_else(|| AppError::Internal("DayZ is not installed".into()))?;
-        let ws = workshop::read(&game.library.path)?;
+        // A vanilla server needs no Workshop list, and one that will not parse — a power
+        // cut mid-write (D-194) — refused every launch, vanilla included, while the join
+        // plan had already turned the same error into a warning. The content folders
+        // are what the junctions point at (D-239).
+        let ws = if required.is_empty() {
+            None
+        } else {
+            match workshop::read(&game.library.path) {
+                Ok(ws) => ws,
+                Err(e) => {
+                    crate::log_warn!(
+                        "launch",
+                        "the Workshop list is unreadable ({e}); looking for the mod folders directly"
+                    );
+                    let ids: Vec<u64> = required.iter().map(|(id, _)| *id).collect();
+                    Some(workshop::from_folders(&game.library.path, &ids))
+                }
+            }
+        };
         let by_id: HashMap<u64, (PathBuf, Option<String>)> = ws
             .map(|w| {
                 w.items
@@ -1855,26 +1873,46 @@ async fn probe_server(
         .clone()
         .with_timeout(std::time::Duration::from_millis(1500))
         .with_retries(0);
-    for &qport in ports {
-        let addr = SocketAddr::new(ip, qport);
-        if let Ok(reply) = probe.info(addr).await {
-            if reply.value.app_id != 0 && reply.value.app_id != crate::steam::DAYZ_APP_ID {
-                continue; // something else answered on that port
+    // All candidates at once, answered in list order. One after another, a game port
+    // typed where the host uses Steam's default query port waited out three timeouts
+    // first (~6 s), and a server that was down took ~13.5 s to say so (D-239). Nine
+    // datagrams at most, inside the client's own pacing and permits (D-037).
+    let mut set = tokio::task::JoinSet::new();
+    for (i, &qport) in ports.iter().enumerate() {
+        let probe = probe.clone();
+        set.spawn(async move { (i, qport, probe.info(SocketAddr::new(ip, qport)).await) });
+    }
+    let mut settled = vec![false; ports.len()];
+    let mut found: Vec<Option<ServerRow>> = vec![None; ports.len()];
+    let mut next = 0;
+    while let Some(joined) = set.join_next().await {
+        let Ok((i, qport, reply)) = joined else {
+            continue;
+        };
+        settled[i] = true;
+        if let Ok(reply) = reply {
+            let dayz = reply.value.app_id == 0 || reply.value.app_id == crate::steam::DAYZ_APP_ID;
+            // Anything else answering on that port, or a sibling server on the same host.
+            let ours = expect_game_port.is_none_or(|gp| reply.value.game_port == Some(gp));
+            if dayz && ours {
+                found[i] = Some(ServerRow::from_info(
+                    &ip.to_string(),
+                    qport,
+                    &reply.value,
+                    reply.rtt.as_millis() as u32,
+                ));
             }
-            if let Some(gp) = expect_game_port {
-                if reply.value.game_port != Some(gp) {
-                    continue; // a sibling server on the same host
-                }
+        }
+        // The first candidate in list order wins, as soon as every earlier one is in.
+        while next < ports.len() && settled[next] {
+            if let Some(row) = found[next].take() {
+                return Some(row);
             }
-            return Some(ServerRow::from_info(
-                &ip.to_string(),
-                qport,
-                &reply.value,
-                reply.rtt.as_millis() as u32,
-            ));
+            next += 1;
         }
     }
-    None
+    // Only reached with a slot that never settled (its task failed): what answered.
+    found.into_iter().flatten().next()
 }
 
 /// Adds a server by `host:port` (game or query port, hostname allowed): probes
@@ -1960,6 +1998,13 @@ pub struct ImportResult {
     pub path: String,
 }
 
+fn import_failed(n: usize, e: &str) -> AppError {
+    crate::log_error!("cache", "favourite import of {n} row(s) failed: {e}");
+    AppError::Internal(format!(
+        "read {n} favourite(s) but could not save them: {e}"
+    ))
+}
+
 /// Imports the official launcher's favourites (docs/02 §7): probes each server,
 /// stores a row (live or from the XML), and marks it favourite.
 #[tauri::command]
@@ -1990,7 +2035,9 @@ pub async fn import_official_favourites(
         .await
         .unwrap_or_default()
     };
-    let mut new_rows = Vec::new();
+    // Each row with whether it came from the XML alone, because the server did not
+    // answer the probe.
+    let mut new_rows: Vec<(ServerRow, bool)> = Vec::new();
     let mut targets = Vec::new();
     // Probe them together rather than one after another (D-188). Awaited in sequence,
     // a list with dead entries costs the sum of its timeouts: measured 21.9 s for 50
@@ -2017,11 +2064,11 @@ pub async fn import_official_favourites(
         let Ok((e, id, probed)) = joined else {
             continue;
         };
-        let row = match probed {
-            Some(r) => r,
+        let (row, from_xml) = match probed {
+            Some(r) => (r, false),
             None => {
                 result.unreachable += 1;
-                ServerRow {
+                let xml_row = ServerRow {
                     id: id.clone(),
                     country: ServerRow::country_for(&e.query_ip),
                     ip: e.query_ip.clone(),
@@ -2046,48 +2093,57 @@ pub async fn import_official_favourites(
                     steam_empty: None,
                     verified_at: None,
                     verdict: None,
-                }
+                };
+                (xml_row, true)
             }
         };
         if let Some(t) = Target::from_row(&row) {
             targets.push(t);
         }
-        new_rows.push(row);
+        new_rows.push((row, from_xml));
         result.imported += 1;
     }
     if !new_rows.is_empty() {
         let c = Arc::clone(&state.cache);
-        let rows = new_rows.clone();
+        let n = new_rows.len();
         // The count was already tallied above, so swallowing these writes reported a
         // successful import that saved nothing (D-160). Fail loudly instead.
-        let stored = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-            let mut c = c
-                .lock()
-                .map_err(|_| "the cache lock is poisoned".to_string())?;
-            c.upsert(&rows).map_err(|e| e.to_string())?;
-            // One transaction and one checkpoint for the whole import: per favourite
-            // it measured 111.8 ms for 50 against 6.7 ms this way (D-175).
-            let ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
-            c.favourites_set_many(&ids).map_err(|e| e.to_string())?;
-            Ok(())
-        })
-        .await;
-        let stored = match stored {
-            Ok(r) => r,
-            Err(e) => Err(e.to_string()),
+        let stored =
+            tauri::async_runtime::spawn_blocking(move || -> Result<Vec<ServerRow>, String> {
+                let mut c = c
+                    .lock()
+                    .map_err(|_| "the cache lock is poisoned".to_string())?;
+                // A server that did not answer this one probe but is already in the list
+                // keeps the row the list has. The XML's copy is however old the official
+                // launcher's file is — name, version, no description, 0 players, 0 ms — and
+                // writing it over a fresh Steam row left a false version warning in the join
+                // plan that no later check repaired (D-239).
+                let mut shown = Vec::with_capacity(new_rows.len());
+                let mut to_store = Vec::with_capacity(new_rows.len());
+                for (row, from_xml) in new_rows {
+                    if from_xml {
+                        if let Some(cached) = c.get(&row.id).map_err(|e| e.to_string())? {
+                            shown.push(cached);
+                            continue;
+                        }
+                    }
+                    to_store.push(row.clone());
+                    shown.push(row);
+                }
+                c.upsert(&to_store).map_err(|e| e.to_string())?;
+                // One transaction and one checkpoint for the whole import: per favourite
+                // it measured 111.8 ms for 50 against 6.7 ms this way (D-175).
+                let ids: Vec<String> = shown.iter().map(|r| r.id.clone()).collect();
+                c.favourites_set_many(&ids).map_err(|e| e.to_string())?;
+                Ok(shown)
+            })
+            .await;
+        let shown = match stored {
+            Ok(Ok(rows)) => rows,
+            Ok(Err(e)) => return Err(import_failed(n, &e)),
+            Err(e) => return Err(import_failed(n, &e.to_string())),
         };
-        if let Err(e) = stored {
-            crate::log_error!(
-                "cache",
-                "favourite import of {} row(s) failed: {e}",
-                new_rows.len()
-            );
-            return Err(AppError::Internal(format!(
-                "read {} favourite(s) but could not save them: {e}",
-                new_rows.len()
-            )));
-        }
-        let _ = app.emit("servers:batch", &new_rows);
+        let _ = app.emit("servers:batch", &shown);
         tauri::async_runtime::spawn(run_verification(
             app.clone(),
             Arc::clone(&state.cache),

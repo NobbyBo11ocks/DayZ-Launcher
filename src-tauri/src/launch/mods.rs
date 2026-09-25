@@ -78,7 +78,20 @@ pub fn ensure_junctions(
                     // exists but is not our junction: try the next candidate
                 }
                 Err(_) => {
-                    junction::create(source, path).map_err(|e| AppError::io(path, e))?;
+                    if let Err(e) = junction::create(source, path) {
+                        // `junction::create` makes the folder first and turns it into a
+                        // mount point second. When the second step failed — a FAT or
+                        // exFAT library, a permission — the empty folder stayed, every
+                        // later launch found the name taken, and the one after that the
+                        // sibling too. This call made it and nothing is in it, so it is
+                        // ours to take back; the rule about junctions we did not create
+                        // does not reach it (D-093, D-239).
+                        if e.kind() != std::io::ErrorKind::AlreadyExists && is_empty_plain_dir(path)
+                        {
+                            let _ = std::fs::remove_dir(path);
+                        }
+                        return Err(AppError::io(path, e));
+                    }
                     chosen = Some((path.clone(), true));
                     break;
                 }
@@ -99,6 +112,12 @@ pub fn ensure_junctions(
         });
     }
     Ok(out)
+}
+
+/// A real, empty directory: not a junction or any other reparse point, nothing inside.
+fn is_empty_plain_dir(p: &Path) -> bool {
+    std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink())
+        && std::fs::read_dir(p).is_ok_and(|mut d| d.next().is_none())
 }
 
 fn same_dir(a: &Path, b: &Path) -> bool {

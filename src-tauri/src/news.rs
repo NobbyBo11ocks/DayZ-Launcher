@@ -339,6 +339,20 @@ pub async fn thumbnail(
     if let Ok(bytes) = std::fs::read(&path) {
         return Ok(bytes);
     }
+    // Two at a time. An empty cache — a first run, or the wider "All news" view — asked
+    // for every card's picture at once, and each is up to 16 MB of body and ~25 MB of
+    // decoded RGB for a 3840×2160 source (S-72): six in parallel were already ~150 MB
+    // against the 90 MB host budget (D-113, D-239). The caps from D-163 bound each
+    // request, not their sum.
+    static SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+    let _slot = SLOTS
+        .acquire()
+        .await
+        .map_err(|_| "thumbnail queue closed".to_string())?;
+    // Another request for the same picture may have written it while this one waited.
+    if let Ok(bytes) = std::fs::read(&path) {
+        return Ok(bytes);
+    }
     let client = reqwest::Client::builder()
         .user_agent(USER_AGENT)
         .timeout(std::time::Duration::from_secs(30))

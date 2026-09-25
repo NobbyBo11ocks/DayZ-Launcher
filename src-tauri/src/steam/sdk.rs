@@ -396,6 +396,11 @@ pub struct SteamWorker {
     owner: bool,
     /// The worker thread, so exit can wait for Steamworks to shut down properly.
     join: Arc<Mutex<Option<std::thread::JoinHandle<()>>>>,
+    /// One unsubscribe at a time. The worker answers an active request "superseded"
+    /// when a second arrives, although Steam already has the first: a quick second
+    /// click on the Mods page reported the first mod as failed while Steam went ahead
+    /// and removed it (D-239).
+    unsubscribing: Arc<Mutex<()>>,
 }
 
 impl SteamWorker {
@@ -428,6 +433,7 @@ impl SteamWorker {
             idle_after,
             owner: true,
             join: Arc::new(Mutex::new(Some(join))),
+            unsubscribing: Arc::new(Mutex::new(())),
         }
     }
 
@@ -440,6 +446,7 @@ impl SteamWorker {
             idle_after: Arc::clone(&self.idle_after),
             owner: false,
             join: Arc::clone(&self.join),
+            unsubscribing: Arc::clone(&self.unsubscribing),
         }
     }
 
@@ -518,6 +525,7 @@ impl SteamWorker {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
+        let _one_at_a_time = self.unsubscribing.lock().unwrap_or_else(|e| e.into_inner());
         let (reply, rx) = mpsc::channel();
         self.cmd
             .send(Cmd::Unsubscribe {
