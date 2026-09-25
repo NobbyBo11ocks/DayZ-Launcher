@@ -154,7 +154,7 @@ button {
 
 /* The icons wear the accent (RailIcon) and the labels the default text colour, on the
    user's call (D-253; D-250 had put the labels in the accent too). The section you are
-   on is the one with the surface, the bar and the heavier weight. A fixed 36 px, so
+   on is the one with the surface, the pill and the heavier weight. A fixed 36 px, so
    the rows keep one rhythm whatever the font does with a label. */
 .rail-item {
   all: unset;
@@ -192,8 +192,31 @@ button {
 
 .rail-item.active {
   background: var(--bg-row);
-  box-shadow: inset 3px 0 0 var(--accent);
   font-weight: 600;
+}
+
+/* The open section's marker: a short pill centred on the left edge, as Windows 11's
+   own navigation draws it. It replaced a 3 px inset shadow that followed the item's
+   rounded corners and read as a bracket (user request, D-255). `--accent-ink`, so it
+   keeps 3:1 against the surface on the light theme's deeper accents too. */
+.rail-item.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 16px;
+  border-radius: 2px;
+  background: var(--accent-ink);
+  transform: translateY(-50%);
+  animation: rail-pill 150ms ease-out;
+}
+
+@keyframes rail-pill {
+  from {
+    opacity: 0;
+    transform: translateY(-50%) scaleY(0.4);
+  }
 }
 
 .rail-item:focus-visible {
