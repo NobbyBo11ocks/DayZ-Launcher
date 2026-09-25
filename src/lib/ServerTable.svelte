@@ -373,7 +373,11 @@
 <style>
   .table { display: flex; flex-direction: column; min-height: 0; height: 100%; font-size: 12.5px; outline: none; }
   .table:focus-visible { box-shadow: inset 0 0 0 2px var(--accent-ink); }
-  .head, .row { display: grid; grid-template-columns: minmax(200px, 1fr) 130px 52px 96px 56px 64px 92px; align-items: center; }
+  /* Time was 64 px and "☀ 19:42" needs about that before the sun or moon, which comes from
+     whichever font has it, draws wider: it read "19…". It took 16 px from Version, which
+     shows "1.29" now (D-251), so the fixed columns are still 490 px and the table's
+     700 px floor behind the D-189 and D-249 breakpoints does not move (D-252). */
+  .head, .row { display: grid; grid-template-columns: minmax(200px, 1fr) 130px 52px 96px 56px 80px 76px; align-items: center; }
   .head { border-bottom: 1px solid var(--border); background: var(--bg); }
   /* Accent, like the title-bar counts (user request, D-177). */
   .th { all: unset; cursor: pointer; padding: 0 8px; height: 30px; display: flex; align-items: center; color: var(--accent-ink); font-weight: 500; white-space: nowrap; }
