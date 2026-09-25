@@ -64,9 +64,14 @@ pub struct DzsaRow {
 /// Downloads and converts the whole list. Blocking network work happens inside
 /// reqwest's own runtime; the JSON is deserialised once into the typed structs.
 pub async fn fetch() -> Result<Vec<DzsaRow>, String> {
+    // No redirects and https only, like the news client (D-160): reqwest would otherwise
+    // follow a redirect from this third party to any host, plain http included, and
+    // seed the cache from it (D-245).
     let client = reqwest::Client::builder()
         .user_agent(USER_AGENT)
         .timeout(std::time::Duration::from_secs(90))
+        .redirect(reqwest::redirect::Policy::none())
+        .https_only(true)
         .build()
         .map_err(|e| format!("http client: {e}"))?;
     let resp = client
@@ -114,7 +119,9 @@ fn keywords(s: &DzsaServer) -> String {
 }
 
 fn convert(s: DzsaServer, now: i64) -> Option<DzsaRow> {
-    if s.endpoint.ip.is_empty() || s.endpoint.port == 0 {
+    // Every consumer parses the address again and refuses a bad one, so a non-address
+    // here only ever made a dead row; it is dropped at the door instead (D-245).
+    if s.endpoint.ip.parse::<std::net::Ipv4Addr>().is_err() || s.endpoint.port == 0 {
         return None;
     }
     let ip = s.endpoint.ip.clone();

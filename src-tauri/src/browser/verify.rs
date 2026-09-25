@@ -150,11 +150,16 @@ pub fn judge(
                 .count();
             if fabricated >= 2 {
                 let v = (p.players.len() - fabricated) as i32;
+                let info_txt = if reported < 0 {
+                    "no INFO".to_string()
+                } else {
+                    format!("INFO {reported}")
+                };
                 return (
                     Verdict::Inflated,
                     Some(v),
                     format!(
-                        "INFO {reported}, {v} real sessions: {fabricated} listed entries are zero-length, which no connected player is"
+                        "{info_txt}, {v} real sessions: {fabricated} listed entries are zero-length, which no connected player is"
                     ),
                 );
             }
@@ -188,6 +193,16 @@ pub fn judge(
                         ),
                     );
                 }
+            }
+            // No count to compare: the cached one was stale and its re-read failed
+            // (`verify_one`, D-245). R5, R11 and R12 have had their say above; the
+            // head-count stands on its own.
+            if reported < 0 {
+                return (
+                    Verdict::Verified,
+                    Some(v),
+                    format!("PLAYER {v}; INFO did not answer"),
+                );
             }
             let diff = reported - v;
             // Four ghosts of tolerance on every path, and deliberately so. It looked
@@ -288,7 +303,7 @@ static LAST_SEEN: LazyLock<Mutex<HashMap<String, Seen>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Two checks closer than this cannot tell a re-drawn list from a stable one.
-const CONTINUITY_MIN_GAP_SECS: f32 = 60.0;
+pub const CONTINUITY_MIN_GAP_SECS: f32 = 60.0;
 /// How far the real advance may sit from the wall-clock gap. A snapshot-serving host
 /// hands out a PLAYER list refreshed every 100 s, so its durations advance by the
 /// snapshot's age, not the gap — 400.0 s over a 341.9 s gap was measured live (D-233).
@@ -304,7 +319,7 @@ const CONTINUITY_STRIKES: u8 = 2;
 /// refreshes 90 minutes apart could strike it twice. At 30 minutes ~60 % remain (D-236).
 const CONTINUITY_MAX_GAP_SECS: f32 = 1800.0;
 /// The reason given while a standing R11 verdict waits for a check it can compare.
-const CONTINUITY_STANDING: &str =
+pub const CONTINUITY_STANDING: &str =
     "sessions did not carry over at earlier checks; none since was close enough to compare";
 
 /// How many of `prev` reappear in `now` advanced by exactly `shift`, each entry used once.
@@ -458,11 +473,20 @@ pub async fn verify_one(client: &Client, t: Target, with_info: bool) -> Verifica
         None
     };
     let players = client.players(t.addr).await;
+    // A stale count that could not be refreshed is no count: judged against it, a
+    // fresh PLAYER read as "INFO 60 vs PLAYER 4" after ordinary churn and hid the
+    // server as inflated until the next Refresh — the D-237 (1) symptom on the lossy
+    // path. `-1` tells `judge` to skip that comparison (D-245).
+    let fallback_reported = if stale && info.is_none() {
+        -1
+    } else {
+        t.reported
+    };
     let (verdict, verified, reason) = judge_with_continuity(
         &t.id,
         info.as_ref().map(|r| &r.value),
         players.as_ref().map(|r| &r.value),
-        t.reported,
+        fallback_reported,
         t.max_players,
         t.was_synthetic,
     );
@@ -492,6 +516,26 @@ mod tests {
         info,
         packet::{classify, Datagram},
     };
+
+    #[test]
+    fn a_stale_count_that_did_not_refresh_is_not_compared() {
+        // Four sessions on a server whose cached INFO said 60 minutes ago and whose
+        // re-read failed: judged against the stale 60 it read as inflated (D-237's
+        // symptom on the lossy path); the sentinel stands the head-count on its own.
+        let p = players(&[100.0, 200.0, 300.0, 400.0], "");
+        let (old, _, _) = judge(None, Ok(&p), 60, 60);
+        assert_eq!(
+            old,
+            Verdict::Inflated,
+            "the stale number would have hidden it"
+        );
+        let (v, n, why) = judge(None, Ok(&p), -1, 60);
+        assert_eq!((v, n), (Verdict::Verified, Some(4)));
+        assert!(why.contains("INFO did not answer"), "{why}");
+        // With no PLAYER either the caller still gets Offline and retries with INFO.
+        let err = crate::a2s::A2sError::Timeout;
+        assert_eq!(judge(None, Err(&err), -1, 60).0, Verdict::Offline);
+    }
 
     #[test]
     fn continuity_real_sessions_carry_over() {

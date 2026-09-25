@@ -97,6 +97,14 @@ The temporal signals — flat counts, always at max, round numbers only, a queue
 | T8 `CreateUnauthenticatedUserConnection` sessions | Steamworks header; whether `hasplayers` counts them is undocumented | open question Q26 |
 | T9 caching DDoS proxies (up to 10 s stale) | gnif SteamQueryProxy, 0x280 | not a fake; R11's shift search (±120 s window, 3 s once the shift is found) absorbs it |
 
+### The farms outgrew the list (D-245)
+
+On 2026-09-25 Steam's master list carried 36 100 DayZ entries, 30 011 of them inflated at listing (R0 or R8), against 24 237 the day before. The `noplayers` partitions for enoch, namalsk and chernarusplus held 14 751, 14 316 and 11 223 entries that hour — 96–98 % fake — so each exceeded Steam's 10 000-row cap, and the farms rotate ports: of the ids one and two hours older than the latest refresh, 10 048 and 11 695 were not in it. The cache had grown from 24 116 to 71 397 rows in a day; 52 567 of them were fakes and 64 398 had never been counted by a verification pass.
+
+What changed, none of it a new signal: a row never counted leaves the cache after three days unseen, and a fake-at-listing row leaves as soon as a listing of the empty partitions omits it (favourites stay; the store drops the same ids). A map partition that hits the cap is followed by the same request with Steam's `collapse_addr_hash` filter (S-83), one server per address, which no farm can fill; the catch-all partition asks that way from the start.
+
+Measured and rejected as a master-server exclusion: the farms' `shard` tags. `shardABC123` and `shard123ABC` appear on 41 511 of the 41 514 fake rows of that hour — and on 1 805 and 1 941 verified servers, so a `nor` on them would have hidden thousands of honest servers. Rows per address is not usable at the master either: 22 verified servers sit on addresses carrying 20 or more entries, 0 on addresses carrying 50 or more, but the filter grammar has no such operator.
+
 ## 4. Cost
 
 PLAYER is one datagram each way. Measured (D-050): the automatic pass after a refresh verifies every populated server (2 858) in 33 s at the client's 400 datagrams/s, sending PLAYER only and retrying non-answers once with INFO at a 2.5 s timeout; rows on screen are re-checked with INFO + PLAYER once their last verification is older than 120 s (0.1–2 s for a screenful). Empty servers are not queried. Sending INFO + PLAYER for everything in one burst cost 60 s and produced hundreds of false "unverifiable"/"offline" results (D-047), so burst size matters more than raw rate.

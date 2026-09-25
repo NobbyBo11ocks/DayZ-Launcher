@@ -34,6 +34,9 @@ pub fn uptime_ms() -> u128 {
 
 /// Rows not seen for this long are dropped from the cache after a completed refresh.
 const CACHE_MAX_AGE_SECS: i64 = 30 * 24 * 3600;
+/// A row no verification pass ever counted holds nothing worth a month; it is back
+/// as a fresh row the next time Steam lists it (D-245).
+const UNVERIFIED_MAX_AGE_SECS: i64 = 3 * 24 * 3600;
 /// Ids per `servers:pruned` event: ~21 bytes each as JSON, so ~170 KB at most.
 const PRUNED_EVENT_IDS: usize = 8_000;
 /// Population samples older than this are dropped (the sparkline shows 72 h).
@@ -364,7 +367,19 @@ pub fn run() {
                                                 Err(e) => log_warn!("cache", "unvouch failed: {e}"),
                                             }
                                         }
-                                        match c.prune(CACHE_MAX_AGE_SECS) {
+                                        // Fakes the latest listing of the empty
+                                        // partitions did not include go now; a
+                                        // populated-only refresh says nothing about
+                                        // them (D-245).
+                                        let listed_empty = d
+                                            .partitions
+                                            .iter()
+                                            .any(|p| p.filters.contains_key("noplayers"));
+                                        match c.prune(
+                                            CACHE_MAX_AGE_SECS,
+                                            UNVERIFIED_MAX_AGE_SECS,
+                                            listed_empty.then_some(refresh_started),
+                                        ) {
                                             Ok(ids) => pruned = ids,
                                             Err(e) => log_warn!("cache", "prune failed: {e}"),
                                         }

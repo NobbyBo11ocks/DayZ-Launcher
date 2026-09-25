@@ -79,8 +79,16 @@ pub fn default_partitions() -> Vec<Filters> {
 }
 
 /// Manual "full" refresh: populated servers, then empty servers per major map,
-/// then a generic `noplayers` catch-all that is allowed to hit the cap. Duplicates
-/// merge by id. Expect several minutes; fakes are flagged by rule R0 as they arrive.
+/// then a `noplayers` catch-all for maps outside that list. Duplicates merge by id.
+/// Expect several minutes; fakes are flagged by rule R0 as they arrive.
+///
+/// The catch-all asks for one server per address (`collapse_addr_hash`, S-83): it
+/// used to hit the 10 000 cap re-listing the ten maps' farm rows — 0 of its rows
+/// were on another map in the 2026-09-25 cache — at the cost of 10 000 pings. A map
+/// partition that hits the cap gets the same collapsed request queued behind it
+/// (see [`COLLAPSE_KEY`]), so every address keeps at least one listed server on that
+/// map when the farms overflow it: enoch, namalsk and chernarusplus each carried
+/// 10 000–14 800 empty entries that day, 96–98 % fake (D-245).
 pub fn full_partitions() -> Vec<Filters> {
     let flag = |k: &str| (k.to_string(), "1".to_string());
     let mut parts = default_partitions();
@@ -90,8 +98,22 @@ pub fn full_partitions() -> Vec<Filters> {
             ("map".to_string(), map.to_string()),
         ]));
     }
-    parts.push(HashMap::from([flag("noplayers")]));
+    parts.push(HashMap::from([flag("noplayers"), flag(COLLAPSE_KEY)]));
     parts
+}
+
+/// Steam's "one server per unique address" filter (`isteammatchmaking.h`, S-83).
+pub const COLLAPSE_KEY: &str = "collapse_addr_hash";
+
+/// The follow-up request for a map partition Steam truncated: the same filters plus
+/// one server per address, which no farm can fill (D-245).
+fn collapsed(filters: &Filters) -> Option<Filters> {
+    if !filters.contains_key("map") || filters.contains_key(COLLAPSE_KEY) {
+        return None;
+    }
+    let mut f = filters.clone();
+    f.insert(COLLAPSE_KEY.to_string(), "1".to_string());
+    Some(f)
 }
 
 /// What Steam's master server says about players for rows of this partition.
@@ -772,7 +794,20 @@ fn item_progress(ugc: &UGC, id: u64, failed: Option<&String>) -> ItemProgress {
     } else if st.contains(ItemState::NEEDS_UPDATE) {
         "needs_update"
     } else if st.contains(ItemState::INSTALLED) {
-        "installed"
+        // Steam's record, not the disk: an item whose folder was deleted behind
+        // Steam's back stays INSTALLED in its books, the join plan (which looks at
+        // the disk) sends it here, and "installed" finished the sync at once, so the
+        // launch failed with "sync mods first" and the next Join did it again. It
+        // stays pending, is re-kicked like any other, and if Steam never re-fetches
+        // it the stall reports the remedy (S-79, D-245).
+        if info
+            .as_ref()
+            .is_some_and(|i| std::path::Path::new(&i.folder).is_dir())
+        {
+            "installed"
+        } else {
+            "pending"
+        }
     } else if st.contains(ItemState::SUBSCRIBED) {
         "subscribed"
     } else {
@@ -1509,6 +1544,19 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                                 PARTITION_TIMEOUT.as_secs()
                             );
                         }
+                        let capped = total >= STEAM_LIST_CAP;
+                        if capped {
+                            crate::log_info!(
+                                "steam",
+                                "partition {:?} hit Steam's {STEAM_LIST_CAP}-row cap",
+                                p.filters
+                            );
+                            // One server per address for the same map, next (D-245).
+                            if let Some(f) = collapsed(&p.filters) {
+                                r.pending.push(f);
+                                r.next_allowed = Instant::now() + PARTITION_GAP;
+                            }
+                        }
                         r.results.push(PartitionResult {
                             filters: p.filters,
                             total,
@@ -1520,7 +1568,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                                 Some(response) => format!("{response:?}"),
                                 None => "NoAnswer".into(),
                             },
-                            capped: total >= STEAM_LIST_CAP,
+                            capped,
                         });
                     }
                 }
@@ -1616,6 +1664,7 @@ fn friend_state_name(state: FriendState) -> &'static str {
 fn parse_connect(text: &str) -> Option<(std::net::Ipv4Addr, u16)> {
     let mut ip: Option<std::net::Ipv4Addr> = None;
     let mut port: Option<u16> = None;
+    let mut prev_was_port = false;
     for tok in text.split(|c: char| c.is_whitespace() || c == '=' || c == ',' || c == ';') {
         let t = tok.trim_matches(|c| c == '+' || c == '-' || c == '"' || c == '\'');
         if ip.is_none() {
@@ -1629,13 +1678,16 @@ fn parse_connect(text: &str) -> Option<(std::net::Ipv4Addr, u16)> {
             if let Ok(a) = t.parse() {
                 ip = Some(a);
             }
-        } else if port.is_none() {
+        } else if port.is_none() && prev_was_port {
+            // Only the number that follows a `port` key: any other bare number in the
+            // string — `-cpuCount=8` — used to be taken as the port (D-245).
             if let Ok(p) = t.parse::<u16>() {
                 if p != 0 {
                     port = Some(p);
                 }
             }
         }
+        prev_was_port = t.eq_ignore_ascii_case("port");
     }
     ip.filter(|a| !a.is_unspecified())
         .map(|a| (a, port.unwrap_or(2302)))

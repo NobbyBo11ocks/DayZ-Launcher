@@ -108,7 +108,12 @@
     }
     joining = f.steamId;
     error = null;
-    const row = await servers.directConnect(`${f.server.ip}:${f.server.gamePort}`);
+    // Steam hands over the query port with the game address; a direct connect on the
+    // game port alone has to guess it, and the guess misses 14 % of populated servers
+    // (733 of 5 249 in the 2026-09-24 cache, D-245). The typed port is tried as the
+    // query port first, so the address form needs no host change.
+    const port = f.server.queryPort > 0 ? f.server.queryPort : f.server.gamePort;
+    const row = await servers.directConnect(`${f.server.ip}:${port}`);
     joining = null;
     if (row) servers.joiningId = row.id;
     // The store records the reason, but this page shows its own error line, so a

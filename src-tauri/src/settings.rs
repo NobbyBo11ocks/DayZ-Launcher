@@ -296,6 +296,10 @@ impl SettingsStore {
             Ok(bytes) => match parse_settings(&bytes) {
                 Ok(mut s) => {
                     s.ui.normalise();
+                    // Adopted means applied: start-up applied the defaults the failed
+                    // read left, and nothing else re-read the flags (D-245).
+                    crate::log::set_enabled(s.logging);
+                    crate::log::set_muted(s.log_muted.clone());
                     *cur = s;
                     true
                 }

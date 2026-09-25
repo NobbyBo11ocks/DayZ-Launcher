@@ -130,17 +130,21 @@ pub fn settings_get(state: State<'_, AppState>) -> Settings {
 /// and a rename (D-239).
 #[tauri::command(async)]
 pub fn settings_set(state: State<'_, AppState>, settings: Settings) -> AppResult<()> {
-    let idle = settings.steam_idle_timeout();
     // Applied before the write, so turning logging off cannot be the last thing the
     // log records (D-169).
     crate::log::set_enabled(settings.logging);
     crate::log::set_muted(settings.log_muted.clone());
-    state
-        .settings
-        .set_launch(settings)
-        .map_err(|e| AppError::Internal(format!("settings: {e}")))?;
-    state.steam.set_idle_timeout(idle);
-    Ok(())
+    let written = state.settings.set_launch(settings);
+    // A refused save (the file has just been read again, D-239) means the store now
+    // holds the file's settings, not the caller's: the flags applied above and the
+    // idle timeout follow the store either way (D-245).
+    let current = state.settings.get();
+    if written.is_err() {
+        crate::log::set_enabled(current.logging);
+        crate::log::set_muted(current.log_muted.clone());
+    }
+    state.steam.set_idle_timeout(current.steam_idle_timeout());
+    written.map_err(|e| AppError::Internal(format!("settings: {e}")))
 }
 
 /// Merges a partial UI-preferences object (theme, accent, filters, onboarded,
@@ -405,19 +409,29 @@ pub async fn run_verification(
     // on-demand checks of visible rows also refresh ping and clock. A target whose INFO
     // is over a minute old is re-read either way (`verify_one`, D-236).
     let with_info = !announce;
-    // A standing R11 verdict survives a restart (D-236).
+    // A standing R11 verdict survives a restart (D-236). Only the automatic pass needs
+    // the lookup: its targets come from Steam's batch rows, which carry no verdict; an
+    // on-demand check builds its targets from cached rows that already carry it, and
+    // ran this full scan — 9.9 ms at 71 000 rows — on every visible-row change. A
+    // failed lookup is logged: silently it re-published "verified" over every
+    // standing verdict (D-245).
     let mut targets = targets;
-    if !targets.is_empty() {
+    if announce && !targets.is_empty() {
         let c = Arc::clone(&cache);
         let synthetic = tauri::async_runtime::spawn_blocking(move || {
-            c.lock().ok().and_then(|c| c.synthetic_ids().ok())
+            c.lock()
+                .map_err(|_| "cache lock poisoned".to_string())
+                .and_then(|c| c.synthetic_ids().map_err(|e| e.to_string()))
         })
         .await
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-        for t in &mut targets {
-            t.was_synthetic |= synthetic.contains(&t.id);
+        .unwrap_or_else(|e| Err(e.to_string()));
+        match synthetic {
+            Ok(synthetic) => {
+                for t in &mut targets {
+                    t.was_synthetic |= synthetic.contains(&t.id);
+                }
+            }
+            Err(e) => crate::log_warn!("verify", "standing synthetic verdicts not read: {e}"),
         }
     }
     let total = targets.len();
@@ -442,10 +456,18 @@ pub async fn run_verification(
     let mut pending = verify::verify_stream(&client, targets, with_info);
     let mut batch: Vec<Verification> = Vec::with_capacity(VERIFY_FLUSH_ROWS);
     let mut last_flush = Instant::now();
+    // Standing R11 verdicts this pass could not compare (D-236): they get a second
+    // PLAYER read once the minimum gap has passed, below.
+    let mut standing: Vec<Target> = Vec::new();
     while let Some(v) = pending.next().await {
         if v.verdict == Verdict::Offline {
             if let Some(t) = by_id.get(&v.id) {
                 offline.push(t.clone());
+            }
+        }
+        if announce && v.reason == verify::CONTINUITY_STANDING {
+            if let Some(t) = by_id.get(&v.id) {
+                standing.push(t.clone());
             }
         }
         batch.push(v);
@@ -466,6 +488,35 @@ pub async fn run_verification(
             .with_timeout(std::time::Duration::from_millis(2500));
         let results = verify::verify_many(&patient, offline, true).await;
         publish(&app, &cache, &mut latest, results).await;
+    }
+    // A standing verdict is only ever overturned by a comparison inside R11's window,
+    // and the automatic pass runs once a session — so a server judged synthetic
+    // once, hidden by the default filter and never clicked, was re-published
+    // "synthetic" at every start for good. The pass finishes now; a detached check
+    // reads those servers again a minute past the minimum gap, when the sample this
+    // pass stored can be compared (D-245).
+    if !standing.is_empty() {
+        let n = standing.len();
+        let app = app.clone();
+        let cache = Arc::clone(&cache);
+        let client = client.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs_f32(
+                verify::CONTINUITY_MIN_GAP_SECS + 60.0,
+            ))
+            .await;
+            let results = verify::verify_many(&client, standing, false).await;
+            let healed = results
+                .iter()
+                .filter(|v| v.verdict != Verdict::Synthetic)
+                .count();
+            let mut latest = HashMap::with_capacity(n);
+            publish(&app, &cache, &mut latest, results).await;
+            crate::log_info!(
+                "verify",
+                "{n} standing synthetic verdict(s) compared again: {healed} cleared"
+            );
+        });
     }
     let mut summary = VerifySummary {
         total,

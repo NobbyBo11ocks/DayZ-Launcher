@@ -545,7 +545,9 @@ class ServersStore {
           break;
         case "players":
           k1[i] = trustedPlayers(r);
-          k2[i] = -pingBucket(r);
+          // An unmeasured ping (D-242) is the worst tie-breaker, not the best: at 0 it
+          // sorted a DZSA row above a measured 40 ms one among equal counts (D-245).
+          k2[i] = pingUnmeasured(r) ? -1e6 : -pingBucket(r);
           break;
         case "ping":
           k1[i] = pingUnmeasured(r) ? -1 : pingBucket(r);

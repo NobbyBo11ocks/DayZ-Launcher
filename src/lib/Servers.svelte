@@ -61,6 +61,13 @@
   }
 
   const busy = $derived(!servers.steam?.initialized || servers.steam?.refreshing === true);
+  // Only a selection the grid lists: one made on Favourites or LAN that the filters
+  // here hide, or flipped untrusted by a verification, left the grid highlighting
+  // nothing while Enter and F still acted on it (D-240 fixed this on the other two
+  // pages, D-245 here). The pane keeps following the selection itself.
+  const shownSelectedId = $derived(
+    servers.selectedId && servers.list.some((r) => r.id === servers.selectedId) ? servers.selectedId : null,
+  );
 
   /**
    * What an empty grid should say. The three cases are genuinely different: a filter
@@ -175,7 +182,7 @@
   <div class="main" class:with-pane={servers.selected != null}>
     <ServerTable
       rows={servers.list}
-      selectedId={servers.selectedId}
+      selectedId={shownSelectedId}
       sort={servers.sort}
       localVersion={servers.localVersion}
       favourites={servers.favourites}

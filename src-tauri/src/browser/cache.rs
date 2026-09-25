@@ -107,6 +107,11 @@ static GET_SQL: std::sync::LazyLock<String> =
 /// The upsert, in two flavours that differ in four columns: a Steam listing writes what
 /// it measured, a DZSA listing keeps what Steam measured when it has only a placeholder
 /// (D-242). `None` in a verification column never erases a stored one, in either.
+///
+/// `players` is Steam's number while Steam's listing says the server is empty: rule
+/// R0 reads that pair, and the clear D-237 gave it — "the listing said 0 and we counted
+/// more" — reads the stored count. A DZSA row or a probe writing its own count over it
+/// left an honest server hidden with a green verified count (D-245).
 fn upsert_sql(keep_measured: bool) -> String {
     let measured = if keep_measured {
         "ping_ms=CASE WHEN excluded.ping_ms = 0 THEN servers.ping_ms ELSE excluded.ping_ms END,
@@ -122,7 +127,10 @@ fn upsert_sql(keep_measured: bool) -> String {
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
          ON CONFLICT(id) DO UPDATE SET
            ip=excluded.ip, game_port=excluded.game_port, query_port=excluded.query_port, name=excluded.name,
-           map=excluded.map, players=excluded.players, max_players=excluded.max_players,
+           map=excluded.map,
+           players=CASE WHEN excluded.steam_empty IS NULL AND servers.steam_empty = 1
+                        THEN servers.players ELSE excluded.players END,
+           max_players=excluded.max_players,
            password=excluded.password, secure=excluded.secure, server_version=excluded.server_version,
            keywords=excluded.keywords, last_seen=excluded.last_seen, {measured},
            verified_players=COALESCE(excluded.verified_players, servers.verified_players),
@@ -590,12 +598,14 @@ impl Cache {
             if !verified.map_or(steam_empty == Some(false) && players > 0, |v| v > 0) {
                 continue;
             }
-            if !force && scanned_at.is_some_and(|at| now - at <= max_age_secs) {
+            // A stamp in the future — the clock was set back — reads as stale, as
+            // `last_refresh` does since D-236 (D-245).
+            if !force && scanned_at.is_some_and(|at| at <= now && now - at <= max_age_secs) {
                 continue;
             }
             if !force
                 && failed_at.is_some_and(|at| {
-                    now - at < scan_retry_after(failures.unwrap_or(1), max_age_secs)
+                    at <= now && now - at < scan_retry_after(failures.unwrap_or(1), max_age_secs)
                 })
             {
                 held_back += 1;
@@ -764,8 +774,23 @@ impl Cache {
     /// Drops rows not confirmed for `max_age_secs` (and their mod lists); returns the
     /// ids removed, so the front end can drop the same rows from its own map (Q24,
     /// D-235) instead of holding them until the next start.
-    pub fn prune(&self, max_age_secs: i64) -> rusqlite::Result<Vec<String>> {
-        let cutoff = ServerRow::now_unix() - max_age_secs;
+    ///
+    /// Two shorter lanes (D-245): a row never counted by a verification pass keeps
+    /// nothing worth `max_age_secs` — no head-count, no samples — so it goes after
+    /// `unverified_max_age_secs`; and a row fake at listing time (rule R0 or R8) that
+    /// the latest listing of the empty partitions did not include goes at once, when
+    /// `stale_fakes_before` is that listing's start. The farms rotate ports, so each
+    /// full refresh brought thousands of new ids and the cache tripled in a day
+    /// (24 116 → 71 397 rows on 2026-09-25, 52 567 of them fakes).
+    pub fn prune(
+        &self,
+        max_age_secs: i64,
+        unverified_max_age_secs: i64,
+        stale_fakes_before: Option<i64>,
+    ) -> rusqlite::Result<Vec<String>> {
+        let now = ServerRow::now_unix();
+        let cutoff = now - max_age_secs;
+        let unverified_cutoff = now - unverified_max_age_secs;
         // Never prune a favourite (D-159): dropping the row emptied the Favourites
         // view for any server that was offline, or simply absent from the populated
         // partition, for 30 days.
@@ -773,10 +798,17 @@ impl Cache {
             .conn
             .prepare(
                 "DELETE FROM servers
-                 WHERE last_seen < ?1 AND id NOT IN (SELECT id FROM favourites)
+                 WHERE id NOT IN (SELECT id FROM favourites)
+                   AND (last_seen < ?1
+                        OR (verified_at IS NULL AND last_seen < ?2)
+                        OR (?3 IS NOT NULL AND last_seen < ?3
+                            AND ((steam_empty = 1 AND players > 0) OR players > 127)))
                  RETURNING id",
             )?
-            .query_map(params![cutoff], |r| r.get::<_, String>(0))?
+            .query_map(
+                params![cutoff, unverified_cutoff, stale_fakes_before],
+                |r| r.get::<_, String>(0),
+            )?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let n = ids.len();
         if n > 0 {
@@ -1004,7 +1036,10 @@ mod tests {
         updated.verified_players = Some(3);
         updated.steam_empty = Some(true);
         c.upsert(&[updated]).unwrap();
-        let again = row(27017, 9); // None must not erase the stored verification columns
+        // None must not erase the stored verification columns; and a row without
+        // Steam's listing flag does not write its count over a Steam-says-empty row —
+        // rule R0 and D-237's clear both read Steam's number there (D-245).
+        let again = row(27017, 9);
         c.upsert(&[again]).unwrap();
         let w = c
             .get(&ServerRow::id_for("51.81.8.81", 27017))
@@ -1012,15 +1047,25 @@ mod tests {
             .unwrap();
         assert_eq!(
             (w.players, w.verified_players, w.steam_empty),
-            (9, Some(3), Some(true))
+            (7, Some(3), Some(true))
         );
+        assert!(w.inflated(), "Steam says empty, INFO says 7");
+        // Steam's own listing writes its count.
+        let mut listed = row(27017, 9);
+        listed.steam_empty = Some(true);
+        c.upsert(&[listed]).unwrap();
+        let w = c
+            .get(&ServerRow::id_for("51.81.8.81", 27017))
+            .unwrap()
+            .unwrap();
+        assert_eq!((w.players, w.steam_empty), (9, Some(true)));
         assert!(w.inflated(), "Steam says empty, INFO says 9");
 
         c.set_meta("last_refresh", "123").unwrap();
         assert_eq!(c.get_meta("last_refresh").unwrap().as_deref(), Some("123"));
         assert_eq!(c.get_meta("missing").unwrap(), None);
         assert_eq!(
-            c.prune(-1).unwrap().len(),
+            c.prune(-1, -1, None).unwrap().len(),
             2,
             "everything is older than 'now + 1 s'"
         );
@@ -1093,12 +1138,53 @@ mod tests {
         c.favourite_set(&keep.id, true).unwrap();
 
         assert_eq!(
-            c.prune(-1).unwrap(),
+            c.prune(-1, -1, None).unwrap(),
             vec![drop_me.id.clone()],
             "only the unfavourited row goes, and its id is reported"
         );
         assert_eq!(c.row_counts().unwrap().servers, 1);
         assert_eq!(c.favourites().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn prune_lanes_for_unverified_rows_and_stale_fakes() {
+        let mut c = Cache::open_in_memory().unwrap();
+        let now = ServerRow::now_unix();
+        // Counted once: keeps the long lane even though it was last seen a week ago.
+        let mut counted = row(27017, 12);
+        counted.verified_at = Some(now - 7 * 86_400);
+        counted.last_seen = now - 7 * 86_400;
+        // Never counted, seen a week ago: the short lane takes it.
+        let mut idle = row(27019, 0);
+        idle.last_seen = now - 7 * 86_400;
+        // Fake at listing (Steam says empty, INFO claims 60), listed by an older
+        // refresh than the latest: goes at once. The same row seen by the latest
+        // listing stays.
+        let mut old_fake = row(27021, 60);
+        old_fake.steam_empty = Some(true);
+        old_fake.last_seen = now - 3_600;
+        let mut fresh_fake = row(27023, 60);
+        fresh_fake.steam_empty = Some(true);
+        fresh_fake.last_seen = now;
+        // An honest empty server listed an hour ago is not a fake and stays.
+        let mut honest_empty = row(27025, 0);
+        honest_empty.steam_empty = Some(true);
+        honest_empty.last_seen = now - 3_600;
+        c.upsert(&[
+            counted,
+            idle.clone(),
+            old_fake.clone(),
+            fresh_fake,
+            honest_empty,
+        ])
+        .unwrap();
+
+        let mut gone = c.prune(30 * 86_400, 3 * 86_400, Some(now - 600)).unwrap();
+        gone.sort();
+        let mut want = vec![idle.id, old_fake.id];
+        want.sort();
+        assert_eq!(gone, want);
+        assert_eq!(c.row_counts().unwrap().servers, 3);
     }
 
     #[test]

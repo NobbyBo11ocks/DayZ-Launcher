@@ -201,8 +201,9 @@ No accounts, no telemetry, no third-party analytics. In full:
 | **Steam's news feed and image CDN** | The home page | Only with the News page on |
 | **YouTube** | Preview images, and `youtube-nocookie.com` while a video plays | Only with the News page on |
 | **DZSA's public list** | A fallback server list | Only when Steam is unavailable and you ask |
+| **Microsoft** | The WebView2 runtime, if the installer finds none | Installing, once |
 
-Your cache, favourites, history and settings stay in your own app-data folder. The Logs page shows exactly what the launcher has been doing, and you can copy it, mute it by area, or switch it off.
+Your cache, favourites, history and settings stay in your own app-data folder. The Logs page shows exactly what the launcher has been doing, and you can copy it, mute it by area, or switch it off. One thing to know before pasting a report somewhere public: the join dialog's command line names your Steam profile and your library paths (the password is masked).
 
 ---
 

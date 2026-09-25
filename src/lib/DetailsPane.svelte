@@ -11,7 +11,7 @@
   import Sparkline from "./Sparkline.svelte";
   import { external } from "./external";
   import { mapLabel } from "./maps";
-  import { servers } from "./state/servers.svelte";
+  import { servers, pingUnmeasured } from "./state/servers.svelte";
   import { clock, countryName, type Diagnostics, isInflated, type PopulationSample, queueOf, type ServerDetails, type ServerRow, trustedPlayers } from "./types";
 
   let { row, localVersion }: { row: ServerRow | null; localVersion: string | null } = $props();
@@ -256,7 +256,7 @@
         {#if row.verifiedPlayers != null && row.players !== row.verifiedPlayers} <span class="muted">· server claims {row.players}</span>{/if}
       </dd>
       <dt>Ping</dt>
-      <dd>{details?.infoRttMs ?? row.pingMs} ms</dd>
+      <dd>{details?.infoRttMs != null ? `${details.infoRttMs} ms` : pingUnmeasured(row) ? "—" : `${row.pingMs} ms`}</dd>
       <dt>View</dt>
       <dd>{row.tags.firstPersonOnly ? "First person only" : "First and third person"}</dd>
       <dt>Time</dt>

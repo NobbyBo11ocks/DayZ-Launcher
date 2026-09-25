@@ -179,7 +179,15 @@ fn unescape(s: &str) -> String {
     while let Some(i) = rest.find('&') {
         out.push_str(&rest[..i]);
         let tail = &rest[i..];
-        let decoded = tail.find(';').and_then(|end| {
+        // The longest reference that can decode is `&#x10FFFF;` — eleven characters —
+        // so the scan for its `;` stops there: `find` over the whole tail made a run of
+        // bare `&` quadratic (D-245). Control characters never come from a name.
+        let end = tail
+            .char_indices()
+            .take(12)
+            .find(|&(_, c)| c == ';')
+            .map(|(i, _)| i);
+        let decoded = end.and_then(|end| {
             let entity = &tail[1..end];
             let c = match entity {
                 "lt" => Some('<'),
@@ -195,7 +203,7 @@ fn unescape(s: &str) -> String {
                     .and_then(char::from_u32)
                 }),
             };
-            c.map(|c| (c, end))
+            c.filter(|c| !c.is_control()).map(|c| (c, end))
         });
         match decoded {
             Some((c, end)) => {

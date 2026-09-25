@@ -38,6 +38,8 @@ class NewsStore {
   seen = $state(0);
   /** The seen mark when the current visit to the tab began: newer posts keep their "New" pill. */
   visitSeen = $state(0);
+  /** The file's mark has been adopted; until then nothing counts as read (D-245). */
+  seenLoaded = $state(false);
   /** The landing page shows the latest game updates only unless the user widens it (D-101). */
   view = $state<NewsView>("updates");
   /** Update posts not yet dismissed, newest last (at most three). */
@@ -62,17 +64,22 @@ class NewsStore {
     if (this.#started) return;
     this.#started = true;
     const run = ++this.#run;
+    // The file's mark first, and only then the cached posts: with the order the other
+    // way round, `markSeen` moved the mark to the newest cached post before the file
+    // was read, or `beginVisit`'s fallback froze the boundary at 0 — every post
+    // "New", or none, at every start (D-245).
+    const u = await uiPrefs.ready;
+    // `ready` holds the file as it was at start-up: taken alone, a switch-off and on
+    // later in the session put back a mark the user had since moved, and posts read
+    // meanwhile counted as unread again (D-240).
+    this.seen = Math.max(this.seen, u.newsSeen ?? 0);
+    this.seenLoaded = true;
     try {
       const c = await invoke<NewsCached>("news_cached");
       this.items = c.items;
     } catch {
       /* nothing cached yet */
     }
-    const u = await uiPrefs.ready;
-    // `ready` holds the file as it was at start-up: taken alone, a switch-off and on
-    // later in the session put back a mark the user had since moved, and posts read
-    // meanwhile counted as unread again (D-240).
-    this.seen = Math.max(this.seen, u.newsSeen ?? 0);
     // A switch-off between here and now must not be overtaken by this first fetch.
     if (!this.#started || run !== this.#run) return;
     await this.refresh();
@@ -141,9 +148,11 @@ class NewsStore {
   beginVisit() {
     this.#visiting = true;
     this.visitSeen = this.seen;
-    // At start-up the tab mounts before the seen mark is read from the file.
-    void uiPrefs.ready.then(() => {
-      if (this.#visiting && this.visitSeen === 0) this.visitSeen = this.seen;
+    // At start-up the tab mounts before the seen mark is read from the file. The
+    // file's own mark, not `seen`: whichever promise reaction runs first, `seen`
+    // cannot have moved past it while `markSeen` waits for `seenLoaded` (D-245).
+    void uiPrefs.ready.then((u) => {
+      if (this.#visiting && this.visitSeen === 0) this.visitSeen = Math.max(this.seen, u.newsSeen ?? 0);
     });
   }
 
@@ -153,6 +162,8 @@ class NewsStore {
 
   /** The user looked at the list: nothing currently shown counts as new any more. */
   markSeen() {
+    // Read inside the News effect, so the effect re-runs when the mark arrives.
+    if (!this.seenLoaded) return;
     const newest = this.items.reduce((m, n) => (n.official && n.date > m ? n.date : m), 0);
     if (newest > this.seen) {
       this.seen = newest;

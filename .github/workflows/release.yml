@@ -29,9 +29,9 @@ jobs:
     env:
       PUBLISH: ${{ github.event_name == 'push' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0, pinned (D-245)
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0, pinned (D-245)
         with:
           node-version: 24
           cache: npm
@@ -52,15 +52,20 @@ jobs:
       # versions behind unnoticed, and CARGO_PKG_VERSION is what `app_info` shows in
       # Settings, what the first line of every support log says, and what the Steam news
       # User-Agent claims (D-221).
+      # The tag name reaches every script through the environment, never by
+      # interpolation into the script's source: git allows `$`, `(` and `'` in a ref,
+      # which PowerShell would have run with the signing key in scope (D-245).
       - name: Tag must match the configured version
         if: github.event_name == 'push'
         shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
           $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
           $pkg = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $cargoLine = Get-Content src-tauri/Cargo.toml | Where-Object { $_ -like 'version = *' } | Select-Object -First 1
           $cargo = ($cargoLine -split '"')[1]
-          $tag = "${{ github.ref_name }}"
+          $tag = $env:TAG
           if ($tag -ne "v$version") { throw "tag $tag does not match tauri.conf.json version $version" }
           if ($pkg -ne $version) { throw "package.json is $pkg but tauri.conf.json is $version" }
           if ($cargo -ne $version) { throw "src-tauri/Cargo.toml is $cargo but tauri.conf.json is $version" }
@@ -186,16 +191,18 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit '${{ github.ref_name }}' --draft=false
+          TAG: ${{ github.ref_name }}
+        run: gh release edit $env:TAG --draft=false
 
       - name: Rewrite latest.json with the browser download URL
         if: success() && env.PUBLISH == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
         run: |
-          node tools/make_latest.js '${{ github.ref_name }}'
-          gh release upload '${{ github.ref_name }}' 'src-tauri/target/release/bundle/nsis/latest.json' --clobber
+          node tools/make_latest.js $env:TAG
+          gh release upload $env:TAG 'src-tauri/target/release/bundle/nsis/latest.json' --clobber
 
       - name: Verify the published manifest and signature
         if: success() && env.PUBLISH == 'true'
@@ -213,3 +220,17 @@ jobs:
             Start-Sleep -Seconds 20
           }
           if (-not $ok) { throw 'the published manifest did not verify' }
+
+      # A run that failed before publishing leaves a draft carrying an installer that
+      # never passed the smoke test and a manifest that was never rewritten; published
+      # by hand it would skip both gates. The draft goes, the tag stays (D-245).
+      - name: Delete the unpublished draft of a failed run
+        if: failure() && env.PUBLISH == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          $draft = gh release view $env:TAG --json isDraft --jq '.isDraft' 2>$null
+          if ($draft -eq 'true') { gh release delete $env:TAG --yes; "deleted the draft release $env:TAG" }
+          else { "no draft to delete for $env:TAG" }
