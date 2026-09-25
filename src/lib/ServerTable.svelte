@@ -274,7 +274,8 @@
                   e.stopPropagation();
                   onFavourite(r.id);
                 }}
-                ondblclick={(e) => e.stopPropagation()}>{favourites.has(r.id) ? "★" : "☆"}</button
+                ondblclick={(e) => e.stopPropagation()}
+                ><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.7L14.29 9.54L20.56 9.92L15.71 13.91L17.29 19.98L12 16.6L6.71 19.98L8.29 13.91L3.44 9.92L9.71 9.54Z" /></svg></button
               >
               <Flag code={r.country} />
               <span class="flags">
@@ -413,8 +414,13 @@
   .cell { padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .c-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
   /* .55 measured 2.68:1 (dark) / 2.29 (light) on the page; .8 gives 3.9 / 3.3 (D-248). */
-  .star { all: unset; cursor: pointer; flex: none; width: 18px; text-align: center; color: var(--fg-muted); opacity: 0.8; font-size: 13px; }
+  .star { all: unset; cursor: pointer; flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; color: var(--fg-muted); opacity: 0.8; }
   .star:hover, .star.on { opacity: 1; color: var(--accent-ink); }
+  /* Drawn, and a size up (user request, D-254): the ☆ glyph at 13 px came out small and
+     thin in whichever symbol font had it. The rail's Favourites star, outlined until the
+     server is a favourite and filled after. */
+  .star svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; }
+  .star.on svg { fill: currentColor; }
   .flags { display: inline-flex; gap: 4px; flex: none; }
   .flag { font-size: 11px; }
   .pill { font-size: 10px; line-height: 14px; padding: 0 5px; border-radius: 4px; background: var(--bg-row); color: var(--fg-muted); border: 1px solid var(--border); }

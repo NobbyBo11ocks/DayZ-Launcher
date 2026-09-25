@@ -47,7 +47,7 @@ Goal: the fastest way from "open launcher" to "in game", in a dark, quiet, infor
 | Time | in-game clock with sun/moon glyph; tooltip shows `etm`/`entm` acceleration |
 | Version | the server's version as major.minor ("1.29", D-251), amber when its build differs from the local client; the full build (1.29.163709) is in the tooltip and the details pane |
 
-The favourite star lives in the name cell, not a separate Actions column; there is no per-row join button — Enter or a double-click opens the join dialog. The alert bell that sat beside it was removed with the feature (D-182).
+The favourite star lives in the name cell, not a separate Actions column, drawn at 18 px since D-254: outlined, and filled in the accent for a favourite; there is no per-row join button — Enter or a double-click opens the join dialog. The alert bell that sat beside it was removed with the feature (D-182).
 
 Row height 36 px, hover highlight, keyboard navigation (↑/↓, Enter = join, F = favourite, / = focus search).
 
