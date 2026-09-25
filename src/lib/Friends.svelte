@@ -153,13 +153,18 @@
           {#each visible as f (f.steamId)}
             {@const row = serverOf(f)}
             <tr class:dim={f.state === "offline" && !f.inDayz}>
-              <td class="who">
-                {#if avatarFor(f)}
-                  <img class="avatar" src={avatarFor(f)} alt="" width="24" height="24" />
-                {:else}
-                  <span class="avatar placeholder" aria-hidden="true">{f.name.slice(0, 1).toUpperCase()}</span>
-                {/if}
-                <span class="dot {f.inDayz ? 'dayz' : f.state}" aria-hidden="true"></span>{f.name}
+              <!-- The flex row sits inside the cell, not on it: a <td> made a flex box is no
+                   longer a table cell, so it stayed its own height and its bottom border
+                   ended short of the row's on every row a Join button made taller (D-250). -->
+              <td>
+                <span class="who">
+                  {#if avatarFor(f)}
+                    <img class="avatar" src={avatarFor(f)} alt="" width="24" height="24" />
+                  {:else}
+                    <span class="avatar placeholder" aria-hidden="true">{f.name.slice(0, 1).toUpperCase()}</span>
+                  {/if}
+                  <span class="dot {f.inDayz ? 'dayz' : f.state}" aria-hidden="true"></span>{f.name}
+                </span>
               </td>
               <td class={f.inDayz ? "accent" : "muted"}>{f.inDayz ? "In DayZ" : LABEL[f.state]}</td>
               <td>

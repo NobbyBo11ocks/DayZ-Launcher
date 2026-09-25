@@ -9,6 +9,7 @@
   import Logs from "./lib/Logs.svelte";
   import Mods from "./lib/Mods.svelte";
   import News from "./lib/News.svelte";
+  import RailIcon from "./lib/RailIcon.svelte";
   import Recent from "./lib/Recent.svelte";
   import Servers from "./lib/Servers.svelte";
   import Settings from "./lib/Settings.svelte";
@@ -84,16 +85,17 @@
     prefs.apply();
   });
 
+  // Each section draws the icon of the same name (RailIcon, D-250).
   const allSections = [
-    { id: "news", label: "News", glyph: "▤" },
-    { id: "servers", label: "Servers", glyph: "≡" },
-    { id: "lan", label: "LAN", glyph: "⌂" },
-    { id: "favourites", label: "Favourites", glyph: "★" },
-    { id: "friends", label: "Friends", glyph: "☺" },
-    { id: "recent", label: "Recent", glyph: "↺" },
-    { id: "mods", label: "Mods", glyph: "▦" },
-    { id: "settings", label: "Settings", glyph: "⚙" },
-    { id: "logs", label: "Logs", glyph: "✚" },
+    { id: "news", label: "News" },
+    { id: "servers", label: "Servers" },
+    { id: "lan", label: "LAN" },
+    { id: "favourites", label: "Favourites" },
+    { id: "friends", label: "Friends" },
+    { id: "recent", label: "Recent" },
+    { id: "mods", label: "Mods" },
+    { id: "settings", label: "Settings" },
+    { id: "logs", label: "Logs" },
   ] as const;
   type Section = (typeof allSections)[number]["id"];
   /** News can be switched off entirely (D-174); the sidebar then starts at Servers. */
@@ -131,7 +133,7 @@
     <nav class="sections" aria-label="Sections">
       {#each sections as s (s.id)}
         <button class="rail-item" class:active={active === s.id} aria-current={active === s.id ? "page" : undefined} onclick={() => (active = s.id)} title={s.label}>
-          <span class="glyph" aria-hidden="true">{s.glyph}</span>
+          <RailIcon name={s.id} />
           <span class="text">{s.label}</span>
           {#if s.id === "news" && news.unread > 0}<span class="badge" aria-label="{news.unread} new posts">{news.unread > 99 ? "99+" : news.unread}</span>{/if}
           {#if s.id === "mods" && modUpdates.count > 0}<span class="badge" aria-label="{modUpdates.count} mods have an update waiting" title="{modUpdates.count} mod{modUpdates.count === 1 ? "" : "s"} can be updated">{modUpdates.count > 99 ? "99+" : modUpdates.count}</span>{/if}
@@ -168,7 +170,7 @@
         title="Version {updates.version} is ready to install — opens Settings"
         aria-label="Update {updates.version} is available; open Settings to install it"
       >
-        <span class="glyph" aria-hidden="true">↑</span>
+        <RailIcon name="update" />
         <span class="text">Update Available</span>
       </button>
     {/if}

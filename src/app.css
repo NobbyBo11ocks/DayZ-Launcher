@@ -152,23 +152,24 @@ button {
   gap: 2px;
 }
 
+/* Every item wears the accent since D-250 (user request); the section you are on is
+   the one with the surface, the bar and the heavier weight. A fixed 36 px, so the rows
+   keep one rhythm whatever the font does with a label. */
 .rail-item {
   all: unset;
+  box-sizing: border-box;
   cursor: pointer;
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
+  gap: 11px;
+  height: 36px;
+  padding: 0 10px;
   border-radius: var(--radius);
-  color: var(--fg-muted);
+  color: var(--accent-ink);
+  font-weight: 500;
   transition: background-color 120ms, color 120ms;
   white-space: nowrap;
-}
-
-.rail-item .glyph {
-  width: 16px;
-  text-align: center;
-  font-size: 14px;
 }
 
 .rail-item .badge {
@@ -186,13 +187,12 @@ button {
 
 .rail-item:hover {
   background: var(--bg-row);
-  color: var(--fg);
 }
 
 .rail-item.active {
   background: var(--bg-row);
-  color: var(--fg);
   box-shadow: inset 3px 0 0 var(--accent);
+  font-weight: 600;
 }
 
 .rail-item:focus-visible {
@@ -200,16 +200,17 @@ button {
   outline-offset: -2px;
 }
 
-/* The one item that is not a place, so it sits apart at the foot of the rail and
-   wears the accent. D-216 described both and the rule was never written: it stood
-   straight under Logs in the muted grey of every other item. */
+/* The one item that is not a place, so it sits apart at the foot of the rail. D-216
+   gave it the accent, which every item wears now (D-250), so it has an accent tint
+   behind it as well. The rule D-216 described was never written: it stood straight
+   under Logs in the muted grey of every other item. */
 .rail-item.update {
   margin-top: auto;
-  color: var(--accent-ink);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .rail-item.update:hover {
-  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 /* The filters' own error boundary (App.svelte, D-249). */
@@ -302,9 +303,14 @@ h1 {
     grid-template-columns: 52px 1fr;
   }
 
-  /* 8 px sides, so an item keeps its 36 px for the glyph in the 52 px rail. */
+  /* 8 px sides keep a 36 px item in the 52 px rail, and 9 px inside it centre the
+     18 px icon. */
   .shell:not(.filters) .rail {
     padding: 8px;
+  }
+
+  .shell:not(.filters) .rail-item {
+    padding: 0 9px;
   }
 
   .shell:not(.filters) .rail-item .text {
@@ -322,7 +328,12 @@ h1 {
   }
 
 
+  /* On the icon's corner, as there is no room beside it: in line, it hung past the
+     rail's edge over the page. */
   .shell:not(.filters) .rail-item .badge {
+    position: absolute;
+    top: 1px;
+    right: 0;
     margin-left: 0;
     font-size: 10px;
     line-height: 16px;

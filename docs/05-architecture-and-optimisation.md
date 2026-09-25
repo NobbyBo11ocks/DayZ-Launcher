@@ -99,7 +99,7 @@ Apply whenever a file of that type is created or patched; note deviations in [09
 - Resources: `steam_api64.dll` only.
 
 ### Assets
-- Icons are inline SVG in the component that uses them plus Unicode glyphs in the sidebar; the sprite specified at M0 was never built, and with nine views carrying a handful of icons each it would cost more indirection than bytes. The app icon is drawn and rasterised by `tools/make_icon.js` (D-156), not `tauri icon`. Raster assets: the flag sprite only.
+- Icons are inline SVG in the component that uses them, the sidebar's included since D-250 (`RailIcon.svelte`; it used Unicode glyphs before); the sprite specified at M0 was never built, and with nine views carrying a handful of icons each it would cost more indirection than bytes. The app icon is drawn and rasterised by `tools/make_icon.js` (D-156), not `tauri icon`. Raster assets: the flag sprite only.
 
 ## 8. Security and privacy
 - No telemetry and no accounts. Outbound traffic: Steam (Steamworks), UDP A2S to game servers, Steam's news feed and image CDN, GitHub for updates, the DZSA list when the user asks for it, and YouTube for the home page's preview images and its embedded player. **The player is third-party remote code**, sandboxed and created only while a video is open (D-150/D-163); it is the one exception to "no remote code", and the news page can be switched off in Settings, and the installer offers the same choice before the launcher has ever run (D-206).

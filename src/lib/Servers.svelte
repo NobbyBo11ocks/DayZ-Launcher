@@ -132,25 +132,6 @@
     if (d && !d.rejected) return `${fmt.format(d.responded)} servers listed.`;
     return "";
   });
-  const status = $derived.by(() => {
-    const s = servers.steam;
-    const d = servers.done;
-    const v = servers.verifySummary;
-    const parts: string[] = [];
-    void servers.rowsTick;
-    parts.push(`${fmt.format(servers.list.length)} of ${fmt.format(servers.rows.size)} shown`);
-    if (s?.refreshing) parts.push("refreshing from Steam…");
-    else if (servers.dzsaLoading) parts.push("downloading the DZSA list…");
-    else if (d) parts.push(`${fmt.format(d.responded)} from ${d.source === "dzsa" ? "DZSA" : d.source === "lan" ? "the LAN" : "Steam"} in ${(d.elapsedMs / 1000).toFixed(0)} s`);
-    if (servers.verifying && !v) parts.push("verifying player counts…");
-    // A skipped pass is not a result: all zeroes would read as "nothing found" (D-208).
-    else if (v?.skipped) parts.push("verification deferred — a pass is already running");
-    else if (v) parts.push(`${fmt.format(v.verified)} verified · ${fmt.format(v.inflated + v.unverifiable + v.synthetic)} fake · ${v.offline} offline`);
-    if (servers.modScanning) parts.push(`scanning mod lists (${fmt.format(servers.modScan?.total ?? 0)})…`);
-    if (servers.filters.mod && servers.unscannedModded > 0) parts.push(`${fmt.format(servers.unscannedModded)} modded servers not scanned yet`);
-    if (servers.lastRefresh && !s?.refreshing && !d) parts.push(`cached ${new Date(servers.lastRefresh * 1000).toLocaleTimeString()}`);
-    return parts.join(" · ");
-  });
 </script>
 
 <svelte:window onkeydown={onKey} />
@@ -179,51 +160,47 @@
         />
         <kbd aria-hidden="true">/</kbd>
       </label>
-      <div class="actions">
-        <div class="connect">
-          <button class="iconbtn" bind:this={connectBtn} class:on={connectOpen} onclick={toggleConnect} aria-expanded={connectOpen} aria-label="Direct connect" title="Direct connect to an address">
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3" /><circle cx="8" cy="8" r="3" /></svg>
-          </button>
-          {#if connectOpen}
-            <form class="pop" onsubmit={(e) => { e.preventDefault(); void connectDirect(); }}>
-              <span class="poptitle">Direct connect</span>
-              <input type="text" placeholder="ip:port" bind:value={direct} bind:this={connectInput} aria-label="Direct connect address" spellcheck="false" />
-              <button class="btn" type="submit" disabled={connecting || !direct.trim()}>{connecting ? "…" : "Add"}</button>
-            </form>
-          {/if}
-        </div>
-        <!-- One button (D-141): the full partition list starts with the populated
-             servers, so the rows people care about arrive in about 40 s and the empty
-             ones keep filling in behind them. -->
-        <button class="btn" onclick={() => servers.refresh(true, true)} disabled={busy} title="Fetch from Steam: servers with players first (about 40 s), then the empty ones (a few minutes)">
-          {servers.steam?.refreshing ? "Refreshing…" : "Refresh"}
+      <!-- Beside the search, where an address would be typed anyway (user request,
+           D-250); the popover opens to the right, over the list. -->
+      <div class="connect">
+        <button class="iconbtn" bind:this={connectBtn} class:on={connectOpen} onclick={toggleConnect} aria-expanded={connectOpen} aria-label="Direct connect" title="Direct connect to an address">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3" /><circle cx="8" cy="8" r="3" /></svg>
         </button>
+        {#if connectOpen}
+          <form class="pop" onsubmit={(e) => { e.preventDefault(); void connectDirect(); }}>
+            <span class="poptitle">Direct connect</span>
+            <input type="text" placeholder="ip:port" bind:value={direct} bind:this={connectInput} aria-label="Direct connect address" spellcheck="false" />
+            <button class="btn" type="submit" disabled={connecting || !direct.trim()}>{connecting ? "…" : "Add"}</button>
+          </form>
+        {/if}
       </div>
+
+      <!-- The status line under the search is gone (user request, D-250): the counts,
+           the pass progress and the cache time it carried every second are not shown.
+           What needs the user — Steam not running, with the DZSA fallback, and an
+           error — shows here in the header row, and only while it is true. -->
+      <div class="notices">
+        {#if servers.steam && !servers.steam.initialized}
+          <span class="warn" title={servers.steam.error ?? "Steam is not running; the launcher connects as soon as it starts."}>Steam is not running; the launcher connects as soon as it starts.</span>
+          <button class="link" onclick={() => servers.loadDzsa()} disabled={servers.dzsaLoading} title="Download the DZSA Launcher's public server list (about 24 MB) instead">
+            {servers.dzsaLoading ? "Downloading…" : "Load list from DZSA"}
+          </button>
+        {/if}
+        {#if servers.error}<span class="error" title={servers.error}>{servers.error}</span>{/if}
+      </div>
+
+      <!-- One button (D-141): the full partition list starts with the populated
+           servers, so the rows people care about arrive in about 40 s and the empty
+           ones keep filling in behind them. -->
+      <button class="btn" onclick={() => servers.refresh(true, true)} disabled={busy} title="Fetch from Steam: servers with players first (about 40 s), then the empty ones (a few minutes)">
+        {servers.steam?.refreshing ? "Refreshing…" : "Refresh"}
+      </button>
     </div>
 
-    <div class="statusline">
-      <!-- Deliberately not a live region. `polite` defers, it does not coalesce, and
-           this sentence reads `rowsTick`, which bumps every 350 ms - so a refresh had
-           a screen reader reciting it about three times a second for forty seconds
-           with no way to interrupt. The announcement below carries the outcomes
-           instead, and only when they land (D-224). -->
-      <span class="status" title={status}>{status}</span>
-      <span class="sr-only" role="status" aria-live="polite">{announcement}</span>
-      <!-- The scan runs itself after a refresh, but until now there was no way to ask
-           for it: a mod filter with unscanned servers was a dead end (D-160). -->
-      {#if servers.unscannedModded > 0 && !servers.modScanning}
-        <button class="link" onclick={() => void servers.scanMods(false)} title="Read the mod list of every populated modded server that has not been scanned">
-          Scan {fmt.format(servers.unscannedModded)} mod list{servers.unscannedModded === 1 ? "" : "s"}
-        </button>
-      {/if}
-      {#if servers.steam && !servers.steam.initialized}
-        <span class="warn" title={servers.steam.error ?? ""}>Steam is not running; the launcher connects as soon as it starts.</span>
-        <button class="link" onclick={() => servers.loadDzsa()} disabled={servers.dzsaLoading} title="Download the DZSA Launcher's public server list (about 24 MB) instead">
-          {servers.dzsaLoading ? "Downloading…" : "Load list from DZSA"}
-        </button>
-      {/if}
-      {#if servers.error}<span class="error">{servers.error}</span>{/if}
-    </div>
+    <!-- Screen readers still hear the outcomes, and only when they land: the old visible
+         line read `rowsTick`, which bumps every 350 ms, so it was never a live region
+         itself (D-224). -->
+    <span class="sr-only" role="status" aria-live="polite">{announcement}</span>
   </div>
 
   <div class="main" class:with-pane={servers.selected != null}>
@@ -254,9 +231,13 @@
   /* Read by assistive technology, never drawn. */
   .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
   .servers { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-  .top { display: flex; flex-direction: column; gap: 6px; padding: 8px 16px 6px; border-bottom: 1px solid var(--border); background: var(--bg-elev); }
+  .top { padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--bg-elev); }
+  /* One row: search, Direct connect beside it, any notice in the free middle, Refresh
+     at the right. A notice shortens to its tooltip rather than wrap the header. */
   .row { display: flex; align-items: center; gap: 8px; }
-  .actions { display: flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
+  .notices { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 10px; padding-left: 6px; font-size: 12px; }
+  .notices .warn, .notices .error { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .notices .link { flex: none; }
 
   .searchwrap { position: relative; display: inline-flex; align-items: center; flex: 0 1 340px; min-width: 180px; }
   .searchwrap .icon { position: absolute; left: 9px; width: 14px; height: 14px; fill: none; stroke: var(--fg-muted); stroke-width: 1.5; stroke-linecap: round; pointer-events: none; }
@@ -269,14 +250,12 @@
   .iconbtn:hover, .iconbtn.on { color: var(--fg); border-color: var(--accent-ink); }
   .iconbtn:focus-visible { outline: 2px solid var(--accent-ink); }
 
-  .connect { position: relative; }
-  .pop { position: absolute; top: 34px; right: 0; z-index: 20; display: flex; align-items: center; gap: 6px; padding: 8px; border-radius: 10px; background: var(--bg-elev); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); }
+  .connect { position: relative; flex: none; }
+  .pop { position: absolute; top: 34px; left: 0; z-index: 20; display: flex; align-items: center; gap: 6px; padding: 8px; border-radius: 10px; background: var(--bg-elev); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); }
   .poptitle { font-size: 11.5px; color: var(--fg-muted); white-space: nowrap; padding-right: 2px; }
   .pop input { box-sizing: border-box; width: 190px; height: 28px; padding: 0 10px; border-radius: var(--radius); border: 1px solid var(--border-control); background: var(--bg-row); color: var(--fg); font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
   .pop input:focus-visible { outline: 2px solid var(--accent-ink); }
 
-  .statusline { display: flex; align-items: center; gap: 10px; min-height: 16px; font-size: 11px; color: var(--fg-muted); }
-  .status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
   .link { all: unset; cursor: pointer; color: var(--accent-ink); text-decoration: underline; }
   .link:hover { filter: brightness(1.15); }
   .link:disabled { opacity: 0.6; cursor: default; text-decoration: none; }

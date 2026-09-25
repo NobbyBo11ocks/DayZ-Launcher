@@ -180,6 +180,19 @@
           </select>
         </span>
       {/if}
+      <!-- A mod filter only matches servers whose mod list has been read. The scan runs
+           after every refresh; this asks for it now (D-160). It sat on the status line
+           under the search until that went, and it matters only with a mod chosen (D-250). -->
+      {#if f.mod && (servers.modScanning || servers.unscannedModded > 0)}
+        <p class="hint">
+          {#if servers.modScanning}
+            Reading mod lists…
+          {:else}
+            {fmt.format(servers.unscannedModded)} modded server{servers.unscannedModded === 1 ? "" : "s"} not scanned yet.
+            <button class="link" onclick={() => void servers.scanMods(false)} title="Read the mod list of every populated modded server that has not been scanned">Scan now</button>
+          {/if}
+        </p>
+      {/if}
     </div>
   </div>
 </section>
@@ -248,4 +261,9 @@
   .modf { display: flex; flex-direction: column; gap: 5px; }
   .modsearch { box-sizing: border-box; width: 100%; height: 28px; padding: 0 9px; border-radius: var(--radius); border: 1px solid var(--border-control); background: var(--bg-row); color: var(--fg); font-size: 12.5px; }
   .modsearch:focus-visible { outline: 2px solid var(--accent-ink); }
+
+  .hint { margin: 0; font-size: 11.5px; line-height: 1.4; color: var(--fg-muted); }
+  .link { all: unset; cursor: pointer; color: var(--accent-ink); text-decoration: underline; }
+  .link:hover { filter: brightness(1.15); }
+  .link:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
 </style>
