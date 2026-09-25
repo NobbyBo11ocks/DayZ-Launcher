@@ -626,7 +626,6 @@ impl Cache {
         tx.commit()
     }
 
-    /// Drops rows not confirmed for `max_age_secs` (and their mod lists); returns how many were removed.
     /// Withdraws Steam's vouch from every server the populated partition did not
     /// return this time.
     ///
@@ -644,16 +643,24 @@ impl Cache {
         )
     }
 
-    pub fn prune(&self, max_age_secs: i64) -> rusqlite::Result<usize> {
+    /// Drops rows not confirmed for `max_age_secs` (and their mod lists); returns the
+    /// ids removed, so the front end can drop the same rows from its own map (Q24,
+    /// D-235) instead of holding them until the next start.
+    pub fn prune(&self, max_age_secs: i64) -> rusqlite::Result<Vec<String>> {
         let cutoff = ServerRow::now_unix() - max_age_secs;
         // Never prune a favourite (D-159): dropping the row emptied the Favourites
         // view for any server that was offline, or simply absent from the populated
         // partition, for 30 days.
-        let n = self.conn.execute(
-            "DELETE FROM servers
-             WHERE last_seen < ?1 AND id NOT IN (SELECT id FROM favourites)",
-            params![cutoff],
-        )?;
+        let ids = self
+            .conn
+            .prepare(
+                "DELETE FROM servers
+                 WHERE last_seen < ?1 AND id NOT IN (SELECT id FROM favourites)
+                 RETURNING id",
+            )?
+            .query_map(params![cutoff], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let n = ids.len();
         // `prune` is the only DELETE on `servers`, so nothing can be orphaned unless
         // it deleted something — and the sweep measured 23.6 ms over 127 000 mod rows
         // every completed refresh (D-175). The one other way to orphan them is a
@@ -666,7 +673,7 @@ impl Cache {
             // Row loss has been a mystery before (Q22), so every deletion is recorded.
             crate::log_info!("cache", "pruned {n} server(s) unseen since {cutoff}");
         }
-        Ok(n)
+        Ok(ids)
     }
 
     // ----- mod lists (D-080) ---------------------------------------------------
@@ -891,7 +898,7 @@ mod tests {
         assert_eq!(c.get_meta("last_refresh").unwrap().as_deref(), Some("123"));
         assert_eq!(c.get_meta("missing").unwrap(), None);
         assert_eq!(
-            c.prune(-1).unwrap(),
+            c.prune(-1).unwrap().len(),
             2,
             "everything is older than 'now + 1 s'"
         );
@@ -908,7 +915,11 @@ mod tests {
         c.upsert(&[keep.clone(), drop_me.clone()]).unwrap();
         c.favourite_set(&keep.id, true).unwrap();
 
-        assert_eq!(c.prune(-1).unwrap(), 1, "only the unfavourited row goes");
+        assert_eq!(
+            c.prune(-1).unwrap(),
+            vec![drop_me.id.clone()],
+            "only the unfavourited row goes, and its id is reported"
+        );
         assert_eq!(c.row_counts().unwrap().servers, 1);
         assert_eq!(c.favourites().unwrap().len(), 1);
     }

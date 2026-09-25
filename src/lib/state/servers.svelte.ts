@@ -731,6 +731,7 @@ class ServersStore {
         this.maybeAutoRefresh();
         if (this.friendsInDayz == null) void this.pollFriends();
       }),
+      await listen<string[]>("servers:pruned", (ev) => this.dropRows(ev.payload)),
       await listen<Verification[]>("servers:verified", (ev) => this.applyVerifications(ev.payload)),
       await listen<VerifySummary>("servers:verify-done", (ev) => {
         this.verifySummary = ev.payload;
@@ -933,6 +934,37 @@ class ServersStore {
       this.#seenThisRefresh?.add(r.id);
       if (r.steamEmpty === true && !this.hasEmptyServers) this.hasEmptyServers = true;
     }
+    this.rowsChanged();
+  }
+
+  /**
+   * Drops the rows the cache pruned after a completed refresh (30 days unseen, never a
+   * favourite). The map is otherwise only ever added to, so a long-lived session kept
+   * in the WebView every server it had been sent since start-up (Q24, D-235).
+   */
+  dropRows(ids: string[]) {
+    // A batch still in the inbox for one of these ids would put it straight back.
+    this.flushRows();
+    let n = 0;
+    const delta = new Map<number, number>();
+    for (const id of ids) {
+      if (!this.rows.delete(id)) continue;
+      n++;
+      this.#hay.delete(id);
+      this.#pending.delete(id);
+      const mods = this.modsByServer.get(id);
+      if (mods) {
+        for (const m of mods) delta.set(m, (delta.get(m) ?? 0) - 1);
+        this.modsByServer.delete(id);
+      }
+    }
+    if (n === 0) return;
+    for (const [m, d] of delta) {
+      const e = this.modCatalog.get(m);
+      if (e) this.modCatalog.set(m, { name: e.name, servers: Math.max(0, e.servers + d) });
+    }
+    if (this.selectedId && !this.rows.has(this.selectedId)) this.selectedId = null;
+    this.#namesDirty = true;
     this.rowsChanged();
   }
 

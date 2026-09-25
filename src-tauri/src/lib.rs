@@ -346,7 +346,8 @@ pub fn run() {
                                 - (d.elapsed_ms / 1000) as i64
                                 - 10;
                             let c = Arc::clone(&cache);
-                            let _ = tauri::async_runtime::spawn_blocking(move || {
+                            let pruned = tauri::async_runtime::spawn_blocking(move || {
+                                let mut pruned = Vec::new();
                                 if let Ok(c) = c.lock() {
                                     if full_list {
                                         let _ = c.set_meta("last_refresh", &browser::ServerRow::now_unix().to_string());
@@ -360,7 +361,10 @@ pub fn run() {
                                                 Err(e) => log_warn!("cache", "unvouch failed: {e}"),
                                             }
                                         }
-                                        let _ = c.prune(CACHE_MAX_AGE_SECS);
+                                        match c.prune(CACHE_MAX_AGE_SECS) {
+                                            Ok(ids) => pruned = ids,
+                                            Err(e) => log_warn!("cache", "prune failed: {e}"),
+                                        }
                                         let _ = c.population_prune(POPULATION_MAX_AGE_SECS);
                                         // A refresh writes thousands of rows and never
                                         // checkpointed, so the WAL reached 4.5 MB and every
@@ -373,8 +377,16 @@ pub fn run() {
                                         let _ = c.population_prune(POPULATION_MAX_AGE_SECS);
                                     }
                                 }
+                                pruned
                             })
-                            .await;
+                            .await
+                            .unwrap_or_default();
+                            // The UI holds every row it was ever sent; without this a
+                            // long-lived session kept, in the WebView, rows the cache
+                            // had dropped a month ago (Q24, D-235).
+                            if !pruned.is_empty() {
+                                let _ = handle.emit("servers:pruned", &pruned);
+                            }
                             // A rejected `Done` is an answer, not a result: the refresh
                             // it refers to either never reached Steam (D-160) or is still
                             // running (D-197's busy reply). Taking `populated` there stole
