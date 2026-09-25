@@ -286,7 +286,7 @@ npm run tauri build
 
 Output: `src-tauri/target/release/bundle/nsis/` (`DZSA CrayZ Launcher_<version>_x64-setup.exe` plus a `.sig` for the updater).
 
-`src-tauri/nsis/installer.nsi` is a copy of Tauri's stock template carrying **nine deviations in sixteen marked blocks**, plus one new file (`nsis/hooks.nsh`) on Tauri's own extension point. Each deviation is bracketed by `; >>> dzl-change:` and carries the upstream lines it replaces, so `node tools/nsis_template_check.js` puts them all back and compares against the real thing rather than keeping a second copy of what we wrote (D-205):
+`src-tauri/nsis/installer.nsi` is a copy of Tauri's stock template carrying **nine deviations in seventeen marked blocks**, plus one new file (`nsis/hooks.nsh`) on Tauri's own extension point. Each deviation is bracketed by `; >>> dzl-change:` and carries the upstream lines it replaces, so `node tools/nsis_template_check.js` puts them all back and compares against the real thing rather than keeping a second copy of what we wrote (D-205):
 
 1. The per-user default install directory is `%LOCALAPPDATA%\Programs\<product>` rather than `%LOCALAPPDATA%\<product>`, which collided with the official DayZ Launcher's data folder under this app's original name (D-067).
 2. An options page before anything is written, so the news question is answered before the launcher has ever run (D-206), and `/NONEWS` for silent installs.
@@ -296,7 +296,7 @@ Output: `src-tauri/target/release/bundle/nsis/` (`DZSA CrayZ Launcher_<version>_
 6. The install waits for the old binary's lock to clear before overwriting it, because WebView2's children outlive the host (D-214).
 7. `AllowSkipFiles off`: NSIS otherwise skips a locked file, and a silent install exited 0 having changed nothing while writing the new version to Add/Remove Programs (D-205).
 8. The launcher's own look on every page, uninstaller included: its dark surfaces, light text and lime accent, the logo beside the welcome and finish pages, the gas mask in the header, and a splash for an interactive install that silent, passive and update runs never show. Each picture comes in seven sizes, one per common display scale, and the installer loads the one made for the screen it is on (D-258).
-9. After the shortcuts are written, the installer tells Explorer to invalidate its icon cache (`SHChangeNotify`). Explorer keeps the icons it has drawn for a shortcut by the target's path, so an update that changed the icon left the Start menu and desktop shortcuts showing the old one (D-260). A pinned taskbar button is Explorer's own copy: unpin it and pin it again.
+9. Shortcut icons that follow an update. Explorer keeps the icon it drew for a shortcut by the icon's location, and Tauri's shortcuts take theirs from the exe, whose path never changes — so an update that changed the icon left the desktop and Start menu shortcuts and a pinned taskbar button showing the old one (D-260). The installer now writes a copy of the icon named after the version and points every shortcut of ours at it, the pinned button included, then asks Windows to refresh; most of that lives in `hooks.nsh`, and the one marked block gives the Finish page's desktop shortcut the same icon (D-262).
 
 Auto-updates were never affected by any of this — the updater always passes `/UPDATE`.
 

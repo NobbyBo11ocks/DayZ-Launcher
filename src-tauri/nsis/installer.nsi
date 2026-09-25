@@ -1081,7 +1081,9 @@ Section Install
   ; the target's path, so after an in-place update the Start menu and desktop
   ; shortcuts kept the previous icon (D-260). SHCNE_ASSOCCHANGED is the documented
   ; way to tell it that cached icons are stale; SHCNF_IDLIST (0) is the flag the
-  ; documentation requires with it.
+  ; documentation requires with it. On its own it did not clear the old picture on the
+  ; user's machine; the shortcuts now point at a versioned copy of the icon instead
+  ; (hooks.nsh, D-262), and this stays as the general "cached icons are stale" signal.
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 
   !ifmacrodef NSIS_HOOK_POSTINSTALL
@@ -1339,5 +1341,11 @@ Function CreateOrUpdateDesktopShortcut
   ${EndIf}
 
   CreateShortcut "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+; >>> dzl-change:   !insertmacro SetLnkAppUserModelId "$DESKTOP\${PRODUCTNAME}.lnk"
   !insertmacro SetLnkAppUserModelId "$DESKTOP\${PRODUCTNAME}.lnk"
+  ; The Finish page makes this shortcut after NSIS_HOOK_POSTINSTALL has written the
+  ; versioned icon copy and pointed the other shortcuts at it; this one takes it too,
+  ; or it would show whatever Explorer cached for the exe path (hooks.nsh, D-262).
+  !insertmacro DzlSetShortcutIcon "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\icons\${VERSION}.ico"
+; <<< dzl-change
 FunctionEnd
