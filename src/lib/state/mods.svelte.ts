@@ -39,10 +39,13 @@ class ModUpdates {
       try {
         diag = await invoke<Diagnostics>("diagnostics");
       } catch {
-        return; // no Steam, no game, or the ACF is missing: nothing to say
+        return; // the collect itself failed; missing parts come back as warnings (D-194)
       }
     }
-    const items = diag.workshop?.items ?? [];
+    // No Workshop section is "could not read", not "nothing installed": asking Steam
+    // about zero items cleared every update the badge was showing (D-191, D-256).
+    if (!diag.workshop) return;
+    const items = diag.workshop.items;
     // The file's own view, which is right whenever Steam has checked recently and is
     // all there is when it is not running.
     let next = new Set(items.filter((i) => i.needsUpdate).map((i) => i.id));

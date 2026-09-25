@@ -203,6 +203,10 @@
      leaves the container, so without it the selection moved silently (D-224).
      `aria-rowcount` counts the header, which is row 1, and an empty grid reports -1
      (unknown) rather than an invalid 0. -->
+<!-- One element for the host's grid. The table and its empty-state message were two, and
+     with the details pane open the message took the pane's column and pushed the pane
+     into a second row under the table (D-256). -->
+<div class="wrap">
 <div
   class="table"
   role="grid"
@@ -370,8 +374,10 @@
 {#if rows.length === 0 && empty}
   <p class="no-rows" role="status">{empty}</p>
 {/if}
+</div>
 
 <style>
+  .wrap { position: relative; min-width: 0; min-height: 0; height: 100%; }
   .table { display: flex; flex-direction: column; min-height: 0; height: 100%; font-size: 12.5px; outline: none; }
   .table:focus-visible { box-shadow: inset 0 0 0 2px var(--accent-ink); }
   /* Time was 64 px and "☀ 19:42" needs about that before the sun or moon, which comes from
@@ -384,6 +390,9 @@
   .th { all: unset; cursor: pointer; padding: 0 8px; height: 30px; display: flex; align-items: center; color: var(--accent-ink); font-weight: 500; white-space: nowrap; }
   .th:hover { filter: brightness(1.15); }
   .th:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
+  /* A header is a flex box, so the column's `text-align` never reached it: Mods,
+     Players and Ping sat at the left over numbers aligned right (D-256). */
+  .th.c-num { justify-content: flex-end; }
   /* The header is a separate grid from the body, so the body always reserves the
      scrollbar and the header matches it with padding. `scrollbar-gutter` on the header
      did nothing — it only applies to scroll containers — which left every column from
@@ -395,7 +404,8 @@
   /* No will-change: the compositor layer cost more GPU memory than the transform saved (Q17, D-056). */
   .window { position: absolute; left: 0; right: 0; top: 0; }
   .row { height: 36px; border-bottom: 1px solid var(--border); cursor: default; }
-  .no-rows { margin: 28px auto 0; max-width: 46ch; text-align: center; color: var(--fg-muted); font-size: 13px; line-height: 1.5; }
+  /* Under the header, over the empty body: in the wrapper it no longer takes a grid cell. */
+  .no-rows { position: absolute; top: 31px; left: 0; right: 0; margin: 28px auto 0; max-width: 46ch; text-align: center; color: var(--fg-muted); font-size: 13px; line-height: 1.5; }
   .row:hover { background: var(--bg-row); }
   /* The tint was 18 %, and on it `--fg-muted`, `.ok` and `.warn` measured 3.41, 3.58
      and 3.43 at worst across all 24 theme × accent combinations — under 4.5 in every

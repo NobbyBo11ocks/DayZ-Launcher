@@ -197,6 +197,12 @@ impl Client {
             self.pace().await;
             let sent_at = Instant::now();
             let deadline = *deadline.get_or_insert(sent_at + self.timeout);
+            // After a challenge the pacer can hold the request past the deadline, and it
+            // went out anyway into a wait that was already over: one more datagram and
+            // NAT flow for nothing (D-037, D-256).
+            if sent_at >= deadline {
+                return Err(A2sError::Timeout);
+            }
             sock.send(&kind.request(challenge)).await?;
             let mut reasm = Reassembler::new();
             let mut packets = 0u8;

@@ -714,6 +714,9 @@ impl Cache {
             // * A ping never measured (0 on a non-LAN row) takes PLAYER's round trip
             //   (`?9`): the automatic pass sends no INFO, so a DZSA row kept its
             //   dash through every pass and fell outside every ping preset (D-247).
+            //   With neither round trip (an offline verdict) it stays 0: the CASE gave
+            //   NULL there, the NOT NULL column refused it, and the error rolled back
+            //   every result in the batch, all of them lost at the next start (D-256).
             let mut stmt = tx.prepare_cached(
                 "UPDATE servers SET
                    verified_players = CASE WHEN ?4 = 'synthetic' THEN NULL
@@ -726,7 +729,7 @@ impl Cache {
                    steam_empty = CASE WHEN steam_empty = 1 AND players = 0 AND ?7 IS NOT NULL
                                            AND ?4 = 'verified' AND ?2 > 0 THEN NULL
                                       ELSE steam_empty END,
-                   ping_ms = COALESCE(?7, CASE WHEN ping_ms = 0 THEN ?9 ELSE ping_ms END),
+                   ping_ms = COALESCE(?7, NULLIF(ping_ms, 0), ?9, 0),
                    keywords = COALESCE(?8, keywords),
                    last_seen = CASE WHEN ?7 IS NULL THEN last_seen ELSE ?3 END
                  WHERE id = ?1",
@@ -804,6 +807,8 @@ impl Cache {
     /// id, never counted, never in a Steam partition. 7 236 such rows were 46 % of the
     /// visible list once the empties were loaded, and none had been seen by either
     /// source in the hour before. A LAN address is never a DZSA row and stays (D-247).
+    /// 172.16/12 is matched exactly: read as the two characters after `172.`, the test
+    /// also counted the public 172.160 to 172.255 as private (D-256).
     pub fn prune(
         &self,
         max_age_secs: i64,
@@ -828,7 +833,8 @@ impl Cache {
                         OR (?3 IS NOT NULL AND last_seen < ?3
                             AND steam_id = 0 AND verified_at IS NULL AND steam_empty IS NULL
                             AND NOT (ip LIKE '10.%' OR ip LIKE '192.168.%' OR ip LIKE '127.%'
-                                     OR (ip LIKE '172.%' AND CAST(substr(ip, 5, 2) AS INTEGER) BETWEEN 16 AND 31))))
+                                     OR ip GLOB '172.1[6-9].*' OR ip GLOB '172.2[0-9].*'
+                                     OR ip GLOB '172.3[01].*')))
                  RETURNING id",
             )?
             .query_map(
@@ -1228,6 +1234,55 @@ mod tests {
         assert_eq!(c.row_counts().unwrap().servers, 3);
     }
 
+    /// The DZSA-only lane spares LAN rows by the exact private ranges: read two
+    /// characters at a time, 172.160 to 172.255 counted as 172.16/12 and were
+    /// spared too (D-256).
+    #[test]
+    fn prune_spares_only_private_addresses_from_the_dzsa_lane() {
+        let mut c = Cache::open_in_memory().unwrap();
+        let now = ServerRow::now_unix();
+        // Never in a Steam partition, never counted, last listed before the latest one.
+        let dzsa_only = |ip: &str| {
+            let mut r = row(2303, 0);
+            r.id = ServerRow::id_for(ip, 2303);
+            r.ip = ip.into();
+            r.steam_id = 0;
+            r.last_seen = now - 3_600;
+            r
+        };
+        let private = [
+            "10.0.0.5",
+            "192.168.1.20",
+            "127.0.0.1",
+            "172.16.0.1",
+            "172.24.3.9",
+            "172.31.255.1",
+        ];
+        let public = [
+            "172.15.0.1",
+            "172.32.0.1",
+            "172.160.0.1",
+            "172.200.8.8",
+            "172.255.1.1",
+            "51.81.8.81",
+        ];
+        let rows: Vec<ServerRow> = private
+            .iter()
+            .chain(&public)
+            .map(|&ip| dzsa_only(ip))
+            .collect();
+        c.upsert(&rows).unwrap();
+
+        let mut gone = c.prune(30 * 86_400, 3 * 86_400, Some(now - 600)).unwrap();
+        gone.sort();
+        let mut want: Vec<String> = public
+            .iter()
+            .map(|ip| ServerRow::id_for(ip, 2303))
+            .collect();
+        want.sort();
+        assert_eq!(gone, want);
+    }
+
     #[test]
     fn favourites_history_and_population() {
         let mut c = Cache::open_in_memory().unwrap();
@@ -1319,6 +1374,51 @@ mod tests {
             ),
             (33, Some("offline"), Some(1_000), Some(0)),
             "verdict updates; the count and its timestamp survive a check that could not count"
+        );
+    }
+
+    /// An offline verdict on a row that never had a ping (a DZSA or imported row) keeps
+    /// its 0. The update wrote NULL there, the NOT NULL column refused it, and the error
+    /// rolled back every other result in the same batch (D-256).
+    #[test]
+    fn an_offline_verdict_on_a_row_without_a_ping_keeps_its_batch() {
+        let mut c = Cache::open_in_memory().unwrap();
+        let mut never_pinged = row(27017, 5);
+        never_pinged.ping_ms = 0;
+        c.upsert(&[never_pinged, row(27018, 7)]).unwrap();
+        let offline = |port: u16| Verification {
+            id: ServerRow::id_for("51.81.8.81", port),
+            verdict: Verdict::Offline,
+            reported: 5,
+            verified: None,
+            max_players: 50,
+            ping_ms: None,
+            player_rtt_ms: None,
+            keywords: None,
+            tags: None,
+            verified_at: 1_000,
+            reason: "test".into(),
+        };
+        let counted = Verification {
+            verdict: Verdict::Verified,
+            verified: Some(7),
+            ping_ms: Some(45),
+            ..offline(27018)
+        };
+        c.apply_verifications(&[counted, offline(27017)]).unwrap();
+        let a = c
+            .get(&ServerRow::id_for("51.81.8.81", 27017))
+            .unwrap()
+            .unwrap();
+        let b = c
+            .get(&ServerRow::id_for("51.81.8.81", 27018))
+            .unwrap()
+            .unwrap();
+        assert_eq!((a.ping_ms, a.verdict.as_deref()), (0, Some("offline")));
+        assert_eq!(
+            (b.ping_ms, b.verified_players, b.verdict.as_deref()),
+            (45, Some(7), Some("verified")),
+            "the rest of the batch is kept"
         );
     }
 

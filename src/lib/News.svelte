@@ -100,10 +100,13 @@
     returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     playing = { id: n.video, title: n.title };
   }
+  // Escape with focus outside the player (inside it, `trap` has already closed it).
+  // Through closePlayer, so focus goes back to whatever opened the video (D-224,
+  // D-256); it only cleared `playing`, which dropped focus to <body>.
   function onPlayerKey(e: KeyboardEvent) {
     if (e.key === "Escape" && playing) {
       e.stopPropagation();
-      playing = null;
+      closePlayer();
     }
   }
 

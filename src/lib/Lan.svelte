@@ -84,7 +84,7 @@
         empty={`No LAN server matches "${servers.filters.search.trim()}". The search box is shared with the Servers page.`}
       />
       {#if selected}
-        <DetailsPane row={selected} localVersion={servers.localVersion} />
+        <DetailsPane row={selected} localVersion={servers.localVersion} shows={(id) => servers.lanRows.some((r) => r.id === id)} />
       {/if}
     </div>
   {/if}

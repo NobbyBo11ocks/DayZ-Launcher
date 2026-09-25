@@ -48,8 +48,22 @@ pub fn set_muted(areas: Vec<String>) {
     }
 }
 
+/// The Logs page's area for a target: its head up to the first `:`, with the heads that
+/// have no chip of their own folded into the chip that says it covers them. App covers
+/// "anything the interface reports" (every `ui:…` target) and the news feed, and Mods
+/// covers junctions. With the raw head, muting App or Mods left those entries recorded,
+/// and "junctions" and "news" could not be muted at all (D-256). `Logs.svelte` mirrors this.
+pub fn area(target: &str) -> &str {
+    let head = target.split_once(':').map_or(target, |(a, _)| a);
+    match head {
+        "ui" | "news" => "app",
+        "junctions" => "mods",
+        other => other,
+    }
+}
+
 fn muted(target: &str) -> bool {
-    let area = target.split_once(':').map_or(target, |(a, _)| a);
+    let area = area(target);
     MUTED
         .lock()
         .map(|m| m.iter().any(|x| x == area))
@@ -262,6 +276,16 @@ mod tests {
             "newest entry is last"
         );
         assert_eq!(recent(5).len(), 5, "limit respected");
+    }
+
+    #[test]
+    fn areas_without_a_chip_fold_into_the_one_that_covers_them() {
+        assert_eq!(area("ui:ipc"), "app");
+        assert_eq!(area("ui"), "app");
+        assert_eq!(area("news"), "app");
+        assert_eq!(area("junctions"), "mods");
+        assert_eq!(area("steam"), "steam");
+        assert_eq!(area("cache:prune"), "cache");
     }
 
     #[test]

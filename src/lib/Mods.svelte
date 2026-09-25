@@ -290,7 +290,15 @@
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   {#if notice}<p class="ok small" role="status" aria-live="polite">{notice}</p>{/if}
 
-  {#if data && (!data.workshop || all.length === 0)}
+  {#if data && !data.workshop}
+    <!-- The inventory could not be read: saying "no mods installed" here sent the user
+         off to re-download what was already on disk (D-256). -->
+    <div class="empty">
+      <p>The installed mods could not be read.</p>
+      {#each data.warnings as w, i (i)}<p class="muted">{w}</p>{/each}
+      <p class="muted">Rescan once that is sorted out.</p>
+    </div>
+  {:else if data && all.length === 0}
     <div class="empty">
       <p>No Workshop mods installed.</p>
       <p class="muted">Join a modded server and the launcher subscribes to and downloads what it needs, then lists it here.</p>

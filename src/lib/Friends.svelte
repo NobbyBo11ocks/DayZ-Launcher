@@ -16,22 +16,41 @@
   /** Steam's small avatar, the size `Cmd::FriendAvatar` asks for. */
   const AVATAR_PX = 32;
   const avatars = new SvelteMap<string, string>();
-  const avatarTries = new Map<string, number>();
+  /** Friends whose avatar has been asked for. A plain set: `avatarFor` runs in the
+   *  template, and the old counter lived beside a read of the reactive map, so every
+   *  avatar that arrived re-ran each row still missing one and asked again while the
+   *  first request was in flight; the 4 s timer only reset that counter, so the retry
+   *  D-115 describes never happened as such (D-256). */
+  const asked = new Set<string>();
+  const retries = new Set<ReturnType<typeof setTimeout>>();
+  $effect(() => () => {
+    for (const t of retries) clearTimeout(t);
+  });
+  function requestAvatar(id: string, retry: boolean) {
+    // Raw bytes, not a JSON array of numbers: the same 4 096-byte picture crossed
+    // IPC as 14 657 bytes of decimal text before (D-181).
+    void invoke<ArrayBuffer>("friend_avatar", { steamId: id })
+      .then((buf) => {
+        const url = buf.byteLength === AVATAR_PX * AVATAR_PX * 4 ? avatarDataUrl({ width: AVATAR_PX, height: AVATAR_PX, rgba: new Uint8ClampedArray(buf) }) : null;
+        if (url) avatars.set(id, url);
+        else if (retry) {
+          // Steam answers from its cache and may not have it yet: once more, 4 s on.
+          const t = setTimeout(() => {
+            retries.delete(t);
+            requestAvatar(id, false);
+          }, 4000);
+          retries.add(t);
+        }
+      })
+      .catch(() => {});
+  }
   function avatarFor(f: FriendInfo): string | null {
     const have = avatars.get(f.steamId);
     if (have) return have;
-    const tries = avatarTries.get(f.steamId) ?? 0;
-    if (tries >= 2) return null;
-    avatarTries.set(f.steamId, tries + 1);
-    // Raw bytes, not a JSON array of numbers: the same 4 096-byte picture crossed
-    // IPC as 14 657 bytes of decimal text before (D-181).
-    void invoke<ArrayBuffer>("friend_avatar", { steamId: f.steamId })
-      .then((buf) => {
-        const url = buf.byteLength === AVATAR_PX * AVATAR_PX * 4 ? avatarDataUrl({ width: AVATAR_PX, height: AVATAR_PX, rgba: new Uint8ClampedArray(buf) }) : null;
-        if (url) avatars.set(f.steamId, url);
-        else if (tries === 0) setTimeout(() => avatarTries.set(f.steamId, 1), 4000);
-      })
-      .catch(() => {});
+    if (!asked.has(f.steamId)) {
+      asked.add(f.steamId);
+      requestAvatar(f.steamId, true);
+    }
     return null;
   }
 

@@ -798,8 +798,10 @@ fn item_progress(ugc: &UGC, id: u64, failed: Option<&String>) -> ItemProgress {
         // Steam's back stays INSTALLED in its books, the join plan (which looks at
         // the disk) sends it here, and "installed" finished the sync at once, so the
         // launch failed with "sync mods first" and the next Join did it again. It
-        // stays pending, is re-kicked like any other, and if Steam never re-fetches
-        // it the stall reports the remedy (S-79, D-245).
+        // stays pending, and if Steam never re-fetches it the stall reports the remedy
+        // (S-79, D-245). It gets only the start's kick: `tick_sync` re-kicks
+        // "subscribed" and "needs_update", and whether more kicks would make Steam
+        // fetch an item it counts as installed is open (Q30, D-256).
         if info
             .as_ref()
             .is_some_and(|i| std::path::Path::new(&i.folder).is_dir())
@@ -1324,12 +1326,27 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                             // timeout and came back "0 listed". Dropping it *here* is safe:
                             // Steam has just started, so nothing of ours is in flight, and
                             // the next command re-initialises (D-194).
+                            //
+                            // Answered first, as in the "restarted" branch above: a
+                            // refresh queued before the loss was reported still started on
+                            // the dead session, and dropping the session under it left
+                            // `refreshing` stuck, so every later refresh was declined, and
+                            // left its request pointing into the session just shut down
+                            // (D-256). With nothing in flight this does nothing.
+                            abandon_in_flight(
+                                &mut active,
+                                &mut sync,
+                                &mut unsub,
+                                &events,
+                                "Steam restarted",
+                            );
                             unreleased.clear();
                             session = None;
                             session_pid = 0;
                             crate::log_info!("steam", "Steam is back; the session will re-open");
                             shared.set_status(&events, |st| {
                                 st.initialized = true;
+                                st.refreshing = false;
                                 st.error = None;
                             });
                         }

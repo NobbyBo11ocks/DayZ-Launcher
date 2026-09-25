@@ -71,7 +71,7 @@ const WATCHDOG_MS = 30_000;
  * filter read it, so the per-row `toLowerCase()` the search used to do on every pass
  * over 13 000 rows is now done once per rename instead (D-188, D-211).
  */
-type Hay = { n: string; d: string | null; text: string; style: number; map: string };
+type Hay = { n: string; d: string | null; m: string; text: string; style: number; map: string };
 
 /** Bit 1 = says PVE, 2 = says PVP, 4 = says RP. A server may say several. */
 const STYLE_PVE = 1;
@@ -308,15 +308,18 @@ class ServersStore {
    *  Keeping data out of the key is the whole point of D-060 and D-160. */
   filterKey = $derived(JSON.stringify(this.filters));
 
-  /** Lower-cased name + description per row, with the playstyle it claims. Rebuilt for
-   *  a row only when that row renames, so the filter loop allocates nothing (D-211). */
+  /** Lower-cased name + description per row, with the playstyle it claims and its map.
+   *  Rebuilt for a row only when one of those changes, so the filter loop allocates
+   *  nothing (D-211). The map was left out of that check: a server that changed map
+   *  kept its old one here, so the map filter hid it under the new map, which the
+   *  dropdown counted it under (D-256). */
   #hay = new Map<string, Hay>();
 
   #hayFor(r: ServerRow): Hay {
     let e = this.#hay.get(r.id);
-    if (e === undefined || e.n !== r.name || e.d !== r.description) {
+    if (e === undefined || e.n !== r.name || e.d !== r.description || e.m !== r.map) {
       const text = r.description ? (r.name + " | " + r.description).toLowerCase() : r.name.toLowerCase();
-      e = { n: r.name, d: r.description, text, style: styleOf(text), map: r.map.toLowerCase() };
+      e = { n: r.name, d: r.description, m: r.map, text, style: styleOf(text), map: r.map.toLowerCase() };
       this.#hay.set(r.id, e);
     }
     return e;
@@ -777,12 +780,19 @@ class ServersStore {
           return;
         }
         this.done = ev.payload;
-        this.lastRefresh = Math.floor(Date.now() / 1000);
         // The verification pass starts now, not when Refresh was pressed. A full refresh
         // measured 473 s (D-046), so a clock started at the button press ran out while
         // Steam was still listing, and a red "verification stopped answering" appeared
         // next to a pass that then finished normally (D-236).
         if (this.verifying) this.#verifyingSince = Date.now();
+        // A LAN scan or a DZSA import is not a Steam refresh. It claimed the Steam card's
+        // "last refresh" time, which the host keeps for Steam alone (D-220), and a DZSA
+        // import finishing during a Steam refresh threw away that refresh's record of
+        // the servers it had seen, so the vouches below were never withdrawn (D-256).
+        if (ev.payload.source !== "steam") return;
+        this.lastRefresh = Math.floor(Date.now() / 1000);
+        // Steam may have updated DayZ while the list was coming in.
+        void this.refreshLocalVersion();
         // Mirror of the host's `unvouch_unseen` (D-233): the in-memory rows must agree
         // with the cache, or the vouch would linger on screen until the next start.
         const seen = this.#seenThisRefresh;
@@ -840,6 +850,10 @@ class ServersStore {
     } catch (e) {
       logWarn("steam", `status unavailable at start: ${describe(e)}`);
     }
+    // And again whenever the user comes back to the window, at most twice a minute.
+    window.addEventListener("focus", () => {
+      if (Date.now() - this.#versionReadAt > 30_000) void this.refreshLocalVersion();
+    });
     this.maybeAutoRefresh();
     void this.pollFriends();
     setInterval(() => void this.pollFriends(), FRIENDS_POLL_MS);
@@ -1009,6 +1023,22 @@ class ServersStore {
     }
   }
 
+  #versionReadAt = Date.now();
+  /**
+   * The installed DayZ build, read again on window focus and after a Steam refresh.
+   * Read only at start, a DayZ update that Steam applied mid-session left the old build
+   * here, and "My version" then hid every server that had updated while listing the
+   * ones the game could no longer join (D-256).
+   */
+  async refreshLocalVersion() {
+    this.#versionReadAt = Date.now();
+    try {
+      this.localVersion = await invoke<string | null>("local_game_version");
+    } catch (e) {
+      logWarn("steam", `local game version unavailable: ${describe(e)}`);
+    }
+  }
+
   #autoRetry: ReturnType<typeof setTimeout> | undefined;
   #retryAutoRefresh() {
     if (this.#autoRetry !== undefined) return;
@@ -1034,12 +1064,37 @@ class ServersStore {
       // A new row, or one that renamed itself, invalidates the name ranks; a changed
       // player count does not (D-181).
       if (!prev || prev.name !== r.name) this.#namesDirty = true;
-      // Keep verification results the Steam batch does not carry.
-      this.#put(prev ? { ...r, verifiedPlayers: prev.verifiedPlayers, verifiedAt: prev.verifiedAt, verdict: prev.verdict } : r);
+      // A row without Steam's empty flag is a DZSA row: the host keeps its measured
+      // values over the list's placeholders, and so does this.
+      this.#put(prev ? this.#merge(prev, r, r.steamEmpty == null) : r);
       this.#seenThisRefresh?.add(r.id);
       if (r.steamEmpty === true && !this.hasEmptyServers) this.hasEmptyServers = true;
     }
     this.rowsChanged();
+  }
+
+  /**
+   * What an incoming row keeps from the one it replaces: the host's upsert rules
+   * (`upsert_sql` in cache.rs), so the list shows what the cache holds. Verification
+   * results never travel with a listing or a probe. A row without Steam's empty flag
+   * keeps the flag, and while that says empty, the player count R0 reads; a DZSA row
+   * (`keepMeasured`) also keeps every measurement it has only a placeholder for. With
+   * the verdict alone kept, a DZSA import blanked the ping, description, bots and flag
+   * of every row it touched: ping "—", search and playstyle misses, R0 and R9 off,
+   * until a restart (D-242, D-245, D-256).
+   */
+  #merge(prev: ServerRow, r: ServerRow, keepMeasured: boolean): ServerRow {
+    const m: ServerRow = { ...r, verifiedPlayers: prev.verifiedPlayers, verifiedAt: prev.verifiedAt, verdict: prev.verdict };
+    if (r.steamEmpty == null) {
+      m.steamEmpty = prev.steamEmpty;
+      if (prev.steamEmpty === true) m.players = prev.players;
+    }
+    if (keepMeasured) {
+      if (r.pingMs === 0) m.pingMs = prev.pingMs;
+      if (!r.bots) m.bots = prev.bots;
+      if (r.description === "") m.description = prev.description;
+    }
+    return m;
   }
 
   /**
@@ -1200,7 +1255,10 @@ class ServersStore {
     this.error = null;
     try {
       const row = await invoke<ServerRow>("direct_connect", { address });
-      this.#put(row);
+      // Merged like a listing: a probe carries no verdict, and the known one and its
+      // count vanished until the re-check landed (D-256).
+      const prev = this.rows.get(row.id);
+      this.#put(prev ? this.#merge(prev, row, false) : row);
       this.#namesDirty = true;
       this.rowsChanged();
       this.selectedId = row.id;

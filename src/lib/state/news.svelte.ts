@@ -45,7 +45,8 @@ class NewsStore {
   /** Update posts not yet dismissed, newest last (at most three). */
   alerts = $state<NewsAlert[]>([]);
   /** PNG data URL of the signed-in user's Steam avatar, once Steam has it. */
-  /** Object URLs of downscaled post pictures by gid (D-111); the backend caches the files. */
+  /** Object URLs of downscaled post pictures by `gid:size` (D-111, D-256); the backend
+   *  caches the files. */
   thumbs = new SvelteMap<string, string>();
   #thumbPending = new Set<string>();
   #thumbFailed = new Set<string>();
@@ -109,6 +110,9 @@ class NewsStore {
     const known = new Set(this.items.map((n) => n.gid));
     try {
       const c = await invoke<NewsCached>("news_fetch");
+      // Switched off while that was in flight: no toast, no taskbar flash and no
+      // Windows notification for a page that has left the sidebar (D-185, D-256).
+      if (!this.#started) return;
       this.items = c.items;
       this.error = null;
       if (before === 0) {
@@ -118,7 +122,10 @@ class NewsStore {
         if (mark > 0) {
           this.seen = mark;
           if (this.#visiting && this.visitSeen === 0) this.visitSeen = mark;
-          uiPrefs.patch({ newsSeen: mark });
+          // Only over a mark that was actually read: when the settings file could not
+          // be read (D-112), 0 is not "never looked", and this wrote an older date over
+          // the file's newer one (D-194, D-256).
+          if (uiPrefs.readOk) uiPrefs.patch({ newsSeen: mark });
         }
       } else {
         for (const n of c.items) {
@@ -181,21 +188,25 @@ class NewsStore {
     const yt = n.video ? `https://i.ytimg.com/vi/${n.video}/${featured ? "hqdefault" : "mqdefault"}.jpg` : null;
     if (!featured && yt) return yt;
     if (!n.image) return yt;
-    const have = this.thumbs.get(n.gid);
+    // Cards draw at ~340 px, the featured picture at roughly twice that; asking for
+    // 640 px everywhere decoded ~920 KB per card in the WebView (D-160). Keyed by size
+    // as well: keyed by post alone, a card that became the featured post reused its
+    // 360 px picture in the 640 px hero, blurred (D-256).
+    const max = featured ? 640 : 360;
+    const key = `${n.gid}:${max}`;
+    const have = this.thumbs.get(key);
     if (have) return have;
-    if (this.#thumbFailed.has(n.gid)) return yt;
-    if (!this.#thumbPending.has(n.gid)) {
-      this.#thumbPending.add(n.gid);
-      // Cards draw at ~340 px, the featured picture at roughly twice that; asking
-      // for 640 px everywhere decoded ~920 KB per card in the WebView (D-160).
-      void invoke<ArrayBuffer>("news_thumb", { gid: n.gid, url: n.image, max: featured ? 640 : 360 })
+    if (this.#thumbFailed.has(key)) return yt;
+    if (!this.#thumbPending.has(key)) {
+      this.#thumbPending.add(key);
+      void invoke<ArrayBuffer>("news_thumb", { gid: n.gid, url: n.image, max })
         .then((buf) => {
-          const old = this.thumbs.get(n.gid);
-          this.thumbs.set(n.gid, URL.createObjectURL(new Blob([buf], { type: "image/jpeg" })));
+          const old = this.thumbs.get(key);
+          this.thumbs.set(key, URL.createObjectURL(new Blob([buf], { type: "image/jpeg" })));
           if (old) URL.revokeObjectURL(old);
         })
-        .catch(() => this.#thumbFailed.add(n.gid))
-        .finally(() => this.#thumbPending.delete(n.gid));
+        .catch(() => this.#thumbFailed.add(key))
+        .finally(() => this.#thumbPending.delete(key));
     }
     return null;
   }

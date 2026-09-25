@@ -14,7 +14,17 @@
   import { servers, pingUnmeasured } from "./state/servers.svelte";
   import { clock, countryName, type Diagnostics, isInflated, type PopulationSample, queueOf, type ServerDetails, type ServerRow, trustedPlayers, type Verification } from "./types";
 
-  let { row, localVersion }: { row: ServerRow | null; localVersion: string | null } = $props();
+  /** `shows`: whether the host page lists a server. Favourites and LAN pass it, because
+   *  they show the pane only for their own rows (D-240). */
+  let { row, localVersion, shows }: { row: ServerRow | null; localVersion: string | null; shows?: (id: string) => boolean } = $props();
+
+  /** A sibling the host page cannot show opens on the Servers page, which shows any
+   *  selection; on Favourites or LAN the click used to close the pane instead (D-212,
+   *  D-256). */
+  function openSibling(id: string) {
+    servers.selectedId = id;
+    if (shows && !shows(id)) servers.navigate = "servers";
+  }
 
   // The effects below key on these primitives, never on `row` itself: every
   // verification (including the one `server_details` publishes) replaces the row
@@ -338,7 +348,7 @@
         <ul class="sibs">
           {#each shownSiblings as sv (sv.id)}
             <li>
-              <button class="sib" onclick={() => (servers.selectedId = sv.id)} title={sv.name}>
+              <button class="sib" onclick={() => openSibling(sv.id)} title={sv.name}>
                 <span class="sname">{sv.name}</span>
                 <span class="smeta">{mapLabel(sv.map)} · {trustedPlayers(sv)}/{sv.maxPlayers}</span>
               </button>

@@ -50,7 +50,7 @@
     <h2 id="welcome-title">Welcome to DZSA CrayZ Launcher</h2>
     <ol>
       <li><strong>Steam stays in charge.</strong> The server list comes from Steam, mods download through the Workshop, and the game starts through BattlEye exactly like the official launcher. Keep Steam running.</li>
-      <li><strong>Player counts are verified.</strong> More than half of the servers on Steam fake their population. Every number you see is checked directly with the server; fakes are hidden by default (toggle in the filter bar).</li>
+      <li><strong>Player counts are verified.</strong> More than half of the servers on Steam fake their population. Every number you see is checked directly with the server; fakes are hidden by default ("Hide inflated" in the Servers filters).</li>
       <li><strong>Join in one click.</strong> Pick a server, press Join. Missing mods download with progress and DayZ launches connected.</li>
     </ol>
     <div class="row">

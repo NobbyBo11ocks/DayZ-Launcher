@@ -493,8 +493,9 @@ export type HistoryEntry = { id: string; joinedAt: number; name: string; ip: str
 export type PopulationSample = { ts: number; players: number; queue: number };
 export type ImportResult = { total: number; imported: number; already: number; unreachable: number; path: string };
 
+/** 0 is "0 kB": it said "1 kB" for an empty Workshop and before a download began (D-256). */
 export const fmtBytes = (n: number): string =>
-  n >= 1 << 30 ? `${(n / (1 << 30)).toFixed(2)} GB` : n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} kB`;
+  n <= 0 ? "0 kB" : n >= 1 << 30 ? `${(n / (1 << 30)).toFixed(2)} GB` : n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} kB`;
 
 export const clock = (minutes: number | null | undefined): string =>
   minutes == null ? "–" : `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;

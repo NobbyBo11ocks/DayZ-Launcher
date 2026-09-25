@@ -64,13 +64,22 @@ pub fn build_args(spec: &LaunchSpec) -> Vec<String> {
     v
 }
 
-/// Splits `a "b c" d` into `[a, b c, d]`; a lone quote is ignored.
+/// Splits `a "b c" d` into `[a, b c, d]`; a quote nothing closes is ignored. It used to
+/// open a quote that ran to the end of the line, so `-nosplash "-profiles=D:\P -skipintro`
+/// handed the game `-skipintro` inside its profile path (D-256).
 pub fn split_extra(s: &str) -> Vec<String> {
+    // With an odd count, the last quote is the one nothing closes.
+    let unmatched = if s.matches('"').count() % 2 == 1 {
+        s.rfind('"')
+    } else {
+        None
+    };
     let mut out = Vec::new();
     let mut cur = String::new();
     let mut quoted = false;
-    for ch in s.chars() {
+    for (i, ch) in s.char_indices() {
         match ch {
+            '"' if Some(i) == unmatched => {}
             '"' => quoted = !quoted,
             c if c.is_whitespace() && !quoted => {
                 if !cur.is_empty() {
@@ -200,5 +209,11 @@ mod tests {
     fn split_extra_handles_quotes() {
         assert_eq!(split_extra(r#"a "b c" d"#), vec!["a", "b c", "d"]);
         assert_eq!(split_extra("   "), Vec::<String>::new());
+        // A quote nothing closes is ignored instead of swallowing the rest (D-256).
+        assert_eq!(
+            split_extra(r#"-nosplash "-profiles=D:\P -skipintro"#),
+            vec!["-nosplash", r"-profiles=D:\P", "-skipintro"]
+        );
+        assert_eq!(split_extra(r#"a "b c" "d e"#), vec!["a", "b c", "d", "e"]);
     }
 }

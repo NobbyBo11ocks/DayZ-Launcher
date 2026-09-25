@@ -100,9 +100,15 @@
   type Section = (typeof allSections)[number]["id"];
   /** News can be switched off entirely (D-174); the sidebar then starts at Servers. */
   const sections = $derived(prefs.news ? allSections : allSections.filter((s) => s.id !== "news"));
-  // The welcome line belongs to the window, not the home page (D-173).
-  const hour = new Date().getHours();
-  const timeOfDay = hour < 5 ? "Still up" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  // The welcome line belongs to the window, not the home page (D-173). The hour is
+  // re-read every five minutes: read once, a launcher opened in the morning said "Good
+  // morning" all evening (D-256).
+  let hour = $state(new Date().getHours());
+  $effect(() => {
+    const t = setInterval(() => (hour = new Date().getHours()), 5 * 60_000);
+    return () => clearInterval(t);
+  });
+  const timeOfDay = $derived(hour < 5 ? "Still up" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening");
   const persona = $derived(servers.steam?.persona ?? null);
   const greeting = $derived(persona ? `${timeOfDay}, ${persona}` : "");
 

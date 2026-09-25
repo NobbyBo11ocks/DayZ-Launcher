@@ -291,7 +291,17 @@
     // never sees another key. One Shift+Tab then reached the grid behind the modal,
     // which is the D-184 failure all over again (D-197).
     void phase;
-    if (dialogEl?.contains(document.activeElement)) return;
+    // A control the user is already on keeps focus; the dialog itself does not count.
+    // While the plan loads, Cancel is the only button, so focusing "the first control"
+    // then put focus on Cancel, and this early return kept it there once the plan
+    // arrived: Enter on a row and Enter again still cancelled, whatever D-248 said. The
+    // dialog holds focus until there is something worth landing on (D-256).
+    const active = document.activeElement;
+    if (active !== dialogEl && dialogEl?.contains(active)) return;
+    if (phase === "planning") {
+      dialogEl?.focus();
+      return;
+    }
     // The password field when one is needed, else the primary button: in DOM order
     // the first control was the footer's Cancel, so Enter on a row and Enter again —
     // the natural next keypress — cancelled the join, and a screen reader's first

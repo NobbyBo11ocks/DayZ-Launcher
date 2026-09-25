@@ -60,26 +60,38 @@
     // The guard comes first. Mutating `muted` before it left the chip struck through
     // while logging carried on exactly as before, with nothing said (D-194).
     if (!settings) return;
+    const before = { muted, settings };
     muted = isMuted(id) ? muted.filter((m) => m !== id) : [...muted, id];
     settings = { ...settings, logMuted: muted };
     try {
       await invoke("settings_set", { settings });
+      settingsError = null;
       await load();
     } catch (e) {
-      error = String(e);
+      // The host keeps its stored areas when the save fails, so the chips go back too.
+      // The reason goes on its own line: `error` is cleared by the next 5 s refresh,
+      // which left a struck-through chip over an area still being recorded (D-256).
+      muted = before.muted;
+      settings = before.settings;
+      settingsError = `That change was not saved (${String(e)}).`;
     }
   }
 
   async function setRecording(on: boolean) {
     if (!settings) return;
+    const before = { recording, settings };
     recording = on;
     settings = { ...settings, logging: on };
     try {
       await invoke("settings_set", { settings });
+      settingsError = null;
       if (!on) logs = [];
       else await load();
     } catch (e) {
-      error = String(e);
+      // As in toggleArea: back to what the host still has, with a reason that stays.
+      recording = before.recording;
+      settings = before.settings;
+      settingsError = `That change was not saved (${String(e)}).`;
     }
   }
 
@@ -94,9 +106,12 @@
     }
   }
 
+  /** The host's `log::area`, mirrored (D-256): heads without a chip of their own count
+   *  under the chip that covers them, which is also what muting that chip silences. */
+  const FOLDED: Record<string, string> = { ui: "app", news: "app", junctions: "mods" };
   const area = (t: string) => {
     const head = t.split(":")[0] ?? t;
-    return head === "ui" ? "app" : head;
+    return FOLDED[head] ?? head;
   };
   const shown = $derived(onlyProblems ? logs.filter((l) => l.level === "warn" || l.level === "error") : logs);
   const counts = $derived.by(() => {

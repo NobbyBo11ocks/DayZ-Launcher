@@ -23,7 +23,11 @@
     }
     joining = h.id;
     try {
-      const row = await servers.directConnect(`${h.ip}:${h.gamePort}`);
+      // The entry's id is `ip:queryPort`, the address Steam knew it by. The game port
+      // made the host guess the query port, and the guess misses 14 % of populated
+      // servers; Friends stopped guessing in D-245, this page in D-256. A typed port is
+      // tried as the query port first, so the id needs no conversion.
+      const row = await servers.directConnect(h.id);
       if (row) servers.joiningId = row.id;
       else servers.error = `${h.name} did not answer on ${h.ip}:${h.gamePort}; it may be offline or have moved.`;
     } finally {

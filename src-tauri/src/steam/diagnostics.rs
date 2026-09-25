@@ -161,7 +161,12 @@ pub fn collect() -> AppResult<Diagnostics> {
         });
 
         let workshop_read = match workshop::read(&g.library.path) {
-            Ok(w) => w,
+            Ok(Some(w)) => Some(w),
+            // Steam writes the list with the first DayZ Workshop item, so no list is
+            // "nothing installed": an empty section, and the Mods page says so. No
+            // section at all is left to mean "could not be read", which the page
+            // reports with the warning that says why (D-256).
+            Ok(None) => Some(workshop::from_folders(&g.library.path, &[])),
             Err(e) => {
                 warnings.push(format!(
                     "Steam's Workshop list could not be read ({e}); installed mods cannot be checked."
@@ -225,9 +230,15 @@ pub fn collect() -> AppResult<Diagnostics> {
             ));
         }
     } else if steam.path.is_some() {
-        warnings.push(format!(
-            "DayZ (app {DAYZ_APP_ID}) is not installed in any Steam library."
-        ));
+        // A library on a disconnected drive is skipped by `find_dayz`, and "not
+        // installed" is then untrue (D-160). The Mods page shows this line (D-256).
+        warnings.push(match locate::unreachable_dayz_libraries(&libs).first() {
+            Some(p) => format!(
+                "Steam has DayZ in {}, but that folder is not reachable; connect the drive and try again.",
+                p.display()
+            ),
+            None => format!("DayZ (app {DAYZ_APP_ID}) is not installed in any Steam library."),
+        });
     }
 
     Ok(Diagnostics {

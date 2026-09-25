@@ -66,18 +66,29 @@
     connecting = false;
     if (row) {
       direct = "";
-      connectOpen = false;
+      // Through closeConnect, like Escape: closing destroys the focused field, and
+      // focus fell to <body>, where the grid's keys stop working (D-224, D-256).
+      closeConnect();
     }
   }
 
   // The store is started once by App.svelte and never stopped (D-084).
 
 
+  /** Inputs that take no text: a key pressed on one of these is not typing. */
+  const NON_TEXT_INPUTS = new Set(["checkbox", "radio", "button", "submit", "reset", "range", "color", "file"]);
+
   function onKey(e: KeyboardEvent) {
     // The join dialog is modal; the page behind it must not act on keys (D-184).
     if (servers.joiningId) return;
-    const target = e.target as HTMLElement | null;
-    const typing = target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA");
+    const target = e.target;
+    // Only a field that takes text keeps "/" and Escape. The Status filters became
+    // checkboxes in D-249, and a click on one left both keys dead while it had focus
+    // (D-256).
+    const typing =
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement ||
+      (target instanceof HTMLInputElement && !NON_TEXT_INPUTS.has(target.type));
     if (e.key === "/" && !typing) {
       e.preventDefault();
       focusSearch();
@@ -85,8 +96,8 @@
       closeConnect();
     } else if (e.key === "Escape" && !typing && servers.selectedId) {
       // The grid closes the pane on Escape only while it has focus; after a click on
-      // the pane's own Join, star or a mod link, or on a filter chip, the key did
-      // nothing and the pane stayed (D-247). An input keeps its own Escape.
+      // the pane's own Join, star or a mod link, or on a filter, the key did nothing
+      // and the pane stayed (D-247). A text field keeps its own Escape.
       servers.select(null);
     }
   }
@@ -276,6 +287,9 @@
   @media (max-width: 1300px) {
     .main { position: relative; }
     .main.with-pane { grid-template-columns: minmax(0, 1fr); }
+    /* The empty-list message centres in the part of the list the pane leaves visible;
+       centred on the whole width, its end was under the pane (D-256). */
+    .main.with-pane :global(.no-rows) { right: min(360px, 100%); }
     .main > :global(aside) {
       position: absolute;
       inset: 0 0 0 auto;

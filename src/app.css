@@ -366,8 +366,12 @@ h1 {
   }
 }
 
+/* Pseudo-elements too: `*` does not match them and neither property inherits, so the
+   rail's open-section pill (D-255) and the filter checkboxes' tick still moved (D-256). */
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *,
+  *::before,
+  *::after {
     transition: none !important;
     animation: none !important;
   }

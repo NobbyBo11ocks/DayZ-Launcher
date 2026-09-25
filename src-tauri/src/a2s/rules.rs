@@ -102,7 +102,16 @@ pub fn parse(payload: &[u8]) -> A2sResult<Rules> {
     } else {
         fragments.sort_by_key(|f| f.0);
         let total = fragments[0].1 as usize;
-        if fragments.len() != total || fragments.iter().any(|f| f.1 as usize != total) {
+        // Each number from 1 to the total exactly once (1-based, docs/03). Only the
+        // count and the totals were checked, so a repeated fragment passed in place of a
+        // missing one and was decoded twice into a wrong mod list (D-256).
+        if fragments.len() != total
+            || fragments.iter().any(|f| f.1 as usize != total)
+            || fragments
+                .iter()
+                .enumerate()
+                .any(|(i, f)| f.0 as usize != i + 1)
+        {
             return Err(A2sError::SplitMismatch("dayz rule fragments"));
         }
         let raw: Vec<u8> = fragments.iter().flat_map(|f| f.2.iter().copied()).collect();
@@ -342,6 +351,21 @@ mod tests {
             .unwrap()
             .starts_with("Survival at its Finest"));
         assert_eq!(d.trailing, 0);
+    }
+
+    #[test]
+    fn rejects_a_repeated_fragment_in_place_of_a_missing_one() {
+        // Two fragments both numbered 1 of 2: the count and the totals agree, the
+        // numbers do not.
+        let mut p = vec![0x45, 2, 0];
+        for _ in 0..2 {
+            p.extend_from_slice(&[1, 2, 0]);
+            p.extend_from_slice(b"abc\0");
+        }
+        assert!(matches!(
+            parse(&p),
+            Err(A2sError::SplitMismatch("dayz rule fragments"))
+        ));
     }
 
     #[test]

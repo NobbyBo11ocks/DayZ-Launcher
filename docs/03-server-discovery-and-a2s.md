@@ -86,7 +86,7 @@ Response: `FF FF FF FF 45 <uint16 count>` then `count` × (`key\0 value\0`).
 
 DayZ smuggles a binary structure through the key/value pairs (S-09, S-11, S-12, S-14; **[LIVE]**):
 
-1. Pairs whose **key is exactly 2 bytes** and `key[0] <= key[1]` are fragments: `key = [index (1-based), total]`. Live: keys `1/4 … 4/4`, 4 fragments for 12 mods, 447 escaped bytes in one UDP packet. Sort by index, concatenate the values.
+1. Pairs whose **key is exactly 2 bytes** and `key[0] <= key[1]` are fragments: `key = [index (1-based), total]`. Live: keys `1/4 … 4/4`, 4 fragments for 12 mods, 447 escaped bytes in one UDP packet. Sort by index, concatenate the values. Every index from 1 to the total must appear exactly once and every key must carry the same total, or the answer is rejected: a repeated fragment standing in for a missing one decodes into a wrong mod list. S-12 enforces the same (page 0, a page above the count, a disagreeing count and a missing page are all errors; re-checked 2026-09-25, D-256).
 2. **Unescape** the concatenation (values cannot contain `0x00`, so these bytes are escaped):
 
 | Escaped | Byte |

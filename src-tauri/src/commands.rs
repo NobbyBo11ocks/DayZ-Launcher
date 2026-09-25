@@ -1675,15 +1675,26 @@ pub async fn launch_game(
         let ws = if required.is_empty() {
             None
         } else {
+            let ids = || required.iter().map(|(id, _)| *id).collect::<Vec<u64>>();
             match workshop::read(&game.library.path) {
-                Ok(ws) => ws,
+                Ok(Some(ws)) => Some(ws),
+                // No manifest at all, which deleting it as Workshop troubleshooting
+                // leaves behind, is the same case as one that will not parse: the
+                // folders can still be there. It read as "nothing installed" and
+                // refused the launch with "sync mods first" (D-256).
+                Ok(None) => {
+                    crate::log_warn!(
+                        "launch",
+                        "there is no Workshop list; looking for the mod folders directly"
+                    );
+                    Some(workshop::from_folders(&game.library.path, &ids()))
+                }
                 Err(e) => {
                     crate::log_warn!(
                         "launch",
                         "the Workshop list is unreadable ({e}); looking for the mod folders directly"
                     );
-                    let ids: Vec<u64> = required.iter().map(|(id, _)| *id).collect();
-                    Some(workshop::from_folders(&game.library.path, &ids))
+                    Some(workshop::from_folders(&game.library.path, &ids()))
                 }
             }
         };

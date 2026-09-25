@@ -23,6 +23,17 @@ export const defaultUiPrefs = (): UiPrefs => ({
 const READ_TRIES = 8;
 const READ_RETRY_MS = 250;
 
+/**
+ * JSON with object keys sorted, so a comparison does not depend on key order. The host
+ * sends `filters` back with its keys sorted, so unchanged filters never compared equal
+ * and every save of them, one per debounced search, cost an IPC round trip (D-256).
+ */
+function stable(v: unknown): string {
+  return JSON.stringify(v, (_k, x: unknown) =>
+    x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : x,
+  );
+}
+
 class UiPrefsStore {
   /** Last state confirmed by the backend, or the defaults if it could not be read. */
   current: UiPrefs | null = null;
@@ -48,13 +59,15 @@ class UiPrefsStore {
       try {
         const s = await invoke<Settings>("settings_get");
         this.readOk = true;
-        this.current = s.ui ?? defaultUiPrefs();
+        // A change made before the file arrived is still on its way to it; the copy
+        // has to show it, or `patch` compares the next change against stale values.
+        this.current = { ...(s.ui ?? defaultUiPrefs()), ...this.#pending };
         return this.current;
       } catch {
         await new Promise((r) => setTimeout(r, READ_RETRY_MS));
       }
     }
-    this.current = defaultUiPrefs();
+    this.current = { ...defaultUiPrefs(), ...this.#pending };
     return this.current;
   }
 
@@ -63,7 +76,7 @@ class UiPrefsStore {
     const cur = this.current;
     let changed = false;
     for (const [k, v] of Object.entries(p) as [keyof UiPrefs, UiPrefs[keyof UiPrefs]][]) {
-      if (cur && JSON.stringify(cur[k]) === JSON.stringify(v)) continue;
+      if (cur && stable(cur[k]) === stable(v)) continue;
       (this.#pending as Record<string, unknown>)[k] = v;
       changed = true;
     }
@@ -81,7 +94,12 @@ class UiPrefsStore {
     this.#pending = {};
     await this.ready;
     try {
-      this.current = await invoke<UiPrefs>("ui_prefs_set", { patch: p });
+      const saved = await invoke<UiPrefs>("ui_prefs_set", { patch: p });
+      // The file as saved, plus whatever changed while that was in flight. Taking the
+      // reply alone put a value the user had just moved away from back into the copy:
+      // moving back to it was then dropped as "no change", and the queued write saved
+      // the other one, so the screen and the file disagreed (D-256).
+      this.current = { ...saved, ...this.#pending };
     } catch {
       /* the caches still hold the values; the next patch retries the file */
       this.#pending = { ...p, ...this.#pending };
