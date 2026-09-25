@@ -120,19 +120,22 @@ pub mod process {
     }
 
     pub fn find_steam(steam_path: Option<&Path>) -> Option<u32> {
+        steam_pids(steam_path).into_iter().next()
+    }
+
+    /// Every live `steam.exe` under `steam_path`. There can be more than one for a
+    /// moment: a `steam://` link starts a second copy that hands its command to the
+    /// running client and exits, so "the first one found" is not "the client" (D-236).
+    pub fn steam_pids(steam_path: Option<&Path>) -> Vec<u32> {
         let want_prefix = steam_path.map(|p| p.to_string_lossy().to_ascii_lowercase());
-        for pid in pids_named("steam.exe") {
-            match (&want_prefix, image_path(pid)) {
-                (None, _) => return Some(pid),
-                (Some(prefix), Some(img))
-                    if img.to_ascii_lowercase().starts_with(prefix.as_str()) =>
-                {
-                    return Some(pid)
-                }
-                _ => continue,
-            }
-        }
-        None
+        pids_named("steam.exe")
+            .into_iter()
+            .filter(|&pid| match (&want_prefix, image_path(pid)) {
+                (None, _) => true,
+                (Some(prefix), Some(img)) => img.to_ascii_lowercase().starts_with(prefix.as_str()),
+                _ => false,
+            })
+            .collect()
     }
 
     fn pids_named(exe: &str) -> Vec<u32> {

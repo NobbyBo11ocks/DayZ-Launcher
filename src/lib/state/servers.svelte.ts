@@ -58,6 +58,9 @@ const ROW_FLUSH_MS = 350;
  * scan of 2 400 a few minutes — so a slow machine is never cut short (D-160).
  */
 const VERIFY_DEADLINE_MS = 5 * 60_000;
+/** The worker's `MIN_REFRESH_INTERVAL` (sdk.rs): an automatic refresh inside it is declined. */
+const AUTO_REFRESH_GAP_SECS = 60;
+const VERIFY_STALLED = "Player-count verification stopped answering. Refresh to try again.";
 const SCAN_DEADLINE_MS = 20 * 60_000;
 const WATCHDOG_MS = 30_000;
 
@@ -250,8 +253,10 @@ class ServersStore {
     for (const r of this.rows.values()) {
       const owner = owners.size ? owners.get(cloneKey(r.name)) : undefined;
       const clone = owner !== undefined && owner !== r.ip && r.verdict !== "verified";
-      if (clone) r.clone = true;
-      else if (r.clone) delete r.clone;
+      // A new object when the flag flips, never a write into the old one: the grid's
+      // keyed rows and the details pane compare by identity, so an in-place flag kept
+      // the trusted look until something else replaced the row (D-236).
+      if (clone !== (r.clone === true)) this.rows.set(r.id, { ...r, clone });
     }
   }
   /** Reads the version so a derived or template re-runs when the map changes. */
@@ -711,15 +716,25 @@ class ServersStore {
         }
         this.done = ev.payload;
         this.lastRefresh = Math.floor(Date.now() / 1000);
+        // The verification pass starts now, not when Refresh was pressed. A full refresh
+        // measured 473 s (D-046), so a clock started at the button press ran out while
+        // Steam was still listing, and a red "verification stopped answering" appeared
+        // next to a pass that then finished normally (D-236).
+        if (this.verifying) this.#verifyingSince = Date.now();
         // Mirror of the host's `unvouch_unseen` (D-233): the in-memory rows must agree
         // with the cache, or the vouch would linger on screen until the next start.
         const seen = this.#seenThisRefresh;
         this.#seenThisRefresh = null;
-        if (seen && ev.payload.source === "steam" && !ev.payload.rejected && !ev.payload.capped && !ev.payload.stoppedEarly) {
+        // The host decides what "complete" means from the partition answers, so the
+        // two cannot disagree about a refresh Steam timed out or throttled (D-236).
+        if (seen && ev.payload.complete === true) {
           let n = 0;
           for (const r of this.rows.values()) {
             if (r.steamEmpty === false && !seen.has(r.id)) {
-              r.steamEmpty = null;
+              // A new object, not a write into the old one: the grid's keyed rows and
+              // the details pane compare by identity, so an in-place change kept the
+              // vouched look until a verification happened to replace the row (D-236).
+              this.rows.set(r.id, { ...r, steamEmpty: null });
               n++;
             }
           }
@@ -737,6 +752,8 @@ class ServersStore {
         this.verifySummary = ev.payload;
         this.verifying = false;
         this.#verifyingSince = 0;
+        // A late answer proves the watchdog wrong; its message must not sit beside it.
+        if (this.error === VERIFY_STALLED) this.error = null;
       }),
       await listen<ModScanSummary>("servers:mods-start", (ev) => {
         this.modScan = ev.payload;
@@ -774,10 +791,10 @@ class ServersStore {
    */
   #watchdog() {
     const now = Date.now();
-    if (this.verifying && this.#verifyingSince && now - this.#verifyingSince > VERIFY_DEADLINE_MS) {
+    if (this.verifying && this.#verifyingSince && !this.steam?.refreshing && now - this.#verifyingSince > VERIFY_DEADLINE_MS) {
       this.verifying = false;
       this.#verifyingSince = 0;
-      this.error = "Player-count verification stopped answering. Refresh to try again.";
+      this.error = VERIFY_STALLED;
     }
     if (this.modScanning && this.#scanningSince && now - this.#scanningSince > SCAN_DEADLINE_MS) {
       this.modScanning = false;
@@ -839,7 +856,11 @@ class ServersStore {
   dzsaLoading = $state(false);
 
   private maybeAutoRefresh() {
-    if (this.steam?.initialized && !this.steam.refreshing && !this.#autoRefreshed) {
+    // Not while the session is released: a status event is the only thing that calls
+    // this, and after a declined start-up refresh the next one was the idle release
+    // itself — so the retry re-opened the session the release had just closed and put
+    // the user back to "Playing DayZ" for another quarter of an hour (D-236).
+    if (this.steam?.initialized && !this.steam.idle && !this.steam.refreshing && !this.#autoRefreshed) {
       // Armed by `refresh` itself, from what the worker actually answered. Set here,
       // it was spent even when the worker declined — and it declines for 60 s after
       // the last completed refresh, seeded across restarts from the cache. So a
@@ -901,6 +922,11 @@ class ServersStore {
     try {
       const started = await invoke<boolean>("servers_refresh", { force, full });
       this.#autoRefreshed = started;
+      // Declined by the worker's 60 s throttle (a restart right after a refresh, the
+      // updater's relaunch): nothing else would ask again until the next status
+      // event, which in a quiet session is the idle release a quarter of an hour
+      // later — or never, with the release switched off (D-236).
+      if (!started && !force && !full) this.#retryAutoRefresh();
       // Every id the batches deliver from here on; the rows Steam does not return
       // this time lose their vouch when the refresh completes (D-233).
       if (started) this.#seenThisRefresh = new Set();
@@ -913,6 +939,17 @@ class ServersStore {
     } catch (e) {
       this.error = String(e);
     }
+  }
+
+  #autoRetry: ReturnType<typeof setTimeout> | undefined;
+  #retryAutoRefresh() {
+    if (this.#autoRetry !== undefined) return;
+    const ago = this.steam?.lastRefreshSecsAgo ?? 0;
+    const waitMs = Math.max(5, AUTO_REFRESH_GAP_SECS - ago + 2) * 1000;
+    this.#autoRetry = setTimeout(() => {
+      this.#autoRetry = undefined;
+      this.maybeAutoRefresh();
+    }, waitMs);
   }
 
   /** Merges everything the last batches delivered. Idempotent and cheap when empty. */
@@ -963,7 +1000,21 @@ class ServersStore {
       const e = this.modCatalog.get(m);
       if (e) this.modCatalog.set(m, { name: e.name, servers: Math.max(0, e.servers + d) });
     }
+    for (const id of ids) this.friendsOn.delete(id);
     if (this.selectedId && !this.rows.has(this.selectedId)) this.selectedId = null;
+    // It only ever went from false to true, so once the prune took the last row Steam
+    // listed as empty, the empty state kept saying "widen the filters" instead of
+    // offering the Refresh that brings them back (D-210, D-236).
+    if (this.hasEmptyServers) {
+      let any = false;
+      for (const r of this.rows.values()) {
+        if (r.steamEmpty === true) {
+          any = true;
+          break;
+        }
+      }
+      this.hasEmptyServers = any;
+    }
     this.#namesDirty = true;
     this.rowsChanged();
   }

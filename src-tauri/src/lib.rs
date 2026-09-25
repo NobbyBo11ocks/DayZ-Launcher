@@ -34,6 +34,8 @@ pub fn uptime_ms() -> u128 {
 
 /// Rows not seen for this long are dropped from the cache after a completed refresh.
 const CACHE_MAX_AGE_SECS: i64 = 30 * 24 * 3600;
+/// Ids per `servers:pruned` event: ~21 bytes each as JSON, so ~170 KB at most.
+const PRUNED_EVENT_IDS: usize = 8_000;
 /// Population samples older than this are dropped (the sparkline shows 72 h).
 const POPULATION_MAX_AGE_SECS: i64 = 7 * 24 * 3600;
 
@@ -338,10 +340,11 @@ pub fn run() {
                             // and reported "0 of 0 shown" as a success.
                             let full_list = d.source == "steam" && !d.rejected;
                             // Only a refresh that Steam answered completely may withdraw
-                            // vouches: a capped or early-stopped one did not see every
-                            // populated server, and withdrawing on it would punish the
-                            // ones it never reached (D-233).
-                            let complete = full_list && !d.capped && !d.stopped_early;
+                            // vouches: a capped, early-stopped, timed-out or throttled one
+                            // did not see every populated server, and withdrawing on it
+                            // would punish the ones it never reached (D-233). The worker
+                            // decides, from the partition answers (D-236).
+                            let complete = full_list && d.complete;
                             let refresh_started = browser::ServerRow::now_unix()
                                 - (d.elapsed_ms / 1000) as i64
                                 - 10;
@@ -384,8 +387,11 @@ pub fn run() {
                             // The UI holds every row it was ever sent; without this a
                             // long-lived session kept, in the WebView, rows the cache
                             // had dropped a month ago (Q24, D-235).
-                            if !pruned.is_empty() {
-                                let _ = handle.emit("servers:pruned", &pruned);
+                            // In chunks: rows only a Full refresh renews all reach 30 days
+                            // together, ~21 000 ids at the D-233 cache size — 444 KiB in
+                            // one event against docs/05 §4's ~200 KB ceiling (D-236).
+                            for chunk in pruned.chunks(PRUNED_EVENT_IDS) {
+                                let _ = handle.emit("servers:pruned", chunk);
                             }
                             // A rejected `Done` is an answer, not a result: the refresh
                             // it refers to either never reached Steam (D-160) or is still

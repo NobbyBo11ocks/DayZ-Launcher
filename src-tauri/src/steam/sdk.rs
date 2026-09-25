@@ -148,6 +148,62 @@ fn open_session() -> Result<Session, String> {
     Ok(Session { client, mms, ugc })
 }
 
+/// Publishes a session that has just opened, and returns the pid of the `steam.exe`
+/// it talks to. Every open goes through here: the on-demand re-open used to set the
+/// flags only, so a Steam restarted under another account kept the old persona and
+/// id on screen (D-236).
+fn publish_open(shared: &Shared, events: &UnboundedSender<SteamEvent>, s: &Session) -> u32 {
+    let steam_id = s.client.user().steam_id().raw();
+    let persona = s.client.friends().name();
+    shared.set_status(events, |st| {
+        st.initialized = true;
+        st.idle = false;
+        st.error = None;
+        st.steam_id = Some(steam_id);
+        st.persona = Some(persona);
+    });
+    crate::steam::registry::detect().pid
+}
+
+/// Answers everything in flight when the Steam it was running against is gone. Each
+/// one holds a spinner in the UI until it is answered (D-160).
+fn abandon_in_flight(
+    active: &mut Option<ActiveRefresh>,
+    sync: &mut Option<ActiveSync>,
+    unsub: &mut Option<ActiveUnsubscribe>,
+    events: &UnboundedSender<SteamEvent>,
+    why: &str,
+) {
+    if let Some(r) = active.take() {
+        let _ = events.send(SteamEvent::Done(RefreshDone {
+            total: 0,
+            responded: 0,
+            failed: 0,
+            inflated: 0,
+            elapsed_ms: r.started.elapsed().as_millis() as u64,
+            partitions: Vec::new(),
+            capped: false,
+            stopped_early: true,
+            complete: false,
+            rejected: true,
+            reason: Some("no-session"),
+            source: "steam",
+        }));
+    }
+    if let Some(job) = sync.take() {
+        let _ = events.send(SteamEvent::SyncDone(SyncDone {
+            job: job.job,
+            ok: false,
+            error: Some(format!("{why} during the download")),
+            items: Vec::new(),
+            elapsed_ms: job.started.elapsed().as_millis() as u64,
+        }));
+    }
+    if let Some(u) = unsub.take() {
+        let _ = u.reply.send(Err(why.to_string()));
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PartitionResult {
@@ -175,6 +231,12 @@ pub struct RefreshDone {
     pub capped: bool,
     /// Remaining partitions were skipped after repeated empty master answers (throttling).
     pub stopped_early: bool,
+    /// Steam finished the `hasplayers` answer, uncapped and not stopped early: only such
+    /// a refresh may withdraw the vouch from servers it did not list (D-233). Decided
+    /// here, where the partition answers are known, so the host and the store use the
+    /// same test instead of each inferring it from the other flags (D-236).
+    #[serde(default)]
+    pub complete: bool,
     /// `steam` for the master server, `lan` for LAN discovery (D-087), `dzsa` for
     /// the fallback list (D-089).
     pub source: &'static str,
@@ -189,6 +251,7 @@ pub struct RefreshDone {
     /// `"busy"` — a refresh is already running and will report for itself. Not an error,
     /// and the targets it is collecting belong to it.
     /// `"no-session"` — Steam is not there. A real failure; nothing else is coming.
+    /// `"no-answer"` — Steam took the request and listed nothing (D-236). Nothing is coming.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<&'static str>,
 }
@@ -395,7 +458,10 @@ impl SteamWorker {
             .last_done
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .map(|t| (ServerRow::now_unix() - t).max(0) as u64);
+            // A refresh "in the future" means the clock was set back since. Clamped to
+            // "0 s ago", it held every automatic refresh back until the clock caught up
+            // again — hours, for a clock that had been wrong by hours (D-236).
+            .and_then(|t| u64::try_from(ServerRow::now_unix() - t).ok());
         s
     }
 
@@ -486,6 +552,13 @@ impl SteamWorker {
     pub fn stale_items(&self, ids: Vec<u64>) -> Option<Vec<u64>> {
         if ids.is_empty() {
             return Some(Vec::new());
+        }
+        // The one wrapper without this check, and the worker keeps a dead session after
+        // Steam closes (D-190): the client answered from it, a likely "nothing is stale"
+        // replaced the `.acf` view and cleared the update badges while Steam was
+        // closed (D-236).
+        if !self.status().initialized {
+            return None;
         }
         let (reply, rx) = mpsc::channel();
         if self.cmd.send(Cmd::StaleItems { ids, reply }).is_err() {
@@ -813,6 +886,7 @@ fn reject(cmd: Cmd, events: &UnboundedSender<SteamEvent>, e: String) {
                 partitions: Vec::new(),
                 capped: false,
                 stopped_early: true,
+                complete: false,
                 rejected: true,
                 reason: Some("no-session"),
                 source: if partitions.iter().any(|p| p.contains_key("lan")) {
@@ -849,17 +923,14 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
             }
         }
     }
-    {
-        let s = session.as_ref().expect("session just opened");
-        let steam_id = s.client.user().steam_id().raw();
-        let persona = s.client.friends().name();
-        shared.set_status(&events, |st| {
-            st.initialized = true;
-            st.error = None;
-            st.steam_id = Some(steam_id);
-            st.persona = Some(persona);
-        });
-    }
+    // Which `steam.exe` the session talks to. A Steam that restarts inside the
+    // liveness grace (a self-update does) was never noticed, and the session kept
+    // talking to a process that no longer existed (D-236).
+    let mut session_pid = publish_open(
+        &shared,
+        &events,
+        session.as_ref().expect("session just opened"),
+    );
 
     let env_idle = idle_timeout();
     let mut last_activity = Instant::now();
@@ -908,14 +979,10 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
             if session.is_none() && !matches!(cmd, Cmd::Shutdown) {
                 match open_session() {
                     Ok(s) => {
+                        session_pid = publish_open(&shared, &events, &s);
                         session = Some(s);
                         last_activity = Instant::now();
                         lost_since = None;
-                        shared.set_status(&events, |st| {
-                            st.initialized = true;
-                            st.idle = false;
-                            st.error = None;
-                        });
                     }
                     Err(e) => {
                         // A failed re-open left `initialized` true, so the UI kept
@@ -996,6 +1063,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                         partitions: Vec::new(),
                         capped: false,
                         stopped_early: true,
+                        complete: false,
                         rejected: true,
                         reason: Some("busy"),
                         source: "steam",
@@ -1028,9 +1096,23 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
         let busy = active.is_some() || sync.is_some() || unsub.is_some();
         let idle_after =
             env_idle.or_else(|| *shared.idle_after.lock().unwrap_or_else(|e| e.into_inner()));
+        // Not while Steam is reported gone: the liveness check below only runs while a
+        // session exists, so releasing a dead one here was the end of it — when Steam
+        // came back nothing noticed, every command wrapper refused to send while
+        // `initialized` was false, and only a launcher restart recovered. The dead
+        // session is kept until the "back" branch drops it, where D-194 showed that is
+        // safe (D-236).
+        let steam_present = shared
+            .status
+            .lock()
+            .map(|st| st.initialized)
+            .unwrap_or(false);
         if busy {
             last_activity = Instant::now();
-        } else if session.is_some() && idle_after.is_some_and(|d| last_activity.elapsed() >= d) {
+        } else if session.is_some()
+            && steam_present
+            && idle_after.is_some_and(|d| last_activity.elapsed() >= d)
+        {
             // Drops Client/MatchmakingServers/UGC → SteamAPI_Shutdown; frees the
             // Steam client heaps (Q16). Any later command re-opens the session.
             session = None;
@@ -1066,84 +1148,127 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
         // runs when nothing is in flight, still drops it (D-190).
         if session.is_some() && last_liveness.elapsed() >= LIVENESS_INTERVAL {
             last_liveness = Instant::now();
-            let alive = crate::steam::registry::detect().running;
-            match (alive, lost_since) {
-                (true, None) => {}
-                (true, Some(_)) => {
-                    // It came back inside the grace period, or after we reported it gone.
-                    let was_reported_gone = lost_since
-                        .is_some_and(|t: Instant| t.elapsed() >= LIVENESS_GRACE)
-                        && !shared
-                            .status
-                            .lock()
-                            .map(|st| st.initialized)
-                            .unwrap_or(false);
-                    lost_since = None;
-                    if was_reported_gone {
-                        // Steam really did go away, so the handles this session holds
-                        // point at a client that no longer exists: D-190 stopped
-                        // dropping them at the moment of the loss, which is unsafe, but
-                        // marking the session live again without re-opening it left a
-                        // corpse — every later refresh spun for the full 180 s partition
-                        // timeout and came back "0 listed". Dropping it *here* is safe:
-                        // Steam has just started, so nothing of ours is in flight, and
-                        // the next command re-initialises (D-194).
-                        session = None;
-                        crate::log_info!("steam", "Steam is back; the session will re-open");
-                        shared.set_status(&events, |st| {
-                            st.initialized = true;
-                            st.error = None;
-                        });
+            let steam = crate::steam::registry::detect();
+            let alive = steam.running;
+            if alive && session_pid == 0 {
+                session_pid = steam.pid;
+            }
+            let reported_gone = !shared
+                .status
+                .lock()
+                .map(|st| st.initialized)
+                .unwrap_or(false);
+            // The first `steam.exe` found is not necessarily the client: a `steam://`
+            // link runs a second copy for a moment. Only a session whose own process is
+            // gone has lost its Steam.
+            let restarted = alive
+                && steam.pid != session_pid
+                && !crate::steam::registry::process::steam_pids(steam.path.as_deref())
+                    .contains(&session_pid);
+            if restarted && !reported_gone {
+                // Another `steam.exe` than the one the session opened against: Steam
+                // restarted between two checks — a self-update takes a few seconds — so
+                // the grace below never saw it go, and the session went on talking to a
+                // process that no longer exists. Every refresh then spun for the full
+                // partition timeout (D-194). Handled like the "back" branch: Steam has
+                // just started, so dropping the session is safe, and the next command
+                // re-opens it (D-236).
+                crate::log_info!(
+                    "steam",
+                    "Steam restarted (pid {session_pid} → {}); the session will re-open",
+                    steam.pid
+                );
+                abandon_in_flight(
+                    &mut active,
+                    &mut sync,
+                    &mut unsub,
+                    &events,
+                    "Steam restarted",
+                );
+                session = None;
+                session_pid = 0;
+                lost_since = None;
+                shared.set_status(&events, |st| {
+                    st.initialized = true;
+                    st.refreshing = false;
+                    st.error = None;
+                });
+            } else {
+                match (alive, lost_since) {
+                    (true, None) => {}
+                    (true, Some(t)) => {
+                        // It came back inside the grace period, or after we reported it gone.
+                        let was_reported_gone = t.elapsed() >= LIVENESS_GRACE && reported_gone;
+                        lost_since = None;
+                        if was_reported_gone {
+                            // Steam really did go away, so the handles this session holds
+                            // point at a client that no longer exists: D-190 stopped
+                            // dropping them at the moment of the loss, which is unsafe, but
+                            // marking the session live again without re-opening it left a
+                            // corpse — every later refresh spun for the full 180 s partition
+                            // timeout and came back "0 listed". Dropping it *here* is safe:
+                            // Steam has just started, so nothing of ours is in flight, and
+                            // the next command re-initialises (D-194).
+                            session = None;
+                            session_pid = 0;
+                            crate::log_info!("steam", "Steam is back; the session will re-open");
+                            shared.set_status(&events, |st| {
+                                st.initialized = true;
+                                st.error = None;
+                            });
+                        }
                     }
-                }
-                (false, None) => lost_since = Some(Instant::now()),
-                (false, Some(t)) if t.elapsed() >= LIVENESS_GRACE => {
-                    // Report it once, not every interval.
-                    if shared
-                        .status
-                        .lock()
-                        .map(|st| st.initialized)
-                        .unwrap_or(false)
-                    {
-                        crate::log_warn!("steam", "Steam is no longer running");
-                        // Everything in flight belonged to a Steam that is gone, and
-                        // each one holds a spinner in the UI until it is answered.
-                        if let Some(r) = active.take() {
-                            let _ = events.send(SteamEvent::Done(RefreshDone {
-                                total: 0,
-                                responded: 0,
-                                failed: 0,
-                                inflated: 0,
-                                elapsed_ms: r.started.elapsed().as_millis() as u64,
-                                partitions: Vec::new(),
-                                capped: false,
-                                stopped_early: true,
-                                rejected: true,
-                                reason: Some("no-session"),
-                                source: "steam",
-                            }));
+                    (false, None) => lost_since = Some(Instant::now()),
+                    (false, Some(t)) if t.elapsed() >= LIVENESS_GRACE => {
+                        // Report it once, not every interval.
+                        if !reported_gone {
+                            crate::log_warn!("steam", "Steam is no longer running");
+                            // Everything in flight belonged to a Steam that is gone.
+                            abandon_in_flight(
+                                &mut active,
+                                &mut sync,
+                                &mut unsub,
+                                &events,
+                                "Steam closed",
+                            );
+                            shared.set_status(&events, |st| {
+                                st.initialized = false;
+                                st.refreshing = false;
+                                st.idle = false;
+                                st.error = Some("Steam is no longer running".into());
+                            });
                         }
-                        if let Some(job) = sync.take() {
-                            let _ = events.send(SteamEvent::SyncDone(SyncDone {
-                                job: job.job,
-                                ok: false,
-                                error: Some("Steam closed during the download".into()),
-                                items: Vec::new(),
-                                elapsed_ms: job.started.elapsed().as_millis() as u64,
-                            }));
-                        }
-                        if let Some(u) = unsub.take() {
-                            let _ = u.reply.send(Err("Steam closed".into()));
-                        }
-                        shared.set_status(&events, |st| {
-                            st.initialized = false;
-                            st.refreshing = false;
-                            st.idle = false;
-                            st.error = Some("Steam is no longer running".into());
-                        });
                     }
+                    (false, Some(_)) => {}
                 }
-                (false, Some(_)) => {}
+            }
+        }
+
+        // No session, and Steam reported unavailable — a re-open that failed, for
+        // instance a Refresh after Steam was closed while the session was released.
+        // Nothing else could ever clear that: the check above needs a session, and
+        // every command wrapper refuses to send while `initialized` is false, so the
+        // on-demand re-open below was unreachable and the launcher said "Steam is not
+        // running" with Steam up until it was restarted (D-236). Like the start-up
+        // retry (D-125), but it only marks Steam available: the session re-opens on
+        // use, so a released session stays released (D-077).
+        if session.is_none() && last_liveness.elapsed() >= STEAM_RETRY {
+            last_liveness = Instant::now();
+            let unavailable = !shared
+                .status
+                .lock()
+                .map(|st| st.initialized)
+                .unwrap_or(false);
+            if unavailable && crate::steam::registry::detect().running {
+                crate::log_info!(
+                    "steam",
+                    "Steam is running again; the session re-opens on use"
+                );
+                shared.set_status(&events, |st| {
+                    st.initialized = true;
+                    st.idle = true;
+                    st.error = None;
+                });
             }
         }
 
@@ -1170,22 +1295,52 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                             && r.results
                                 .iter()
                                 .all(|p| p.filters.contains_key(LAN_PARTITION_KEY));
+                        let total: usize = r.results.iter().map(|p| p.total).sum();
+                        let capped = r.results.iter().any(|p| p.capped);
+                        // A list refresh that listed nothing was never answered: the
+                        // partition timed out, or the master said
+                        // `NoServersListedOnMasterServer`, its throttling answer (D-046).
+                        // It used to report as a complete, successful refresh — the
+                        // throttle and `last_refresh` were armed, every Steam vouch was
+                        // withdrawn (D-233), and "0 from Steam" read as a result (D-236).
+                        let unanswered = !lan_only && total == 0;
+                        // Vouches may only be withdrawn by a `hasplayers` answer Steam
+                        // finished: a timed-out or throttled one never reached every
+                        // populated server, and withdrawing on it punished the rest.
+                        let populated: Vec<&PartitionResult> = r
+                            .results
+                            .iter()
+                            .filter(|p| p.filters.contains_key("hasplayers"))
+                            .collect();
+                        let complete = !lan_only
+                            && !unanswered
+                            && !capped
+                            && !r.stopped_early
+                            && !populated.is_empty()
+                            && populated
+                                .iter()
+                                .all(|p| p.total > 0 && p.response != "NoAnswer");
                         let done = RefreshDone {
                             source: if lan_only { "lan" } else { "steam" },
-                            total: r.results.iter().map(|p| p.total).sum(),
+                            total,
                             responded: r.results.iter().map(|p| p.responded).sum(),
                             failed: r.results.iter().map(|p| p.failed).sum(),
                             inflated: r.results.iter().map(|p| p.inflated).sum(),
                             elapsed_ms: r.started.elapsed().as_millis() as u64,
-                            capped: r.results.iter().any(|p| p.capped),
+                            capped,
                             stopped_early: r.stopped_early,
-                            rejected: false,
-                            reason: None,
+                            complete,
+                            rejected: unanswered,
+                            reason: unanswered.then_some("no-answer"),
                             partitions: std::mem::take(&mut r.results),
                         };
                         let _ = events.send(SteamEvent::Done(done));
-                        *shared.last_done.lock().unwrap_or_else(|e| e.into_inner()) =
-                            Some(ServerRow::now_unix());
+                        // A LAN scan is not a list refresh and must not hold the next
+                        // one back (D-160); an unanswered one fetched nothing to protect.
+                        if !lan_only && !unanswered {
+                            *shared.last_done.lock().unwrap_or_else(|e| e.into_inner()) =
+                                Some(ServerRow::now_unix());
+                        }
                         active = None;
                         shared.set_status(&events, |s| s.refreshing = false);
                     }

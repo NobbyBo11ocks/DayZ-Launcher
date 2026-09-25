@@ -661,17 +661,22 @@ impl Cache {
             .query_map(params![cutoff], |r| r.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let n = ids.len();
-        // `prune` is the only DELETE on `servers`, so nothing can be orphaned unless
-        // it deleted something — and the sweep measured 23.6 ms over 127 000 mod rows
-        // every completed refresh (D-175). The one other way to orphan them is a
-        // schema bump, which drops `servers`; `migrate` clears the mod tables there.
         if n > 0 {
-            self.conn.execute_batch(
+            // Row loss has been a mystery before (Q22), so every deletion is recorded —
+            // before the sweep, which used to skip the line and lose the ids with it
+            // when it failed after the rows were already gone (D-236).
+            crate::log_info!("cache", "pruned {n} server(s) unseen since {cutoff}");
+            // `prune` is the only DELETE on `servers`, so nothing can be orphaned unless
+            // it deleted something — and the sweep measured 23.6 ms over 127 000 mod rows
+            // every completed refresh (D-175). The one other way to orphan them is a
+            // schema bump, which drops `servers`; `migrate` clears the mod tables there.
+            // A failed sweep leaves rows nothing reads, and the next prune retries it.
+            if let Err(e) = self.conn.execute_batch(
                 "DELETE FROM server_mods WHERE server_id NOT IN (SELECT id FROM servers);
                  DELETE FROM server_mods_at WHERE server_id NOT IN (SELECT id FROM servers);",
-            )?;
-            // Row loss has been a mystery before (Q22), so every deletion is recorded.
-            crate::log_info!("cache", "pruned {n} server(s) unseen since {cutoff}");
+            ) {
+                crate::log_warn!("cache", "mod lists of pruned servers not swept: {e}");
+            }
         }
         Ok(ids)
     }

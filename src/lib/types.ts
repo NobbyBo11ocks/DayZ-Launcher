@@ -228,12 +228,16 @@ export type RefreshDone = {
   capped: boolean;
   /** Later partitions were skipped after Steam's master stopped answering (throttling). */
   stoppedEarly: boolean;
+  /** Steam finished the `hasplayers` answer, uncapped: the only kind of refresh that may
+   *  withdraw a vouch from the servers it did not list. The host decides (D-236). */
+  complete?: boolean;
   /** The request never reached Steam: an answer so the UI stops waiting, not a result (D-160). */
   rejected?: boolean;
   /** Why: "busy" (a refresh is already running and will report for itself — not an
-   *  error) or "no-session" (Steam is not there). One flag for both put a permanent
-   *  failure on screen for a double-click on Refresh (D-208). */
-  reason?: "busy" | "no-session" | null;
+   *  error), "no-session" (Steam is not there) or "no-answer" (Steam listed nothing,
+   *  D-236). One flag for all of them put a permanent failure on screen for a
+   *  double-click on Refresh (D-208). */
+  reason?: "busy" | "no-session" | "no-answer" | null;
 };
 
 export type Verification = {

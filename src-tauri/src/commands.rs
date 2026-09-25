@@ -298,6 +298,7 @@ pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResu
         partitions: Vec::new(),
         capped: false,
         stopped_early: false,
+        complete: false,
         rejected: false,
         reason: None,
         source: "dzsa",
@@ -611,9 +612,12 @@ pub async fn run_mod_scan(
             // Modded servers with real players, not scanned recently. The fake ones
             // that only claim players in INFO (rule R0, ~20 000 rows) are skipped;
             // scanning them would be a 23 000-flow sweep for nothing (D-037).
+            // A failed read used to become an empty target list and a "scanned 0"
+            // summary with nothing in the log (D-236).
             c.lock()
                 .ok()?
                 .scan_targets(force, now, MOD_SCAN_MAX_AGE_SECS)
+                .map_err(|e| crate::log_warn!("cache", "mod scan targets unreadable: {e}"))
                 .ok()
         })
         .await
