@@ -62,6 +62,9 @@ pub struct AppInfo {
     version: &'static str,
     tauri: &'static str,
     os: &'static str,
+    /// Running with an administrator token (matched to an elevated Steam, D-119): the
+    /// News page then keeps the third-party video frame out of the process (D-248).
+    elevated: bool,
 }
 
 /// Static build information for the Settings page (the Diagnostics view went in D-168) and the M0 smoke test.
@@ -74,6 +77,7 @@ pub fn app_info() -> AppInfo {
         version: env!("CARGO_PKG_VERSION"),
         tauri: tauri::VERSION,
         os: std::env::consts::OS,
+        elevated: crate::proc::current_is_elevated(),
     }
 }
 

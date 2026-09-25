@@ -114,4 +114,4 @@ PLAYER is one datagram each way. Measured (D-050): the automatic pass after a re
 - Players column shows the verified count; until verified, the INFO number is dimmed with a "reported" tooltip.
 - Badges: ⚠ *inflated*, ? *unverifiable*; both excluded by the default filter "Hide inflated servers" (user can disable).
 - Sorting by players uses the verified number, so farms drop to the bottom instead of the top.
-- Details pane shows both numbers and the rule that fired, so the user can see why.
+- Details pane shows both numbers and the rule that fired — in the player's words, with the rule's own on hover (D-248) — so the user can see why.

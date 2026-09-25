@@ -11,7 +11,7 @@
   import { updates } from "./state/updates.svelte";
   import type { Settings } from "./types";
 
-  type AppInfo = { name: string; version: string; tauri: string; os: string };
+  type AppInfo = { name: string; version: string; tauri: string; os: string; elevated?: boolean };
   let app = $state<AppInfo | null>(null);
   $effect(() => {
     invoke<AppInfo>("app_info")
@@ -320,6 +320,7 @@
   .chip.accent:hover { filter: brightness(1.08); color: var(--accent-fg); }
   .chip:disabled { opacity: 0.5; cursor: default; }
   .chip:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
+  .chip.accent:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 
   /* Accent dots: each carries its own --accent through its data-accent attribute (app.css), so the
      fill and the selection ring are the dot's colour, not the current theme's. */

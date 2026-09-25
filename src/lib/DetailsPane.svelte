@@ -12,7 +12,7 @@
   import { external } from "./external";
   import { mapLabel } from "./maps";
   import { servers, pingUnmeasured } from "./state/servers.svelte";
-  import { clock, countryName, type Diagnostics, isInflated, type PopulationSample, queueOf, type ServerDetails, type ServerRow, trustedPlayers } from "./types";
+  import { clock, countryName, type Diagnostics, isInflated, type PopulationSample, queueOf, type ServerDetails, type ServerRow, trustedPlayers, type Verification } from "./types";
 
   let { row, localVersion }: { row: ServerRow | null; localVersion: string | null } = $props();
 
@@ -174,6 +174,49 @@
     };
   });
 
+  /** Highest sample and how many hours the samples span, for the population section. */
+  const peak = $derived(samples.reduce<PopulationSample | null>((m, s) => (m == null || s.players > m.players ? s : m), null));
+  const peakWhen = $derived(peak ? new Date(peak.ts * 1000).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" }) : "");
+  const hoursShown = $derived.by(() => {
+    if (!samples.length) return 72;
+    let oldest = Infinity;
+    for (const s of samples) if (s.ts < oldest) oldest = s.ts;
+    return Math.max(1, Math.min(72, Math.ceil((Date.now() / 1000 - oldest) / 3600)));
+  });
+
+  /**
+   * The rule's verdict in the player's words. The reason strings are the rules' own
+   * ("INFO 40 vs PLAYER 3", "all_young=false, named=true") and were shown as they
+   * were — the same leak as D-234, on every server (D-248).
+   */
+  function explain(v: Verification): string {
+    const claim = v.reported >= 0 ? String(v.reported) : null;
+    const n = v.verified ?? 0;
+    switch (v.verdict) {
+      case "verified":
+        if (v.reason.startsWith("INFO reports 0")) return "The server reports nobody on it and did not answer the player-list query.";
+        if (v.reason.includes("INFO did not answer")) return `${n} counted; the server's own number did not arrive.`;
+        return claim != null ? `${n} counted; the server advertises ${claim}.` : `${n} counted.`;
+      case "inflated":
+        if (v.reason.includes("zero-length")) return `${n} real session${n === 1 ? "" : "s"}; the rest of the list are entries no clock produced.`;
+        return `The server advertises ${claim ?? "more"} players; ${n} ${n === 1 ? "is" : "are"} actually connected.`;
+      case "unverifiable":
+        return `The server advertises ${claim ?? "some"} players but did not answer the player-list query.`;
+      case "offline":
+        return "The server did not answer at all.";
+      case "synthetic": {
+        if (v.reason.includes("named=true")) return "The player list looks generated: its entries carry names, which real DayZ lists never do.";
+        if (v.reason.includes("carried over between checks")) return "The player list looks generated: the sessions seen at the previous check did not carry over.";
+        if (v.reason.includes("earlier checks")) return "Sessions did not carry over at earlier checks; waiting for a check close enough to compare.";
+        const m = /^(\d+) entries, (\d+) distinct/.exec(v.reason);
+        if (m) return `The player list looks generated: ${m[1]} entries with only ${m[2]} different session length${m[2] === "1" ? "" : "s"}.`;
+        return "The player list looks generated.";
+      }
+      default:
+        return v.reason;
+    }
+  }
+
   const verdictLabel: Record<string, string> = {
     verified: "Verified head-count",
     inflated: "Inflated player count",
@@ -223,6 +266,9 @@
         <button class="star" aria-label={servers.favourites.has(row.id) ? "Remove from favourites" : "Add to favourites"} class:on={servers.favourites.has(row.id)} onclick={() => servers.toggleFavourite(row.id)} aria-pressed={servers.favourites.has(row.id)} title="Favourite (F)">
           {servers.favourites.has(row.id) ? "★" : "☆"}
         </button>
+        <!-- Below 1240 px the pane is an overlay; without this its only exit by mouse
+             was the selected row underneath it (D-248). -->
+        <button class="star" aria-label="Close server details" title="Close (Esc)" onclick={() => servers.select(null)}>✕</button>
       </div>
     </header>
 
@@ -242,7 +288,8 @@
         <span class="muted">The server does not answer player queries. Steam sees at least one session, which does not confirm the {row.players} it claims.</span>
       {:else if v}
         <strong>{verdictLabel[v.verdict]}</strong>
-        <span class="muted">{v.reason}</span>
+        <!-- The rule's own words stay on hover; the sentence is for the player (D-248). -->
+        <span class="muted" title={v.reason}>{explain(v)}</span>
       {:else}
         <strong class="muted">{loading ? "Querying server…" : "Not verified yet"}</strong>
       {/if}
@@ -305,8 +352,11 @@
     {/if}
 
     <section>
-      <h3>Population, last 72 h</h3>
-      <Sparkline {samples} maxPlayers={row.maxPlayers} />
+      <!-- The axis spans the samples, not a fixed 72 h nobody could fill — the launcher
+           ran 15 of the 42 hours the cache covered — and the peak is named (D-248). -->
+      <h3>Population, last {hoursShown} h</h3>
+      <Sparkline {samples} maxPlayers={row.maxPlayers} hours={hoursShown} />
+      {#if peak}<p class="peak">Peak {peak.players}/{row.maxPlayers} at {peakWhen}</p>{/if}
     </section>
 
     <section>
@@ -376,11 +426,12 @@
   .actions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
   .join { all: unset; cursor: pointer; flex: 1; text-align: center; padding: 8px 18px; border-radius: var(--radius); background: var(--accent); color: var(--accent-fg); font-weight: 600; }
   .join:hover { filter: brightness(1.08); }
-  .join:focus-visible { outline: 2px solid var(--accent-ink); }
+  .join:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
   .star { all: unset; cursor: pointer; flex: none; width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); border: 1px solid var(--border); font-size: 17px; color: var(--fg-muted); }
   .star.on, .star:hover { color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
   .star:focus-visible { outline: 2px solid var(--accent-ink); }
 
+  .peak { margin: 4px 0 0; font-size: 11.5px; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
   .trust { padding: 8px 10px; border-radius: var(--radius); border: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
   .trust.good { border-color: color-mix(in srgb, var(--ok) 50%, var(--border)); }
   .trust.bad { border-color: color-mix(in srgb, var(--warn) 60%, var(--border)); }

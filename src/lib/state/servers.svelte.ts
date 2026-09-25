@@ -1074,6 +1074,9 @@ class ServersStore {
     }
     for (const id of ids) this.friendsOn.delete(id);
     if (this.selectedId && !this.rows.has(this.selectedId)) this.selectedId = null;
+    // A join dialog open on a pruned row would fail its next step with "unknown
+    // server"; it closes instead (D-248).
+    if (this.joiningId && !this.rows.has(this.joiningId)) this.joiningId = null;
     // It only ever went from false to true, so once the prune took the last row Steam
     // listed as empty, the empty state kept saying "widen the filters" instead of
     // offering the Refresh that brings them back (D-210, D-236).

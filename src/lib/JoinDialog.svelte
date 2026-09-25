@@ -292,9 +292,16 @@
     // which is the D-184 failure all over again (D-197).
     void phase;
     if (dialogEl?.contains(document.activeElement)) return;
-    const first = dialogEl?.querySelector<HTMLElement>(
-      'input:not([disabled]), select:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
-    );
+    // The password field when one is needed, else the primary button: in DOM order
+    // the first control was the footer's Cancel, so Enter on a row and Enter again —
+    // the natural next keypress — cancelled the join, and a screen reader's first
+    // word on a dialog named after a server was "Cancel" (D-248).
+    const first =
+      dialogEl?.querySelector<HTMLElement>('input[type="password"]:not([disabled])') ??
+      dialogEl?.querySelector<HTMLElement>("button.btn:not(.secondary):not([disabled])") ??
+      dialogEl?.querySelector<HTMLElement>(
+        'input:not([disabled]), select:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+      );
     (first ?? dialogEl)?.focus();
   });
 
@@ -426,8 +433,8 @@
       {:else if phase === "launching"}
         <p class="status" role="status" aria-live="polite">Starting DayZ through BattlEye…</p>
       {:else if phase === "running" && launched}
-        <p class="status ok" role="status" aria-live="polite">DayZ is running (pid {launched.pid}). You can close this window.</p>
-        <details class="cmd"><summary class="muted small">Command line</summary><code>{launched.commandLine}</code></details>
+        <p class="status ok" role="status" aria-live="polite">DayZ is running. You can close this window.</p>
+        <details class="cmd"><summary class="muted small">Command line · process {launched.pid}</summary><code>{launched.commandLine}</code></details>
       {:else if phase === "exited" && exit}
         <p class="status" role="status" aria-live="polite" class:warn={exit.code !== 0}>DayZ exited{exit.code != null ? ` with code ${exit.code}` : ""}.</p>
       {/if}

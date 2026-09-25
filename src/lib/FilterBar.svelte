@@ -208,7 +208,7 @@
       </select>
     </label>
 
-    <button class="chip" class:on={f.hideUntrusted} aria-pressed={f.hideUntrusted} onclick={() => toggle("hideUntrusted")} title="Hide servers whose player counts are inflated or unverifiable (docs/11)">
+    <button class="chip" class:on={f.hideUntrusted} aria-pressed={f.hideUntrusted} onclick={() => toggle("hideUntrusted")} title="Hide servers whose player count cannot be trusted: inflated, fabricated, not answering, or a copy of another server's name">
       Hide inflated <span class="num">{fmt.format(servers.untrustedCount)}</span>
     </button>
 
@@ -245,6 +245,9 @@
   .segbtn:hover { color: var(--fg); }
   .segbtn.on { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
   .segbtn:focus-visible { outline: 2px solid var(--accent-ink); }
+  /* On the accent fill the accent ring is invisible (1.00:1); the `.btn` rule's
+     foreground ring with a gap is what D-186 chose for the same case (D-248). */
+  .segbtn.on:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 
   .select { box-sizing: border-box; height: 28px; padding: 0 6px; border-radius: var(--radius); border: 1px solid var(--border-control); background: var(--bg-row); color: var(--fg); font-size: 12.5px; max-width: 150px; }
   .select:focus-visible { outline: 2px solid var(--accent-ink); }

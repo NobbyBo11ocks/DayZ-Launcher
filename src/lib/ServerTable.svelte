@@ -128,7 +128,8 @@
       }
       return;
     }
-    if (e.key === "f" || e.key === "F") {
+    // A bare F only: Ctrl+F and Alt+F used to toggle the favourite too (D-248).
+    if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.altKey && !e.metaKey) {
       if (selectedId) {
         e.preventDefault();
         onFavourite(selectedId);
@@ -150,13 +151,18 @@
       onSort(sort.key);
       return;
     }
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Enter" && e.key !== "Home" && e.key !== "End") return;
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Enter" && e.key !== "Home" && e.key !== "End" && e.key !== "PageDown" && e.key !== "PageUp") return;
     e.preventDefault();
     if (rows.length === 0) return;
     const idx = selectedId ? rows.findIndex((r) => r.id === selectedId) : -1;
     let next = idx;
+    // A page is what fits, less one row for continuity; the scroll box is a
+    // descendant of the focused grid, so the browser's own PageDown did nothing (D-248).
+    const page = Math.max(1, Math.floor(height / ROW) - 1);
     if (e.key === "ArrowDown") next = Math.min(rows.length - 1, idx + 1);
     if (e.key === "ArrowUp") next = Math.max(0, idx - 1);
+    if (e.key === "PageDown") next = Math.min(rows.length - 1, Math.max(0, idx) + page);
+    if (e.key === "PageUp") next = Math.max(0, idx - page);
     if (e.key === "Home") next = 0;
     if (e.key === "End") next = rows.length - 1;
     if (e.key === "Enter") {
@@ -397,7 +403,8 @@
   .row.untrusted { color: var(--fg-muted); }
   .cell { padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .c-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
-  .star { all: unset; cursor: pointer; flex: none; width: 18px; text-align: center; color: var(--fg-muted); opacity: 0.55; font-size: 13px; }
+  /* .55 measured 2.68:1 (dark) / 2.29 (light) on the page; .8 gives 3.9 / 3.3 (D-248). */
+  .star { all: unset; cursor: pointer; flex: none; width: 18px; text-align: center; color: var(--fg-muted); opacity: 0.8; font-size: 13px; }
   .star:hover, .star.on { opacity: 1; color: var(--accent-ink); }
   .flags { display: inline-flex; gap: 4px; flex: none; }
   .flag { font-size: 11px; }

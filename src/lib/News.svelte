@@ -82,9 +82,23 @@
     }
   }
   const embed = (id: string) => `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&modestbranding=1`;
+  // Elevated (matched to an elevated Steam, D-119) the process already runs every
+  // untrusted parser as administrator; the third-party player is the one thing that
+  // need not join it, so a video opens in the browser instead (D-248).
+  let elevated = $state(false);
+  $effect(() => {
+    invoke<{ elevated?: boolean }>("app_info")
+      .then((i) => (elevated = i.elevated === true))
+      .catch(() => {});
+  });
   function play(n: NewsItem) {
+    if (!n.video) return;
+    if (elevated) {
+      open(watch(n));
+      return;
+    }
     returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    if (n.video) playing = { id: n.video, title: n.title };
+    playing = { id: n.video, title: n.title };
   }
   function onPlayerKey(e: KeyboardEvent) {
     if (e.key === "Escape" && playing) {
@@ -224,6 +238,7 @@
   .segbtn:hover { color: var(--fg); }
   .segbtn.on { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
   .segbtn:focus-visible { outline: 2px solid var(--accent-ink); }
+  .segbtn.on:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 
   .scroll { flex: 1; min-height: 0; overflow: auto; padding-right: 4px; display: flex; flex-direction: column; gap: 12px; }
   /* The list scrolls; its children keep their natural height instead of shrinking
