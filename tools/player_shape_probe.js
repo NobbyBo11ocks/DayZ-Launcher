@@ -108,7 +108,21 @@ for (const t of targets) {
   const a = first.get(t.id);
   const b = second.get(t.id);
   if (a && b && a.durations.length >= 5) {
-    carriedShare.push(carriedOver(a.durations, b.durations, b.at - a.at) / a.durations.length);
+    const gap = b.at - a.at;
+    const share = carriedOver(a.durations, b.durations, gap) / a.durations.length;
+    carriedShare.push(share);
+    // A restart between the passes is exempt from R11 and says so here: every session
+    // in the second list is younger than the gap. Anything else this low is what R11
+    // is for, and is worth looking at by hand (D-243).
+    if (share <= 0.2) {
+      const restarted = b.durations.every((d) => d < gap);
+      console.log(
+        `few sessions carried over (${Math.round(share * 100)} %)`,
+        t.id,
+        restarted ? "— restarted between the passes" : "— NOT a restart",
+        JSON.stringify({ before: a.durations.length, after: b.durations.length, gap: Math.round(gap) }),
+      );
+    }
   }
 }
 carriedShare.sort((x, y) => x - y);

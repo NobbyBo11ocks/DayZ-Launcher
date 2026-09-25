@@ -72,7 +72,7 @@ A code audit, not a new measurement: each change removes a path by which the rul
 
 | Rule | Where | Condition | Yield | False-positive check |
 |---|---|---|---|---|
-| R12 | `verify.rs` `judge`, before R5 | two or more PLAYER entries with 0 < duration < 1 ms: those entries are not counted, and the verdict is **Inflated** with the remaining sessions as the head-count | Every server running T2 as it ships (above) with a real player on it; not measured live — there is no live cache in the container this was written in | A real duration under a millisecond needs the query to land within a millisecond of the connection, for two players at once; one such entry alone is exempt, and an entry at exactly 0.0 is not counted as zero-length. To be confirmed on honest lists with `tools/player_shape_probe.js` (Q27) |
+| R12 | `verify.rs` `judge`, before R5 | two or more PLAYER entries with 0 < duration < 1 ms: those entries are not counted, and the verdict is **Inflated** with the remaining sessions as the head-count | Every server running T2 as it ships (above) with a real player on it; not measured live — there is no live cache in the container this was written in | A real duration under a millisecond needs the query to land within a millisecond of the connection, for two players at once; one such entry alone is exempt, and an entry at exactly 0.0 is not counted as zero-length. **Measured 2026-09-25 (D-243):** 0 of 259 honest lists from 150 verified servers carried even one zero-length entry |
 
 ### What the live probe found (245 addresses, 345 records, 14:52–15:08 UTC, D-037 respected)
 
