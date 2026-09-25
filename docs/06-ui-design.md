@@ -50,7 +50,7 @@ Header: name, map, version (red badge if it differs from the local client), JOIN
 
 ## 4. Filters
 
-Chips above the table: Perspective (1PP/3PP), Map, Country (D-073), Not full, Not empty, Has queue, No password, Official / Community hive (D-195), Modded/Vanilla, Day only, Max ping, Mod (one, chosen from the union of seen mods, D-080), Version = mine, Friends (D-128) and Hide inflated. All filters persist. Two specified here were never built: a time-acceleration filter, and multi-select on mods — one mod answers "which servers run this", which is the question people actually ask.
+Chips above the table: Perspective (1PP/3PP), Map, Country (D-073), Not full, Not empty, Has queue, No password, Official / Community hive (D-195), Modded/Vanilla, Day only, Playstyle (PVE / PVP / RP, D-208), Max ping (with presets, D-208), Mod (one, chosen from the union of seen mods, D-080), Version = mine, Friends (D-128) and Hide inflated. All filters persist. Two specified here were never built: a time-acceleration filter, and multi-select on mods — one mod answers "which servers run this", which is the question people actually ask.
 
 ## 5. Visual system
 
@@ -58,7 +58,7 @@ Chips above the table: Perspective (1PP/3PP), Map, Country (D-073), Not full, No
 - Themes: **Slate** (default dark, neutral greys with a single accent) and **Light**. Twelve accents in colour-wheel order (amber, orange, red, rose, pink, violet, indigo, blue, sky, teal, green, lime), each with a vivid dark-theme tone and a deeper light-theme tone; picked as a row of dots in Settings (D-131). **Lime** is the default (D-132). Theme and accent switch instantly (attributes on `<html>`).
 - Typography: Segoe UI Variable / system-ui; 13 px table, 15 px headers, tabular numerals for ping/players.
 - Motion: 120 ms fades, no slides on lists; skeleton rows while the first batch streams; reduced-motion respected.
-- Iconography: per-component inline SVG; the shared sprite was specified here and never built (docs/05 §10), stroke icons 16 px.
+- Iconography: per-component inline SVG; the shared sprite was specified here and never built (docs/05 §7), stroke icons 16 px.
 
 ## 6. States and copy
 

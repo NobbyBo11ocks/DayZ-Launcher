@@ -418,14 +418,14 @@
       <section class="wrap">
         <h2>Measured, not claimed</h2>
         <p class="sub">
-          Taken on the reference machine at v0.1.23, with the whole cached list loaded. Every release is measured
+          Taken on the reference machine — cold start and memory at v0.1.19 and v0.1.23 with the whole cached list loaded, the refresh as the median of five passes at v0.1.37. Every release is measured
           against a written budget before it ships, and the numbers are in the repository.
         </p>
         <div class="stats">
           <div class="stat"><div class="v">0.43 s</div><div class="k">cold start to first frame</div></div>
           <div class="stat"><div class="v">0.20 %</div><div class="k">of one core, idle</div></div>
           <div class="stat"><div class="v">4.7 MB</div><div class="k">installer</div></div>
-          <div class="stat"><div class="v">42 s</div><div class="k">full populated-server refresh</div></div>
+          <div class="stat"><div class="v">≈35 s</div><div class="k">populated-server refresh, then ≈25 s to verify</div></div>
           <div class="stat"><div class="v">~306 MB</div><div class="k">memory, whole app</div></div>
         </div>
       </section>

@@ -7,6 +7,10 @@
 // releases went unpublished that way before anyone looked at why the updater was still
 // serving an older version (D-228).
 //
+// What it cannot see: an edit that keeps the YAML valid but breaks an `if:` or `${{ }}`
+// expression or a `uses:` ref fails at GitHub the same silent way; `actionlint` would
+// catch those (D-246).
+//
 // Also checks for duplicated step names, which is what a botched edit looks like when
 // the YAML still happens to parse.
 //

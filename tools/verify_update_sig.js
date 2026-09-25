@@ -38,6 +38,9 @@ const win = manifest.platforms?.["windows-x86_64-nsis"] ?? manifest.platforms?.[
 if (!win?.url || !win?.signature) fail("manifest lacks platforms.windows-x86_64[-nsis].url/signature");
 console.log(`manifest  ${manifestSrc}`);
 console.log(`version   ${manifest.version}  pub_date ${manifest.pub_date ?? "-"}`);
+// The updater parses `pub_date` as RFC 3339 when present; one it cannot parse fails every
+// install's check, which this gate would otherwise pass (D-246).
+if (manifest.pub_date != null && Number.isNaN(Date.parse(manifest.pub_date))) fail(`pub_date ${manifest.pub_date} does not parse`);
 console.log(`installer ${win.url}`);
 
 let downloaded = false;

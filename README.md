@@ -155,7 +155,7 @@ No accounts, no API keys, no telemetry. Every destination it contacts is listed 
 ```mermaid
 flowchart LR
   Steam[("Steam client")] -- matchmaking list --> Cache[("SQLite cache")]
-  Servers["Game servers"] -- "A2S info · rules · players" --> Verify{"Trust rules<br/>R0–R11"}
+  Servers["Game servers"] -- "A2S info · rules · players" --> Verify{"Trust rules<br/>R0–R12"}
   Verify -- verified --> Cache
   Verify -- inflated / fake --> Hidden["Hidden by default"]
   Cache --> UI["Server browser"]
@@ -219,7 +219,7 @@ npm install
 npm run tauri dev
 ```
 
-The six checks CI runs, in order — `cargo fmt --check` is the one that catches people out:
+The seven checks CI runs, in order — `cargo fmt --check` is the one that catches people out:
 
 ```bash
 npm run check
@@ -245,6 +245,10 @@ cargo test --manifest-path src-tauri/Cargo.toml
 node tools/nsis_template_check.js
 ```
 
+```bash
+node tools/workflow_check.js
+```
+
 <details>
 <summary><b>Installer and updater signing</b></summary>
 
@@ -254,7 +258,7 @@ npm run tauri build
 
 Output: `src-tauri/target/release/bundle/nsis/` (`DZSA CrayZ Launcher_<version>_x64-setup.exe` plus a `.sig` for the updater).
 
-`src-tauri/nsis/installer.nsi` is a copy of Tauri's stock template carrying **eight marked deviations**, plus one new file (`nsis/hooks.nsh`) on Tauri's own extension point. Each deviation is bracketed by `; >>> dzl-change:` and carries the upstream lines it replaces, so `node tools/nsis_template_check.js` puts them all back and compares against the real thing rather than keeping a second copy of what we wrote (D-205):
+`src-tauri/nsis/installer.nsi` is a copy of Tauri's stock template carrying **seven deviations in eight marked blocks**, plus one new file (`nsis/hooks.nsh`) on Tauri's own extension point. Each deviation is bracketed by `; >>> dzl-change:` and carries the upstream lines it replaces, so `node tools/nsis_template_check.js` puts them all back and compares against the real thing rather than keeping a second copy of what we wrote (D-205):
 
 1. The per-user default install directory is `%LOCALAPPDATA%\Programs\<product>` rather than `%LOCALAPPDATA%\<product>`, which collided with the official DayZ Launcher's data folder under this app's original name (D-067).
 2. An options page before anything is written, so the news question is answered before the launcher has ever run (D-206), and `/NONEWS` for silent installs.
@@ -266,7 +270,7 @@ Output: `src-tauri/target/release/bundle/nsis/` (`DZSA CrayZ Launcher_<version>_
 
 Auto-updates were never affected by any of this — the updater always passes `/UPDATE`.
 
-After upgrading `@tauri-apps/cli`, run the check (add `--write` to refresh the copy from the new tag and re-apply both changes).
+After upgrading `@tauri-apps/cli`, run the check (add `--write` to refresh the copy from the new tag and re-apply every marked change).
 
 The installer's header and sidebar artwork comes from `node tools/nsis_art.js`, and the README banner from `node tools/readme_banner.js` — both drawn from the same mark as the app icon, so the three cannot drift apart.
 
@@ -293,7 +297,7 @@ Bump `version` in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.co
 git tag vX.Y.Z && git push origin main vX.Y.Z
 ```
 
-The [release workflow](.github/workflows/release.yml) builds the signed installer on a clean Windows runner, creates the release with generated notes, uploads the installer, its `.sig` and `latest.json`, smoke-installs the result, and verifies the published manifest. It needs **one** repository secret, set once from the machine that holds the key. In PowerShell:
+The [release workflow](.github/workflows/release.yml) builds the signed installer on a clean Windows runner, creates the release as a draft with generated notes, uploads the installer, its `.sig` and `latest.json`, smoke-installs the result, publishes the draft only when that passes, and verifies the published manifest; a draft a failed run leaves is deleted. It needs **one** repository secret, set once from the machine that holds the key. In PowerShell:
 
 ```powershell
 (Get-Content "$env:USERPROFILE\.tauri\dayz-launcher.key" -Raw).Trim() | gh secret set TAURI_SIGNING_PRIVATE_KEY --repo NobbyBo11ocks/DayZ-Launcher
@@ -353,7 +357,7 @@ src-tauri/src/       Rust host
   log.rs             The app's own log: memory ring plus a rotating file
   geoip.rs           Offline IP-to-country lookup read in place from the image
   http.rs            Capped response bodies for every outbound fetch
-src-tauri/nsis/      Installer template (stock Tauri template, install dir changed)
+src-tauri/nsis/      Installer template (Tauri's stock template with seven marked deviations)
                      plus the header and sidebar bitmaps the setup wizard uses
 docs/                Research, architecture, budgets, sources, decisions log
 site/                The landing page

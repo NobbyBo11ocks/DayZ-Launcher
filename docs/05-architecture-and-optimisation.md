@@ -16,20 +16,20 @@ One window, no tray icon by default, no background service. Minimising does not 
 | Module | Responsibility | Key crates |
 |---|---|---|
 | `steam/locate.rs` | registry → SteamPath, libraries, game folder, exe version | `winreg`, `keyvalues-parser` |
-| `steam/workshop.rs` | `appworkshop_221100.acf`, `meta.cpp`, junction inventory | `keyvalues-parser`, `junction`, `notify` |
+| `steam/workshop.rs` | `appworkshop_221100.acf`, `meta.cpp`, junction inventory | `keyvalues-parser`, `junction` |
 | `steam/sdk.rs` | Steamworks client thread: server list, UGC subscribe/download/progress | `steamworks` |
 | `a2s/{reader,packet}.rs` | packet build/parse, split-packet reassembly, challenge | – |
 | `a2s/{info,rules,players,tags}.rs` | INFO, DayZ's mod payload in RULES, PLAYER, keyword tags (spec in [03](03-server-discovery-and-a2s.md)) | – |
 | `a2s/client.rs` | bounded-concurrency UDP fan-out, pacing, timeouts, retries, RTT | `tokio` |
-| `browser/{model,cache,verify,dzsa}.rs` | server row, SQLite cache, trust rules R2–R5, DZSA fallback list | `rusqlite` (bundled, WAL) |
+| `browser/{model,cache,verify,dzsa}.rs` | server row, SQLite cache, trust rules R2–R5, R11 and R12 (R0, R6 and R8–R10 live in `src/lib/types.ts` and the store), DZSA fallback list | `rusqlite` (bundled, WAL) |
 | `launch/{args,mods,process}.rs` | `-mod=` builder, junction creation, `DayZ_BE.exe` spawn, exit watch | `std::process` |
-| `commands.rs` | Tauri IPC surface (typed, camelCase); events are emitted from `lib.rs` | `tauri`, `serde` |
+| `commands.rs` | Tauri IPC surface (typed, camelCase); events are emitted from `lib.rs` and `commands.rs` | `tauri`, `serde` |
 | `settings.rs` | JSON settings in `%APPDATA%\<app>\settings.json`, written temp + rename | `serde_json` |
-| `news.rs`, `geoip.rs`, `proc.rs`, `log.rs`, `http.rs`, `error.rs` | Steam news and thumbnails, offline IP→country, priority and elevation, the app's own log, capped HTTP bodies, the error type | `reqwest`, `image`, `windows` |
+| `news.rs`, `geoip.rs`, `proc.rs`, `log.rs`, `http.rs`, `error.rs` | Steam news and thumbnails, offline IP→country, priority and elevation, the app's own log, capped HTTP bodies, the error type | `reqwest`, `image`, `windows-sys` |
 
 ## 3. Data flow
 
-1. Startup: the browser calls `servers_cached` → UI renders in < 100 ms. (There is no `servers:snapshot` event; the emitted names are `servers:batch`, `servers:done`, `servers:pruned`, `servers:verified`, `servers:verify-done`, `servers:mods*`, `steam:status` and `launch:*`.)
+1. Startup: the browser calls `servers_cached` → UI renders in < 100 ms. (There is no `servers:snapshot` event; the emitted names are `servers:batch`, `servers:done`, `servers:pruned`, `servers:verified`, `servers:verify-done`, `servers:mods-start`, `servers:mods`, `servers:mods-done`, `mods:progress`, `mods:done`, `steam:status` and `launch:*`.)
 2. Steam thread: `internet_server_list(221100)` streams `GameServerItem`s → batch every 100 ms → `servers:batch` event.
 3. A2S worker: INFO for every listed server (ping + live players/keywords) with concurrency 128, 1 s timeout, one retry, 400 datagrams/s; the automatic pass sends PLAYER only, 1 retry; results coalesced to the UI every 100 ms.
 4. RULES on demand: selected row, favourites, filters that need mods, join.
@@ -38,7 +38,7 @@ One window, no tray icon by default, no background service. Minimising does not 
 ## 4. IPC rules
 
 - Commands are request/response; anything that streams uses events with **batched arrays**, never one event per server.
-- Server row payload: the camelCase form of `browser::ServerRow` — `{ id:"ip:qport", ip, gamePort, queryPort, name, map, description, players, maxPlayers, password, serverVersion, version, pingMs, tags, verifiedPlayers?, steamEmpty?, verifiedAt?, verdict?, country? }`. Fields nothing renders are `skip_serializing` and absent options are omitted, which took a 19 000-row cold start from 15.05 MB to ~10.4 MB (D-164). Mods only travel on demand.
+- Server row payload: the camelCase form of `browser::ServerRow` — `{ id:"ip:qport", ip, gamePort, queryPort, name, map, description, players, maxPlayers, bots, password, serverVersion, version, pingMs, tags, verifiedPlayers?, steamEmpty?, verifiedAt?, verdict?, country? }`. Fields nothing renders are `skip_serializing` and absent options are omitted, which took a 19 000-row cold start from 15.05 MB to ~10.4 MB (D-164). Mods only travel on demand.
 - Never send more than ~200 KB in one event; the WebView2 IPC bridge serialises to string.
 
 ## 5. Frontend state (Svelte 5 runes)

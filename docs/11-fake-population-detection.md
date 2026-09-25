@@ -28,7 +28,7 @@ A full per-map refresh (D-046) put the scale beyond doubt: **27 037 of 33 605 re
 
 So partition membership is a free, list-level inflated flag: a row from a `noplayers` partition whose INFO count is positive is fake (rule R0). This is why community posts say the "Steam API can't be spoofed" (S-53): the Web API's `players` and the master's filters use the same authenticated count. A future spoofer would have to fake Steam auth sessions, which is where rules R2–R5 take over.
 
-## 3. Detection rules (R0 shipped in M3; R2–R5 in M4; **R6–R7 specified, never built**)
+## 3. Detection rules (R0 shipped in M3; R2–R5 in M4; the R6–R7 of this table were never built — the R6 in use is the vouch rule of §3b, and R8–R12 follow it)
 
 Trust is computed per server from cheap signals; the INFO number is never shown as fact.
 
@@ -40,7 +40,7 @@ Trust is computed per server from cheap signals; the INFO number is never shown 
 | R3 | PLAYER answers; `INFO − verified ≥ 5` or ≥ 20 % of `max_players` | **Inflated** — show `verified`, badge, hidden by the default "Hide inflated" filter |
 | R4 | INFO `players` > 0 but PLAYER times out (after a patient 2.5 s retry) while INFO keeps answering | **Unverifiable** — untrusted **unless Steam vouches for the server *and* a real head-count was taken before**, in which case the last head-count stays on screen. A Steam-vouched claim nobody has ever counted is untrusted, its cell shows the dimmed "?" claim, and it sorts as zero: the earlier exemption trusted the server's own INFO for any operator holding one Steam session and dropping PLAYER, which put three fingerprinted farm boxes in the default top 25 at 96, 67 and 44 (D-233). Honest firewalled servers: 6 of 2 858 (D-050); a burstier implementation once mis-labelled 676 (D-047) |
 | R5 | PLAYER answers with ≥ 5 entries and **either** at most two distinct durations, **or** any non-empty name, **or** all durations under 60 s *and* repetitive. D-160 stopped "all young" firing on its own — a freshly restarted server looks exactly like that | **Synthetic list** — treated like Inflated (defence against future PLAYER spoofing) |
-| ~~R6~~ | *Not implemented.* Across samples: INFO stays constant while `verified` stays 0 for ≥ 3 samples | would need a persisted trust score; `verify.rs` judges one sample at a time and its own header says "rules R2–R5" |
+| ~~R6 (superseded)~~ | *Not implemented; the number now names the vouch rule of §3b (D-233).* Across samples: INFO stays constant while `verified` stays 0 for ≥ 3 samples | would need a persisted trust score; `verify.rs` judges one sample at a time and its own header says "rules R2–R5" |
 | ~~R7~~ | *Not implemented.* ≥ 10 servers on one IP with ≥ 80 % Inflated/Unverifiable | would need per-IP aggregation, which nothing in the host or the front end does |
 
 Hosting providers legitimately run many servers per IP, so R7 could only ever be a prior, never a verdict on its own — part of why it has not been built. Names ("official", "Vanilla++") are never used as signals.
@@ -101,7 +101,7 @@ The temporal signals — flat counts, always at max, round numbers only, a queue
 
 On 2026-09-25 Steam's master list carried 36 100 DayZ entries, 30 011 of them inflated at listing (R0 or R8), against 24 237 the day before. The `noplayers` partitions for enoch, namalsk and chernarusplus held 14 751, 14 316 and 11 223 entries that hour — 96–98 % fake — so each exceeded Steam's 10 000-row cap, and the farms rotate ports: of the ids one and two hours older than the latest refresh, 10 048 and 11 695 were not in it. The cache had grown from 24 116 to 71 397 rows in a day; 52 567 of them were fakes and 64 398 had never been counted by a verification pass.
 
-What changed, none of it a new signal: a row never counted leaves the cache after three days unseen, and a fake-at-listing row leaves as soon as a listing of the empty partitions omits it (favourites stay; the store drops the same ids). A map partition that hits the cap is followed by the same request with Steam's `collapse_addr_hash` filter (S-83), one server per address, which no farm can fill; the catch-all partition asks that way from the start.
+What changed, none of it a new signal: a row only the DZSA fallback produced leaves when a listing of the empty partitions did not return it (D-247), a row never counted leaves the cache after three days unseen, and a fake-at-listing row leaves as soon as a listing of the empty partitions did not return it — a capped or timed-out listing counts, which only ever costs a fake its row until it is listed again (favourites stay; the store drops the same ids). A map partition that hits the cap is followed by the same request with Steam's `collapse_addr_hash` filter (S-83), one server per address, which no farm can fill; the catch-all partition asks that way from the start.
 
 Measured and rejected as a master-server exclusion: the farms' `shard` tags. `shardABC123` and `shard123ABC` appear on 41 511 of the 41 514 fake rows of that hour — and on 1 805 and 1 941 verified servers, so a `nor` on them would have hidden thousands of honest servers. Rows per address is not usable at the master either: 22 verified servers sit on addresses carrying 20 or more entries, 0 on addresses carrying 50 or more, but the filter grammar has no such operator.
 

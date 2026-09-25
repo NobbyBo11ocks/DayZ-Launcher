@@ -34,8 +34,8 @@ console.log(`sampling ${rows.length} populated servers from the cache, ${CONCURR
 
 const out = { infoOk: 0, infoFail: 0, rulesOk: 0, rulesTimeout: 0, rulesError: 0, rttInfo: [], rttRules: [], mods: [] };
 const failures = [];
-// Widths seen in the mod id-length byte (Q9): the parser accepts 1–8, live servers
-// have only ever been seen sending 4.
+// Widths seen in the mod id-length byte (Q9): the parser accepts 1–8; live servers
+// send 4, and four of 3 213 entries once sent 1 (D-140).
 const idWidths = new Map();
 
 async function probe(r) {

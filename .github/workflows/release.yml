@@ -78,6 +78,20 @@ jobs:
           KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: if (-not $env:KEY) { throw "repository secret TAURI_SIGNING_PRIVATE_KEY is not set (see README, Releasing through GitHub Actions)" }
 
+      # A re-run of a published tag's workflow would rebuild the installer and replace the
+      # shipped one under the old manifest's signature until the rewrite step ran — every
+      # install checking in those minutes failed verification. Publish once (D-246).
+      - name: Refuse to rebuild a published release
+        if: env.PUBLISH == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          $draft = gh release view $env:TAG --json isDraft --jq '.isDraft' 2>$null
+          if ($LASTEXITCODE -eq 0 -and $draft -eq 'false') { throw "release $env:TAG is already published; a re-run would replace its installer" }
+          exit 0
+
       # Builds the signed NSIS installer; when publishing, also creates the release
       # and uploads the installer, its .sig and latest.json (asset names rewritten
       # the way GitHub does it).
@@ -183,8 +197,8 @@ jobs:
       # header; the signature check then fails (v0.1.21, D-147). Our own generator takes
       # the browser download URL from the release listing, so rewrite the manifest with it.
       # After publishing: a draft's asset URLs change when it is published. No longer
-      # `always()` (D-160): a release that failed the smoke test stays an unpublished
-      # draft, so there is no public manifest to repair (D-241).
+      # `always()` (D-160): a release that failed the smoke test never becomes public —
+      # its draft is deleted at the end of the run (D-241, D-245).
       # Only now does the release become `releases/latest` (D-241).
       - name: Publish the release
         if: success() && env.PUBLISH == 'true'
@@ -232,5 +246,8 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           $draft = gh release view $env:TAG --json isDraft --jq '.isDraft' 2>$null
-          if ($draft -eq 'true') { gh release delete $env:TAG --yes; "deleted the draft release $env:TAG" }
-          else { "no draft to delete for $env:TAG" }
+          if ($LASTEXITCODE -ne 0) { "no release exists for $env:TAG"; exit 0 }
+          if ($draft -ne 'true') { "$env:TAG is published; nothing to delete"; exit 0 }
+          gh release delete $env:TAG --yes
+          if ($LASTEXITCODE -ne 0) { throw "could not delete the draft release $env:TAG" }
+          "deleted the draft release $env:TAG"

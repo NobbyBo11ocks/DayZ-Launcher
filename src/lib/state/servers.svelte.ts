@@ -236,8 +236,14 @@ class ServersStore {
       this.#dirtyTimer = undefined;
       this.#recomputeClones();
       this.#rowsVersion++;
+      if (this.#setDirty) {
+        this.#setDirty = false;
+        this.#rowSetVersion++;
+      }
     }, ROW_FLUSH_MS);
   }
+  /** A deferred recompute must also bump the row-set version: rows were removed. */
+  #setDirty = false;
 
   /**
    * Marks rows whose exact name belongs to a server that verified with five or more
@@ -248,15 +254,27 @@ class ServersStore {
    * populated names, none runs on two addresses, and the generic names that do collide
    * ("DayZ Server", "test server") never reach five verified players, so the reference
    * set excludes them. The flag clears itself the moment the copy verifies (D-233).
-   * Two passes over the map, ~2 ms at 24 000 rows, once per flush.
+   * Two passes over the map, once per flush. `cloneKey` — trim, lower-case, a regex —
+   * on every row twice was 60 % of the whole flush chain once the farms tripled the
+   * row count: 50.7 ms at 71 000 rows, 17 ms at 24 000 (the "~2 ms" this comment
+   * used to claim was never measured). The key is cached per id against the name,
+   * like `#hayFor`: 17 ms at 71 000, 7 ms at 40 000 (D-246).
    */
+  #cloneKeys = new Map<string, { n: string; k: string }>();
+  #cloneKeyOf(r: ServerRow): string {
+    const e = this.#cloneKeys.get(r.id);
+    if (e !== undefined && e.n === r.name) return e.k;
+    const k = cloneKey(r.name);
+    this.#cloneKeys.set(r.id, { n: r.name, k });
+    return k;
+  }
   #recomputeClones() {
     const owners = new Map<string, string>();
     for (const r of this.rows.values()) {
-      if (r.verdict === "verified" && (r.verifiedPlayers ?? 0) >= 5) owners.set(cloneKey(r.name), r.ip);
+      if (r.verdict === "verified" && (r.verifiedPlayers ?? 0) >= 5) owners.set(this.#cloneKeyOf(r), r.ip);
     }
     for (const r of this.rows.values()) {
-      const owner = owners.size ? owners.get(cloneKey(r.name)) : undefined;
+      const owner = owners.size ? owners.get(this.#cloneKeyOf(r)) : undefined;
       const clone = owner !== undefined && owner !== r.ip && r.verdict !== "verified";
       // A new object when the flag flips, never a write into the old one: the grid's
       // keyed rows and the details pane compare by identity, so an in-place flag kept
@@ -362,22 +380,49 @@ class ServersStore {
    */
   maps = $derived.by(() => {
     void this.#rowSetVersion;
-    const counts = new Map<string, number>();
-    for (const r of this.rows.values()) {
-      const key = r.map.toLowerCase();
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-    return [...counts.entries()]
+    return [...this.#mapCounts.entries()]
+      .filter(([, n]) => n > 0)
       .map(([id, n]) => [id, mapLabel(id), n] as [string, string, number])
       .sort((a, b) => b[2] - a[2]);
   });
 
-  untrustedCount = $derived.by(() => {
+  /**
+   * Map and country counts kept as rows come and go, instead of two passes over
+   * every row on every batch flush: 12.7 ms per flush at 71 000 rows for two
+   * dropdowns that show the top 40 and 60 (D-223 keyed them off the verification
+   * tick; the batch tick still drove them 1 389 times in one refresh). Per batch of
+   * 358 rows the deltas cost 0.17 ms including the re-sort of ~150 entries (D-246).
+   */
+  #mapCounts = new Map<string, number>();
+  #countryCounts = new Map<string, number>();
+  #count(r: ServerRow, d: 1 | -1) {
+    const m = r.map.toLowerCase();
+    this.#mapCounts.set(m, (this.#mapCounts.get(m) ?? 0) + d);
+    if (r.country) this.#countryCounts.set(r.country, (this.#countryCounts.get(r.country) ?? 0) + d);
+  }
+  /** `rows.set` for a row that may be new or may have changed map: keeps the counts. */
+  #put(r: ServerRow) {
+    const prev = this.rows.get(r.id);
+    if (prev) this.#count(prev, -1);
+    this.#count(r, 1);
+    this.rows.set(r.id, r);
+  }
+
+  /**
+   * The two head-line counts in one pass: as two derived passes they cost 6.0 ms per
+   * flush at 71 000 rows; fused, 3.7 ms (D-246).
+   */
+  #trustCounts = $derived.by(() => {
     void this.#rowsVersion;
-    let n = 0;
-    for (const r of this.rows.values()) if (isUntrusted(r)) n++;
-    return n;
+    let untrusted = 0;
+    let populated = 0;
+    for (const r of this.rows.values()) {
+      if (isUntrusted(r)) untrusted++;
+      else if (trustedPlayers(r) > 0) populated++;
+    }
+    return { untrusted, populated };
   });
+  untrustedCount = $derived(this.#trustCounts.untrusted);
 
   /** Filters away from their defaults, all rows of the bar (D-108). */
   activeFilterCount = $derived.by(() => {
@@ -411,19 +456,12 @@ class ServersStore {
    * Servers with a trusted head-count above zero (title bar, D-105). Cached rows make
    * it instant at start; it then follows the refresh and verification batches live.
    */
-  populatedCount = $derived.by(() => {
-    void this.#rowsVersion;
-    let n = 0;
-    for (const r of this.rows.values()) if (!isUntrusted(r) && trustedPlayers(r) > 0) n++;
-    return n;
-  });
+  populatedCount = $derived(this.#trustCounts.populated);
 
   /** Distinct countries with counts, most common first (rows without a country are skipped). */
   countries = $derived.by(() => {
     void this.#rowSetVersion;
-    const counts = new Map<string, number>();
-    for (const r of this.rows.values()) if (r.country) counts.set(r.country, (counts.get(r.country) ?? 0) + 1);
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    return [...this.#countryCounts.entries()].filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
   });
 
   list = $derived.by(() => {
@@ -692,7 +730,7 @@ class ServersStore {
       const cached = await invoke<CachedServers>("servers_cached");
       this.lastRefresh = cached.lastRefresh;
       for (const r of cached.rows) {
-        this.rows.set(r.id, r);
+        this.#put(r);
         if (r.steamEmpty === true) this.hasEmptyServers = true;
       }
       this.#namesDirty = true;
@@ -896,7 +934,13 @@ class ServersStore {
       // Steam failed to initialise: fall back to the DZSA list once (D-089), unless a
       // recent cached list already covers the session.
       this.#dzsaTried = true;
-      const fresh = this.lastRefresh != null && Date.now() / 1000 - this.lastRefresh < 600;
+      // An hour, not ten minutes: the launcher often starts seconds before Steam does
+      // (the worker retries every 10 s, D-125), and this branch imported 13 096 rows
+      // without a Steam id — 7 236 of them never counted and listed by nobody since,
+      // 46 % of the visible list once the empties were loaded (D-247). A cache an
+      // hour old shows counts an hour old until Steam is back; the manual "load the
+      // DZSA list" stays for a Steam that is really down.
+      const fresh = this.lastRefresh != null && Date.now() / 1000 - this.lastRefresh < 3600;
       if (!fresh) void this.loadDzsa();
     }
   }
@@ -991,7 +1035,7 @@ class ServersStore {
       // player count does not (D-181).
       if (!prev || prev.name !== r.name) this.#namesDirty = true;
       // Keep verification results the Steam batch does not carry.
-      this.rows.set(r.id, prev ? { ...r, verifiedPlayers: prev.verifiedPlayers, verifiedAt: prev.verifiedAt, verdict: prev.verdict } : r);
+      this.#put(prev ? { ...r, verifiedPlayers: prev.verifiedPlayers, verifiedAt: prev.verifiedAt, verdict: prev.verdict } : r);
       this.#seenThisRefresh?.add(r.id);
       if (r.steamEmpty === true && !this.hasEmptyServers) this.hasEmptyServers = true;
     }
@@ -1009,9 +1053,13 @@ class ServersStore {
     let n = 0;
     const delta = new Map<number, number>();
     for (const id of ids) {
-      if (!this.rows.delete(id)) continue;
+      const gone = this.rows.get(id);
+      if (!gone) continue;
+      this.rows.delete(id);
+      this.#count(gone, -1);
       n++;
       this.#hay.delete(id);
+      this.#cloneKeys.delete(id);
       this.#pending.delete(id);
       const mods = this.modsByServer.get(id);
       if (mods) {
@@ -1040,7 +1088,11 @@ class ServersStore {
       this.hasEmptyServers = any;
     }
     this.#namesDirty = true;
-    this.rowsChanged();
+    // Deferred like `#markDirty`: the host sends the pruned ids in chunks of 8 000,
+    // and one derived chain per chunk was 242–290 ms for 31 000 ids; pooled, one
+    // chain at the size that remains (D-246).
+    this.#setDirty = true;
+    this.#markDirty();
   }
 
   applyVerifications(list: Verification[]) {
@@ -1060,7 +1112,9 @@ class ServersStore {
         // started from, which a later Steam batch may already have replaced.
         players: infoAnswered ? v.reported : r.players,
         maxPlayers: infoAnswered ? v.maxPlayers : r.maxPlayers,
-        pingMs: v.pingMs ?? r.pingMs,
+        // A never-measured ping takes PLAYER's round trip (D-247); `infoAnswered`
+        // above keeps reading `pingMs` alone, as the cache does.
+        pingMs: v.pingMs ?? (r.pingMs === 0 && !isLanIp(r.ip) && v.playerRttMs != null ? v.playerRttMs : r.pingMs),
         tags: v.tags ?? r.tags,
         // Keep the last real count when this check could not produce one (D-160) —
         // but a list judged synthetic is not a count, and must not become the "last
@@ -1143,7 +1197,7 @@ class ServersStore {
     this.error = null;
     try {
       const row = await invoke<ServerRow>("direct_connect", { address });
-      this.rows.set(row.id, row);
+      this.#put(row);
       this.#namesDirty = true;
       this.rowsChanged();
       this.selectedId = row.id;

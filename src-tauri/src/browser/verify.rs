@@ -1,4 +1,4 @@
-//! Population trust: rules R2–R5 and the continuity rule R11 from docs/11-fake-population-detection.md.
+//! Population trust: rules R2–R5, the continuity rule R11 and R12 from docs/11-fake-population-detection.md.
 //!
 //! For each server: one A2S_INFO (fresh reported count, ping, clock) and one
 //! A2S_PLAYER (real head-count). The verdict compares the two and inspects the
@@ -92,6 +92,10 @@ pub struct Verification {
     pub verified: Option<i32>,
     pub max_players: i32,
     pub ping_ms: Option<u32>,
+    /// PLAYER's round trip, for a row whose ping was never measured — the automatic
+    /// pass sends no INFO, so a DZSA row (ping 0) stayed at "—" through every pass:
+    /// 1 498 of 4 488 populated rows on 2026-09-25, outside every ping preset (D-247).
+    pub player_rtt_ms: Option<u32>,
     /// Written to the cache by `apply_verifications`, never rendered: the browser
     /// reads the parsed `tags` instead. One 500-server `servers:verified` event was
     /// 202 KB with it — already at the ~200 KB cap docs/05 §4 sets — and 157 KB
@@ -501,6 +505,7 @@ pub async fn verify_one(client: &Client, t: Target, with_info: bool) -> Verifica
         verified,
         max_players,
         ping_ms: info.as_ref().map(|r| r.rtt.as_millis() as u32),
+        player_rtt_ms: players.as_ref().ok().map(|r| r.rtt.as_millis() as u32),
         keywords: info.as_ref().and_then(|r| r.value.keywords.clone()),
         tags: info.as_ref().map(|r| r.value.tags.clone()),
         verified_at: ServerRow::now_unix(),

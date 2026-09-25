@@ -475,6 +475,8 @@ pub fn run() {
                                     continue;
                                 };
                                 let (h, c, client) = (handle.clone(), Arc::clone(&cache), a2s.clone());
+                                let covered: std::collections::HashSet<String> =
+                                    targets.iter().map(|t| t.id.clone()).collect();
                                 tauri::async_runtime::spawn(async move {
                                     commands::run_verification(
                                         h.clone(),
@@ -484,6 +486,40 @@ pub fn run() {
                                         true,
                                     )
                                     .await;
+                                    // The pass counts what Steam listed; a server the
+                                    // capped partitions never returned keeps a count
+                                    // hours old that still sorts and adds up as fresh —
+                                    // half of the populated rows on 2026-09-25. They
+                                    // are read again now, without a summary (D-247).
+                                    let c2 = Arc::clone(&c);
+                                    let stale = tauri::async_runtime::spawn_blocking(move || {
+                                        c2.lock()
+                                            .ok()
+                                            .and_then(|c| c.counted_before(refresh_started).ok())
+                                            .unwrap_or_default()
+                                    })
+                                    .await
+                                    .unwrap_or_default();
+                                    let stale: Vec<Target> = stale
+                                        .iter()
+                                        .filter(|r| !covered.contains(&r.id))
+                                        .filter_map(Target::from_row)
+                                        .collect();
+                                    if !stale.is_empty() {
+                                        log_info!(
+                                            "verify",
+                                            "{} counted server(s) the listing did not reach: read again",
+                                            stale.len()
+                                        );
+                                        commands::run_verification(
+                                            h.clone(),
+                                            Arc::clone(&c),
+                                            client.clone().with_concurrency(commands::VERIFY_CONCURRENCY),
+                                            stale,
+                                            false,
+                                        )
+                                        .await;
+                                    }
                                     // Released before the scan, which takes its own flag:
                                     // holding it across both kept the door shut for ~69 s
                                     // at the measured v0.1.26 timings, and a second Refresh

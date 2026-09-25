@@ -57,6 +57,11 @@
       filterBar?.focusSearch();
     } else if (e.key === "Escape" && connectOpen) {
       closeConnect();
+    } else if (e.key === "Escape" && !typing && servers.selectedId) {
+      // The grid closes the pane on Escape only while it has focus; after a click on
+      // the pane's own Join, star or a mod link, or on a filter chip, the key did
+      // nothing and the pane stayed (D-247). An input keeps its own Escape.
+      servers.select(null);
     }
   }
 

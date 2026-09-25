@@ -711,6 +711,9 @@ impl Cache {
             //   was listed: a server listed by `noplayers` and filled since read as R0
             //   the moment we counted it, and was hidden. Only when that listing said 0
             //   too — a farm's listing claimed its fabricated number, and keeps R0.
+            // * A ping never measured (0 on a non-LAN row) takes PLAYER's round trip
+            //   (`?9`): the automatic pass sends no INFO, so a DZSA row kept its
+            //   dash through every pass and fell outside every ping preset (D-247).
             let mut stmt = tx.prepare_cached(
                 "UPDATE servers SET
                    verified_players = CASE WHEN ?4 = 'synthetic' THEN NULL
@@ -723,7 +726,8 @@ impl Cache {
                    steam_empty = CASE WHEN steam_empty = 1 AND players = 0 AND ?7 IS NOT NULL
                                            AND ?4 = 'verified' AND ?2 > 0 THEN NULL
                                       ELSE steam_empty END,
-                   ping_ms = COALESCE(?7, ping_ms), keywords = COALESCE(?8, keywords),
+                   ping_ms = COALESCE(?7, CASE WHEN ping_ms = 0 THEN ?9 ELSE ping_ms END),
+                   keywords = COALESCE(?8, keywords),
                    last_seen = CASE WHEN ?7 IS NULL THEN last_seen ELSE ?3 END
                  WHERE id = ?1",
             )?;
@@ -737,6 +741,7 @@ impl Cache {
                     v.max_players,
                     v.ping_ms.map(i64::from),
                     v.keywords,
+                    v.player_rtt_ms.map(i64::from),
                 ])?;
             }
         }
@@ -751,6 +756,18 @@ impl Cache {
             .conn
             .prepare_cached("SELECT id FROM servers WHERE verdict = 'synthetic'")?;
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        rows.collect()
+    }
+
+    /// Rows carrying a head-count older than `before`: what the automatic pass could
+    /// not reach because Steam's capped partitions never listed them — 2 254 of 4 488
+    /// populated rows were over an hour old on 2026-09-25, 1 656 over six (D-247).
+    pub fn counted_before(&self, before: i64) -> rusqlite::Result<Vec<ServerRow>> {
+        let mut stmt = self.conn.prepare_cached(&format!(
+            "SELECT {SELECT_COLUMNS} FROM servers
+             WHERE verified_players > 0 AND verdict = 'verified' AND verified_at < ?1"
+        ))?;
+        let rows = stmt.query_map(params![before], Self::row_from)?;
         rows.collect()
     }
 
@@ -782,6 +799,11 @@ impl Cache {
     /// `stale_fakes_before` is that listing's start. The farms rotate ports, so each
     /// full refresh brought thousands of new ids and the cache tripled in a day
     /// (24 116 → 71 397 rows on 2026-09-25, 52 567 of them fakes).
+    ///
+    /// The same listing retires a row only the DZSA fallback ever produced — no Steam
+    /// id, never counted, never in a Steam partition. 7 236 such rows were 46 % of the
+    /// visible list once the empties were loaded, and none had been seen by either
+    /// source in the hour before. A LAN address is never a DZSA row and stays (D-247).
     pub fn prune(
         &self,
         max_age_secs: i64,
@@ -802,7 +824,11 @@ impl Cache {
                    AND (last_seen < ?1
                         OR (verified_at IS NULL AND last_seen < ?2)
                         OR (?3 IS NOT NULL AND last_seen < ?3
-                            AND ((steam_empty = 1 AND players > 0) OR players > 127)))
+                            AND ((steam_empty = 1 AND players > 0) OR players > 127))
+                        OR (?3 IS NOT NULL AND last_seen < ?3
+                            AND steam_id = 0 AND verified_at IS NULL AND steam_empty IS NULL
+                            AND NOT (ip LIKE '10.%' OR ip LIKE '192.168.%' OR ip LIKE '127.%'
+                                     OR (ip LIKE '172.%' AND CAST(substr(ip, 5, 2) AS INTEGER) BETWEEN 16 AND 31))))
                  RETURNING id",
             )?
             .query_map(
@@ -821,6 +847,21 @@ impl Cache {
             // every completed refresh (D-175). The one other way to orphan them is a
             // schema bump, which drops `servers`; `migrate` clears the mod tables there.
             // A failed sweep leaves rows nothing reads, and the next prune retries it.
+            // The three sweeps scan the 375 000 mod rows whether or not anything was
+            // orphaned — 101–113 ms for nothing after every refresh that pruned a row
+            // without a mod list, which the fake-at-listing lane makes the common case.
+            // One existence probe over the 23 000 scanned servers decides (D-246).
+            let orphaned = self
+                .conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM server_mods_at WHERE server_id NOT IN (SELECT id FROM servers))",
+                    [],
+                    |r| r.get::<_, bool>(0),
+                )
+                .unwrap_or(true);
+            if !orphaned {
+                return Ok(ids);
+            }
             if let Err(e) = self.conn.execute_batch(
                 "DELETE FROM server_mods WHERE server_id NOT IN (SELECT id FROM servers);
                  DELETE FROM server_mods_at WHERE server_id NOT IN (SELECT id FROM servers);
@@ -1234,6 +1275,7 @@ mod tests {
             verified: Some(0),
             max_players: 50,
             ping_ms: Some(33),
+            player_rtt_ms: None,
             keywords: Some("battleye,16:00".into()),
             tags: None,
             verified_at: 1_000,
@@ -1260,6 +1302,7 @@ mod tests {
             verified: None,
             max_players: 50,
             ping_ms: None,
+            player_rtt_ms: None,
             keywords: None,
             tags: None,
             verified_at: 2_000,
@@ -1349,6 +1392,7 @@ mod tests {
             verified,
             max_players: 50,
             ping_ms,
+            player_rtt_ms: None,
             keywords: None,
             tags: None,
             verified_at: 1_000,

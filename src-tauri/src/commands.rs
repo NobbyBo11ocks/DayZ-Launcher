@@ -388,7 +388,7 @@ pub struct VerifySummary {
 /// The verification pass's own permit pool, kept at the interactive client's size —
 /// the pass is not being made gentler, it is being taken out of the queue the join
 /// dialog and the details pane share (D-193).
-const VERIFY_CONCURRENCY: usize = 128;
+pub const VERIFY_CONCURRENCY: usize = 128;
 /// Rows per `servers:verified` event. docs/05 §4 caps an event at ~200 KB and a row
 /// measures 558 B, so 128 rows is ~71 KB — small enough that the front end's derived
 /// chain shrugs at it, large enough that a pass is not thousands of events.
@@ -1195,6 +1195,7 @@ pub async fn server_details(
         verified,
         max_players,
         ping_ms: info.as_ref().ok().map(|r| r.rtt.as_millis() as u32),
+        player_rtt_ms: None,
         keywords: info.as_ref().ok().and_then(|r| r.value.keywords.clone()),
         tags: info.as_ref().ok().map(|r| r.value.tags.clone()),
         verified_at: ServerRow::now_unix(),

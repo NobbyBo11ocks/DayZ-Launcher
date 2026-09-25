@@ -7,8 +7,15 @@ const port = Number.parseInt(process.argv[3] ?? "27017", 10);
 
 const info = await query(host, port, buildInfo);
 const parsedInfo = parseInfo(info.data);
-const rules = await query(host, port, buildRules);
-const parsedRules = parseRules(rules.data);
+// RULES fails on the servers you would probe — the ~170 that never answer it (D-244) —
+// and used to abort the whole probe before INFO was printed (D-246).
+let parsedRules;
+try {
+  const rules = await query(host, port, buildRules);
+  parsedRules = parseRules(rules.data);
+} catch (e) {
+  parsedRules = `err: ${e.message}`;
+}
 let players;
 try {
   const pl = await query(host, port, buildPlayer);
