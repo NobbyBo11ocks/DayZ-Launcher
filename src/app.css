@@ -120,6 +120,17 @@ button {
   font: inherit;
 }
 
+/* A select's open list is drawn by Chromium from the select's own colours: the filter
+   panel's selects are transparent inside their rows (D-259), so the list fell back to
+   the system's white popup while the options inherited the theme's light text —
+   light grey on white, unreadable in the dark theme (D-261). The options carry the
+   theme's surface and text themselves now, for every select in the app. */
+select option,
+select optgroup {
+  background-color: var(--bg-elev);
+  color: var(--fg);
+}
+
 /* The rail was 180 px; it is 240 since the Servers filters moved into it, on the
    user's request for a wider, tidier side panel (D-249). */
 .shell {

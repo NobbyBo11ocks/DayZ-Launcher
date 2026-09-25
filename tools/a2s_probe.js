@@ -8,13 +8,15 @@ const port = Number.parseInt(process.argv[3] ?? "27017", 10);
 const info = await query(host, port, buildInfo);
 const parsedInfo = parseInfo(info.data);
 // RULES fails on the servers you would probe — the ~170 that never answer it (D-244) —
-// and used to abort the whole probe before INFO was printed (D-246).
-let parsedRules;
+// and used to abort the whole probe before INFO was printed (D-246). Built here, like
+// `players`: the D-246 version left the output reading a `rules` that only existed
+// inside the try, so every probe died with a ReferenceError (D-261).
+let rules;
 try {
-  const rules = await query(host, port, buildRules);
-  parsedRules = parseRules(rules.data);
+  const r = await query(host, port, buildRules);
+  rules = { rttMs: +r.rtt.toFixed(1), packets: r.packets, split: r.split, splitSize: r.splitSize, compressed: r.compressed, ...parseRules(r.data) };
 } catch (e) {
-  parsedRules = `err: ${e.message}`;
+  rules = `err: ${e.message}`;
 }
 let players;
 try {
@@ -29,7 +31,7 @@ console.log(
     {
       target: `${host}:${port}`,
       info: { rttMs: +info.rtt.toFixed(1), packets: info.packets, ...parsedInfo, tags: parseKeywords(parsedInfo.keywords) },
-      rules: { rttMs: +rules.rtt.toFixed(1), packets: rules.packets, split: rules.split, splitSize: rules.splitSize, compressed: rules.compressed, ...parsedRules },
+      rules,
       players,
     },
     null,

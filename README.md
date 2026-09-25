@@ -71,7 +71,7 @@ No accounts, no API keys, no telemetry. Every destination it contacts is listed 
 <tr>
 <td width="33%" valign="top">
 
-<img src="docs/screenshots/news.png" alt="News: the latest DayZ updates with pictures and video previews, shown as updates only, all news, or with the press included">
+<img src="docs/screenshots/news.jpg" alt="News: the latest DayZ updates with pictures and video previews, shown as updates only, all news, or with the press included">
 
 **News** — the latest DayZ posts with pictures and video previews: the updates alone, everything, or the press as well. An unread badge on the rail, and a notification when an update lands. Switch the page off in Settings and nothing is ever fetched.
 

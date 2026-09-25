@@ -242,7 +242,10 @@
 
   /* The select is drawn by its row: no border or surface of its own, the row's colour
      when something is chosen. */
-  .row select { flex: 1 1 auto; min-width: 0; align-self: stretch; padding: 0 2px; border: 0; border-radius: 0 var(--radius) var(--radius) 0; background: transparent; color: var(--fg); font-size: 12.5px; }
+  /* The row's own surface rather than `transparent`: Chromium draws the open list from
+     the select's background, and a transparent one fell back to the system's white
+     under the theme's light text (D-261). The same colour, so nothing changes shut. */
+  .row select { flex: 1 1 auto; min-width: 0; align-self: stretch; padding: 0 2px; border: 0; border-radius: 0 var(--radius) var(--radius) 0; background: var(--bg-row); color: var(--fg); font-size: 12.5px; }
   .row select:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
 
   .checks { display: grid; grid-template-columns: 1fr 1fr; column-gap: 8px; margin: 5px 0; }
