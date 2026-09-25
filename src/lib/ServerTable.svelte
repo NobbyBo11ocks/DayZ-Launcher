@@ -187,6 +187,11 @@
   ];
 
   const sortMark = (key: SortKey) => (sort.key === key ? (sort.dir === 1 ? " ▲" : " ▼") : "");
+  /** "1.29.163709" shows as "1.29" (user request, D-251): the build number said nothing
+   *  at a glance and cut the column to "1.29.163…". Only the text is shortened: the
+   *  mismatch colour and "My version" compare the full build, and the tooltip and the
+   *  details pane still name it. Anything not shaped like a version is shown as it is. */
+  const shortVersion = (v: string) => /^\d+\.\d+/.exec(v)?.[0] ?? v;
   const pingClass = (ms: number) => (ms < 60 ? "ok" : ms >= 120 ? "warn" : "");
   /** Ping quality in words: the colour alone said it, which is not available to a
    *  screen reader and not distinguishable to everyone else (D-198). */
@@ -349,7 +354,7 @@
               class="cell c-ver"
               class:warn={localVersion != null && r.version !== localVersion}
               title={localVersion != null && r.version !== localVersion ? `Server runs ${r.version}; your DayZ is ${localVersion}` : `Server version ${r.version}`}
-            >{r.version}</div>
+            >{shortVersion(r.version)}</div>
           </div>
         {/each}
       </div>

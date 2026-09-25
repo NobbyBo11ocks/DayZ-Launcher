@@ -45,7 +45,7 @@ Goal: the fastest way from "open launcher" to "in game", in a dark, quiet, infor
 | Players | **Verified** head-count from A2S_PLAYER for every row on screen (`players/max`, `+queue` from `lqs`). The fill bars specified here were removed in v0.1.3 (D-069): at 36 px they read as noise behind the numbers. An unverified count is dimmed and marked "?" (D-160); an untrusted one gets a warning glyph. More than half of community servers spoof INFO (D-038) |
 | Ping | numeric with 3-band colour (green < 60, unstyled 60-119, amber >= 120) |
 | Time | in-game clock with sun/moon glyph; tooltip shows `etm`/`entm` acceleration |
-| Version | the server's build, amber when it differs from the local client |
+| Version | the server's version as major.minor ("1.29", D-251), amber when its build differs from the local client; the full build (1.29.163709) is in the tooltip and the details pane |
 
 The favourite star lives in the name cell, not a separate Actions column; there is no per-row join button — Enter or a double-click opens the join dialog. The alert bell that sat beside it was removed with the feature (D-182).
 
