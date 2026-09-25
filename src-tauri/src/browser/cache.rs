@@ -90,6 +90,37 @@ const SELECT_COLUMNS: &str = "id, ip, game_port, query_port, name, map, descript
 static GET_SQL: std::sync::LazyLock<String> =
     std::sync::LazyLock::new(|| format!("SELECT {SELECT_COLUMNS} FROM servers WHERE id = ?1"));
 
+/// The upsert, in two flavours that differ in four columns: a Steam listing writes what
+/// it measured, a DZSA listing keeps what Steam measured when it has only a placeholder
+/// (D-242). `None` in a verification column never erases a stored one, in either.
+fn upsert_sql(keep_measured: bool) -> String {
+    let measured = if keep_measured {
+        "ping_ms=CASE WHEN excluded.ping_ms = 0 THEN servers.ping_ms ELSE excluded.ping_ms END,
+         bots=CASE WHEN excluded.bots = 0 THEN servers.bots ELSE excluded.bots END,
+         steam_id=CASE WHEN excluded.steam_id = 0 THEN servers.steam_id ELSE excluded.steam_id END,
+         description=CASE WHEN excluded.description = '' THEN servers.description ELSE excluded.description END"
+    } else {
+        "ping_ms=excluded.ping_ms, bots=excluded.bots, steam_id=excluded.steam_id,
+         description=excluded.description"
+    };
+    format!(
+        "INSERT INTO servers ({SELECT_COLUMNS})
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
+         ON CONFLICT(id) DO UPDATE SET
+           ip=excluded.ip, game_port=excluded.game_port, query_port=excluded.query_port, name=excluded.name,
+           map=excluded.map, players=excluded.players, max_players=excluded.max_players,
+           password=excluded.password, secure=excluded.secure, server_version=excluded.server_version,
+           keywords=excluded.keywords, last_seen=excluded.last_seen, {measured},
+           verified_players=COALESCE(excluded.verified_players, servers.verified_players),
+           steam_empty=COALESCE(excluded.steam_empty, servers.steam_empty),
+           verified_at=COALESCE(excluded.verified_at, servers.verified_at),
+           verdict=COALESCE(excluded.verdict, servers.verdict)"
+    )
+}
+static UPSERT_SQL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| upsert_sql(false));
+static UPSERT_KEEPING_MEASURED_SQL: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(|| upsert_sql(true));
+
 /// What `row_counts` reports (D-193).
 #[derive(Debug, Clone, Copy)]
 pub struct RowCounts {
@@ -544,24 +575,21 @@ impl Cache {
     /// Insert-or-replace a batch inside one transaction. `None` values for the
     /// verification columns never erase stored ones.
     pub fn upsert(&mut self, rows: &[ServerRow]) -> rusqlite::Result<()> {
+        self.upsert_with(rows, &UPSERT_SQL)
+    }
+
+    /// `upsert` for a source that does not measure what Steam does: the DZSA list has
+    /// no ping, bot count, Steam id or description, and its placeholders (0, 0, 0, "")
+    /// were written over the values Steam had stored — a 0 ms ping reads as "good" and
+    /// passes every ping filter, and a bot count of 0 erases R9's prior (D-242).
+    pub fn upsert_keeping_measured(&mut self, rows: &[ServerRow]) -> rusqlite::Result<()> {
+        self.upsert_with(rows, &UPSERT_KEEPING_MEASURED_SQL)
+    }
+
+    fn upsert_with(&mut self, rows: &[ServerRow], sql: &str) -> rusqlite::Result<()> {
         let tx = self.conn.transaction()?;
         {
-            let mut stmt = tx.prepare_cached(
-                "INSERT INTO servers (id, ip, game_port, query_port, name, map, description, players, max_players, bots,
-                                      password, secure, server_version, ping_ms, keywords, steam_id, last_seen,
-                                      verified_players, steam_empty, verified_at, verdict)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
-                 ON CONFLICT(id) DO UPDATE SET
-                   ip=excluded.ip, game_port=excluded.game_port, query_port=excluded.query_port, name=excluded.name,
-                   map=excluded.map, description=excluded.description, players=excluded.players,
-                   max_players=excluded.max_players, bots=excluded.bots, password=excluded.password, secure=excluded.secure,
-                   server_version=excluded.server_version, ping_ms=excluded.ping_ms, keywords=excluded.keywords,
-                   steam_id=excluded.steam_id, last_seen=excluded.last_seen,
-                   verified_players=COALESCE(excluded.verified_players, servers.verified_players),
-                   steam_empty=COALESCE(excluded.steam_empty, servers.steam_empty),
-                   verified_at=COALESCE(excluded.verified_at, servers.verified_at),
-                   verdict=COALESCE(excluded.verdict, servers.verdict)",
-            )?;
+            let mut stmt = tx.prepare_cached(sql)?;
             for s in rows {
                 stmt.execute(params![
                     s.id,
@@ -1043,6 +1071,40 @@ mod tests {
             (33, Some("offline"), Some(1_000), Some(0)),
             "verdict updates; the count and its timestamp survive a check that could not count"
         );
+    }
+
+    /// A DZSA row has no ping, bot count, Steam id or description; it keeps the ones
+    /// Steam measured instead of writing its placeholders over them (D-242).
+    #[test]
+    fn a_dzsa_listing_keeps_what_steam_measured() {
+        let mut c = Cache::open_in_memory().unwrap();
+        let mut steam = row(27017, 5);
+        steam.bots = 3;
+        c.upsert(std::slice::from_ref(&steam)).unwrap();
+        let mut dzsa = row(27017, 7);
+        dzsa.ping_ms = 0;
+        dzsa.bots = 0;
+        dzsa.steam_id = 0;
+        dzsa.description = String::new();
+        c.upsert_keeping_measured(std::slice::from_ref(&dzsa))
+            .unwrap();
+        let w = c.get(&steam.id).unwrap().unwrap();
+        assert_eq!(
+            (
+                w.players,
+                w.ping_ms,
+                w.bots,
+                w.steam_id,
+                w.description.as_str()
+            ),
+            (7, 108, 3, 90_293_138_942_181_394, "PvP"),
+            "the count is new, the measurements are Steam's"
+        );
+        // A Steam listing still writes what it measured, zeros included.
+        let mut zero = row(27017, 0);
+        zero.bots = 0;
+        c.upsert(std::slice::from_ref(&zero)).unwrap();
+        assert_eq!(c.get(&steam.id).unwrap().unwrap().bots, 0);
     }
 
     /// The cached list a launch falls back to keeps the server's order and leaves out

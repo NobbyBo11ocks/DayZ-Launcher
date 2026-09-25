@@ -19,8 +19,9 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use steamworks::{
-    Client, FriendFlags, FriendState, GameServerItem, ItemState, MatchmakingServers,
-    PublishedFileId, ServerListCallbacks, ServerListRequest, ServerResponse, UGC,
+    CallbackHandle, Client, DownloadItemResult, FriendFlags, FriendState, GameServerItem,
+    ItemState, MatchmakingServers, PublishedFileId, ReleaseError, ServerListCallbacks,
+    ServerListRequest, ServerResponse, UGC,
 };
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -139,13 +140,34 @@ struct Session {
     client: Client,
     mms: MatchmakingServers,
     ugc: UGC,
+    /// Workshop downloads Steam finished with an error, as (item, error) (D-242).
+    download_errors: mpsc::Receiver<(u64, String)>,
+    /// Keeps the `DownloadItemResult` callback registered for the session's life.
+    _on_download: CallbackHandle,
 }
 
 fn open_session() -> Result<Session, String> {
     let client = Client::init_app(DAYZ_APP_ID).map_err(|e| e.to_string())?;
     let mms = client.matchmaking_servers();
     let ugc = client.ugc();
-    Ok(Session { client, mms, ugc })
+    // Nothing listened for a failed download: a Steam in offline mode, a full disk or
+    // an item that cannot be fetched showed "Queued" until the stall limit, re-kicked
+    // every five seconds, and the busy sync held the idle release off the whole time.
+    let (tx, download_errors) = mpsc::channel();
+    let on_download = client.register_callback(move |r: DownloadItemResult| {
+        if r.app_id.0 == DAYZ_APP_ID {
+            if let Some(e) = r.error {
+                let _ = tx.send((r.published_file_id.0, format!("{e:?}")));
+            }
+        }
+    });
+    Ok(Session {
+        client,
+        mms,
+        ugc,
+        download_errors,
+        _on_download: on_download,
+    })
 }
 
 /// Publishes a session that has just opened, and returns the pid of the `steam.exe`
@@ -701,6 +723,8 @@ struct ActiveSync {
     /// Subscribe results arrive through Steam call-result callbacks on this thread.
     sub_results: mpsc::Receiver<(u64, Result<(), String>)>,
     failed: HashMap<u64, String>,
+    /// Download errors Steam reported per item; one can be transient, two are not.
+    download_errors: HashMap<u64, u8>,
     kicked: HashMap<u64, Instant>,
 }
 
@@ -729,6 +753,7 @@ fn start_sync(ugc: &UGC, job: u64, ids: Vec<u64>) -> ActiveSync {
         last_emit: Instant::now() - SYNC_EMIT_INTERVAL,
         sub_results: rx,
         failed: HashMap::new(),
+        download_errors: HashMap::new(),
         kicked,
     }
 }
@@ -767,8 +792,22 @@ fn item_progress(ugc: &UGC, id: u64, failed: Option<&String>) -> ItemProgress {
 fn tick_sync(
     ugc: &UGC,
     sync: &mut ActiveSync,
+    download_errors: &mpsc::Receiver<(u64, String)>,
     events: &UnboundedSender<SteamEvent>,
 ) -> Option<SyncDone> {
+    // A single failed attempt may be transient — the item is re-kicked every five
+    // seconds — so an item fails on Steam's second error report for it (D-242).
+    while let Ok((id, e)) = download_errors.try_recv() {
+        if !sync.ids.contains(&id) {
+            continue;
+        }
+        let n = sync.download_errors.entry(id).or_insert(0);
+        *n = n.saturating_add(1);
+        if *n >= 2 {
+            sync.failed
+                .insert(id, format!("Steam could not download it ({e})"));
+        }
+    }
     while let Ok((id, r)) = sync.sub_results.try_recv() {
         match r {
             Ok(()) => {
@@ -974,6 +1013,11 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
     let mut active: Option<ActiveRefresh> = None;
     let mut sync: Option<ActiveSync> = None;
     let mut unsub: Option<ActiveUnsubscribe> = None;
+    // Timed-out server-list queries Steam had not finished with (D-242). Only valid
+    // while their session is: every place that drops the session drops these first,
+    // unreleased, because releasing one after `SteamAPI_Shutdown` would call into a
+    // client that no longer exists.
+    let mut unreleased: Vec<Arc<Mutex<ServerListRequest>>> = Vec::new();
 
     loop {
         if let Some(s) = &session {
@@ -1149,6 +1193,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
         {
             // Drops Client/MatchmakingServers/UGC → SteamAPI_Shutdown; frees the
             // Steam client heaps (Q16). Any later command re-opens the session.
+            unreleased.clear();
             session = None;
             shared.set_status(&events, |st| st.idle = true);
         }
@@ -1219,6 +1264,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                     &events,
                     "Steam restarted",
                 );
+                unreleased.clear();
                 session = None;
                 session_pid = 0;
                 lost_since = None;
@@ -1243,6 +1289,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                             // timeout and came back "0 listed". Dropping it *here* is safe:
                             // Steam has just started, so nothing of ours is in flight, and
                             // the next command re-initialises (D-194).
+                            unreleased.clear();
                             session = None;
                             session_pid = 0;
                             crate::log_info!("steam", "Steam is back; the session will re-open");
@@ -1311,6 +1358,11 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
             continue;
         };
         let (mms, ugc) = (&s.mms, &s.ugc);
+        unreleased.retain(|q| {
+            q.lock()
+                .map(|mut q| matches!(q.release(), Err(ReleaseError::Refreshing)))
+                .unwrap_or(false)
+        });
 
         if let Some(r) = active.as_mut() {
             // Start the next partition when none is running and the gap has passed.
@@ -1421,8 +1473,17 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                             .map(|q| q.get_server_count().unwrap_or(0))
                             .unwrap_or(0)
                             .max(0) as usize;
-                        if let Ok(mut q) = p.req.lock() {
-                            let _ = q.release();
+                        // A query Steam is still refreshing refuses `release`, and that is
+                        // exactly the timeout case: the error was dropped, so the request
+                        // kept pinging beside the next partition and was never freed. It
+                        // is kept and released once Steam lets go of it (D-242).
+                        let refused = p
+                            .req
+                            .lock()
+                            .map(|mut q| matches!(q.release(), Err(ReleaseError::Refreshing)))
+                            .unwrap_or(false);
+                        if refused {
+                            unreleased.push(Arc::clone(&p.req));
                         }
                         let p = r.current.take().expect("current partition");
                         // Only when another request follows. The completion branch is
@@ -1467,10 +1528,14 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
         }
 
         if let Some(job) = sync.as_mut() {
-            if let Some(done) = tick_sync(ugc, job, &events) {
+            if let Some(done) = tick_sync(ugc, job, &s.download_errors, &events) {
                 let _ = events.send(SteamEvent::SyncDone(done));
                 sync = None;
             }
+        } else {
+            // Results for downloads nobody is waiting on (Steam's own updates) must not
+            // be counted against the next job.
+            while s.download_errors.try_recv().is_ok() {}
         }
 
         if unsub.as_mut().is_some_and(tick_unsubscribe) {

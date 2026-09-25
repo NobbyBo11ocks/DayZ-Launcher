@@ -154,6 +154,11 @@ function rankDistinct<T>(rows: readonly T[], of: (row: T) => string): Map<string
   return rank;
 }
 
+/** No ping has been measured: rows from the DZSA list, or an unreachable imported
+ *  favourite, carry 0. A LAN server can genuinely answer in under a millisecond, so it
+ *  keeps its 0 (D-242). */
+export const pingUnmeasured = (r: ServerRow): boolean => r.pingMs <= 0 && !isLanIp(r.ip);
+
 /** Private (RFC 1918), loopback and link-local IPv4: what Steam's LAN discovery returns (D-087). */
 export function isLanIp(ip: string): boolean {
   // Called once per row while the LAN tab is open. `split(".").map(Number)` allocated
@@ -477,7 +482,8 @@ class ServersStore {
       if (mods === "modded" && !r.tags.modded) continue;
       if (mods === "vanilla" && r.tags.modded) continue;
       if (dayOnly && !(r.tags.timeMinutes != null && r.tags.timeMinutes >= 6 * 60 && r.tags.timeMinutes < 20 * 60)) continue;
-      if (maxPing > 0 && r.pingMs > maxPing) continue;
+      // An unmeasured ping cannot be said to meet a limit; as 0 it passed every one.
+      if (maxPing > 0 && (r.pingMs > maxPing || pingUnmeasured(r))) continue;
       if (versionMine && localVersion && r.version !== localVersion) continue;
       if (friendsOnly && !friendsOn.has(r.id)) continue;
       out.push(r);
@@ -542,7 +548,7 @@ class ServersStore {
           k2[i] = -pingBucket(r);
           break;
         case "ping":
-          k1[i] = pingBucket(r);
+          k1[i] = pingUnmeasured(r) ? -1 : pingBucket(r);
           k2[i] = -trustedPlayers(r);
           break;
         case "time":
@@ -556,9 +562,9 @@ class ServersStore {
     const idx = new Uint32Array(n);
     for (let i = 0; i < n; i++) idx[i] = i;
     // Unscanned servers (-1) go below every scanned one whichever way the column
-    // sorts, as D-146 says; multiplied by `dir` like the rest, an ascending sort put
+    // sorts, as D-146 says, and so do unmeasured pings (D-242); multiplied by `dir` like the rest, an ascending sort put
     // every one of them first (D-240).
-    const unscannedLast = key === "mods";
+    const unscannedLast = key === "mods" || key === "ping";
     idx.sort((x, y) => {
       if (unscannedLast) {
         const u = +(k1[x]! < 0) - +(k1[y]! < 0);

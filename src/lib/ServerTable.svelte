@@ -4,7 +4,7 @@
   // the viewport plus overscan, reports visible ids for verification, keyboard nav.
   import Flag from "./Flag.svelte";
   import { clock, isInflated, isUnchecked, isUntrusted, queueOf, type ServerRow, trustedPlayers } from "./types";
-  import type { SortKey } from "./state/servers.svelte";
+  import { pingUnmeasured, type SortKey } from "./state/servers.svelte";
 
   let {
     rows,
@@ -325,7 +325,13 @@
                 {unchecked ? r.players : pop}/{r.maxPlayers}{#if queueOf(r)}<span class="muted"> +{queueOf(r)}</span>{/if}
               </span>
             </div>
-            <div role="gridcell" class="cell c-num {pingClass(r.pingMs)}" title={pingTitle(r.pingMs)}>{r.pingMs}</div>
+            <!-- 0 on a non-LAN row is "not measured" (DZSA list, an unreachable favourite),
+                 which used to read as a green "0 ms — good" (D-242). -->
+            {#if pingUnmeasured(r)}
+              <div role="gridcell" class="cell c-num muted" title="Ping not measured yet">—</div>
+            {:else}
+              <div role="gridcell" class="cell c-num {pingClass(r.pingMs)}" title={pingTitle(r.pingMs)}>{r.pingMs}</div>
+            {/if}
             <div role="gridcell" class="cell c-time">
               {#if r.tags.timeMinutes != null}
                 <span class="glyph" aria-hidden="true">{r.tags.timeMinutes >= 6 * 60 && r.tags.timeMinutes < 20 * 60 ? "☀" : "☾"}</span>

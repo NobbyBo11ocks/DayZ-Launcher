@@ -265,7 +265,7 @@ pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResu
                 // Both were discarded, so a failed write still returned Ok(n) and
                 // the mod rows could be written for servers the upsert never stored
                 // — the same class of bug fixed for the favourites import (D-186).
-                if let Err(e) = c.upsert(&for_db) {
+                if let Err(e) = c.upsert_keeping_measured(&for_db) {
                     crate::log_error!(
                         "cache",
                         "DZSA upsert of {} row(s) failed: {e}",
