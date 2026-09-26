@@ -293,8 +293,11 @@ class ServersStore {
    * spent ~130 ms of every second on the main thread for the length of a refresh and
    * dropped frames while scrolling (D-160). Folding them into one flush costs at most
    * `ROW_FLUSH_MS` of freshness on a list that already takes ~40 s to arrive.
+   * Each row carries whether it came from the DZSA list, whose placeholders must not
+   * replace measured values (D-242). That used to be guessed from a missing Steam
+   * empty flag, which LAN rows and probed rows lack too (D-271).
    */
-  #inbox: ServerRow[] = [];
+  #inbox: [ServerRow, boolean][] = [];
   #flushTimer: ReturnType<typeof setTimeout> | undefined;
   steam = $state<SteamStatus | null>(null);
   done = $state<RefreshDone | null>(null);
@@ -757,12 +760,8 @@ class ServersStore {
     }
     void this.loadModsIndex();
     this.#unlisten.push(
-      await listen<ServerRow[]>("servers:batch", (ev) => {
-        for (const r of ev.payload) this.#inbox.push(r);
-        if (this.#flushTimer === undefined) {
-          this.#flushTimer = setTimeout(() => this.flushRows(), ROW_FLUSH_MS);
-        }
-      }),
+      await listen<ServerRow[]>("servers:batch", (ev) => this.#enqueue(ev.payload, false)),
+      await listen<ServerRow[]>("servers:dzsa-batch", (ev) => this.#enqueue(ev.payload, true)),
       await listen<RefreshDone>("servers:done", (ev) => {
         // A rejected refresh never reached Steam (D-160). It is sent so the UI stops
         // waiting, not as a result: keeping it would replace a real summary with
@@ -794,7 +793,7 @@ class ServersStore {
         this.lastRefresh = Math.floor(Date.now() / 1000);
         // Steam may have updated DayZ while the list was coming in.
         void this.refreshLocalVersion();
-        // Mirror of the host's `unvouch_unseen` (D-233): the in-memory rows must agree
+        // Mirror of the host's `unvouch_unlisted` (D-233, D-271): the in-memory rows must agree
         // with the cache, or the vouch would linger on screen until the next start.
         const seen = this.#seenThisRefresh;
         this.#seenThisRefresh = null;
@@ -1049,6 +1048,14 @@ class ServersStore {
     }, waitMs);
   }
 
+  /** Holds a batch for the next flush; `dzsa` for rows from the DZSA list (D-271). */
+  #enqueue(rows: ServerRow[], dzsa: boolean) {
+    for (const r of rows) this.#inbox.push([r, dzsa]);
+    if (this.#flushTimer === undefined) {
+      this.#flushTimer = setTimeout(() => this.flushRows(), ROW_FLUSH_MS);
+    }
+  }
+
   /** Merges everything the last batches delivered. Idempotent and cheap when empty. */
   flushRows() {
     if (this.#flushTimer !== undefined) {
@@ -1058,15 +1065,17 @@ class ServersStore {
     if (this.#inbox.length === 0) return;
     const batch = this.#inbox;
     this.#inbox = [];
-    for (const r of batch) {
+    for (const [r, dzsa] of batch) {
       const prev = this.rows.get(r.id);
       // A new row, or one that renamed itself, invalidates the name ranks; a changed
       // player count does not (D-181).
       if (!prev || prev.name !== r.name) this.#namesDirty = true;
-      // A row without Steam's empty flag is a DZSA row: the host keeps its measured
-      // values over the list's placeholders, and so does this.
-      this.#put(prev ? this.#merge(prev, r, r.steamEmpty == null) : r);
-      this.#seenThisRefresh?.add(r.id);
+      // The host keeps a DZSA row's measured values over the list's placeholders, and
+      // so does this; every other batch is a measurement and lands as it is.
+      this.#put(prev ? this.#merge(prev, r, dzsa) : r);
+      // Only what Steam listed as populated keeps a vouch, as the host decides (D-271):
+      // DZSA, LAN and probed rows arriving during a refresh are not Steam's answer.
+      if (r.steamEmpty === false) this.#seenThisRefresh?.add(r.id);
       if (r.steamEmpty === true && !this.hasEmptyServers) this.hasEmptyServers = true;
     }
     this.rowsChanged();

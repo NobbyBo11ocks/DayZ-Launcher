@@ -283,6 +283,9 @@ pub fn run() {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let mut populated: Vec<Target> = Vec::new();
+                // What Steam listed as populated during the refresh under way. A vouch
+                // the refresh did not renew goes by this set when it completes (D-271).
+                let mut listed: std::collections::HashSet<String> = std::collections::HashSet::new();
                 while let Some(ev) = rx.recv().await {
                     match ev {
                         SteamEvent::Status(s) => {
@@ -291,6 +294,7 @@ pub fn run() {
                         }
                         SteamEvent::Batch(rows) => {
                             populated.extend(rows.iter().filter(|r| r.steam_empty == Some(false)).filter_map(Target::from_row));
+                            listed.extend(rows.iter().filter(|r| r.steam_empty == Some(false)).map(|r| r.id.clone()));
                             let _ = handle.emit("servers:batch", &rows);
                             let c = Arc::clone(&cache);
                             let _ = tauri::async_runtime::spawn_blocking(move || {
@@ -353,6 +357,31 @@ pub fn run() {
                             let refresh_started = browser::ServerRow::now_unix()
                                 - (d.elapsed_ms / 1000) as i64
                                 - 10;
+                            // A "busy" rejection belongs to a refresh still collecting;
+                            // every other Done closes the set, used or not.
+                            let listed_now = if d.reason == Some("busy") {
+                                std::collections::HashSet::new()
+                            } else {
+                                std::mem::take(&mut listed)
+                            };
+                            // The empty-list lanes prune what a listing of the empty
+                            // partitions omitted — so every one of them has to have
+                            // answered. A throttled refresh stopped early, or a map
+                            // partition that timed out, omitted rows it never listed,
+                            // and deleted every fake and DZSA-only row on those maps,
+                            // verification history and all (D-271).
+                            let listed_empty = !d.stopped_early && {
+                                let mut empty = d
+                                    .partitions
+                                    .iter()
+                                    .filter(|p| p.filters.contains_key("noplayers"))
+                                    .peekable();
+                                empty.peek().is_some()
+                                    && empty.all(|p| {
+                                        p.response != "NoAnswer"
+                                            && !(p.total == 0 && p.response == "NoServersListedOnMasterServer")
+                                    })
+                            };
                             let c = Arc::clone(&cache);
                             let pruned = tauri::async_runtime::spawn_blocking(move || {
                                 let mut pruned = Vec::new();
@@ -360,7 +389,7 @@ pub fn run() {
                                     if full_list {
                                         let _ = c.set_meta("last_refresh", &browser::ServerRow::now_unix().to_string());
                                         if complete {
-                                            match c.unvouch_unseen(refresh_started) {
+                                            match c.unvouch_unlisted(&listed_now) {
                                                 Ok(n) if n > 0 => log_info!(
                                                     "steam",
                                                     "{n} server(s) Steam no longer lists as populated lost their vouch"
@@ -372,11 +401,8 @@ pub fn run() {
                                         // Fakes the latest listing of the empty
                                         // partitions did not include go now; a
                                         // populated-only refresh says nothing about
-                                        // them (D-245).
-                                        let listed_empty = d
-                                            .partitions
-                                            .iter()
-                                            .any(|p| p.filters.contains_key("noplayers"));
+                                        // them (D-245), nor does one that did not
+                                        // finish listing them (above).
                                         match c.prune(
                                             CACHE_MAX_AGE_SECS,
                                             UNVERIFIED_MAX_AGE_SECS,
@@ -391,9 +417,10 @@ pub fn run() {
                                         // later start paid recovery over it (D-160).
                                         c.checkpoint();
                                     } else {
-                                        // A LAN scan or the DZSA fallback still adds
-                                        // population samples; without this they grew for
-                                        // the whole session (D-160).
+                                        // A LAN scan still adds population samples;
+                                        // without this they grew for the whole session
+                                        // (D-160). The DZSA fallback never comes this
+                                        // way: `servers_dzsa` sends its own `servers:done`.
                                         let _ = c.population_prune(POPULATION_MAX_AGE_SECS);
                                     }
                                 }

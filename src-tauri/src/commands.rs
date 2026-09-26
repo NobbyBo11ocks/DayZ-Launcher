@@ -297,7 +297,9 @@ pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResu
         .await
         .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?;
         wrote.map_err(AppError::Internal)?;
-        let _ = app.emit("servers:batch", &batch);
+        // Its own event: the store keeps measured values over these placeholders, as
+        // `upsert_keeping_measured` does, and every other batch is a measurement (D-271).
+        let _ = app.emit("servers:dzsa-batch", &batch);
     }
     // `last_refresh` deliberately not written here. It seeds the Steam worker's 60 s
     // throttle across restarts (lib.rs), so a DZSA import used to make the *next*

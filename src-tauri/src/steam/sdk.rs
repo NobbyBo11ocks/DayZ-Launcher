@@ -275,10 +275,11 @@ pub struct RefreshDone {
     pub capped: bool,
     /// Remaining partitions were skipped after repeated empty master answers (throttling).
     pub stopped_early: bool,
-    /// Steam finished the `hasplayers` answer, uncapped and not stopped early: only such
-    /// a refresh may withdraw the vouch from servers it did not list (D-233). Decided
-    /// here, where the partition answers are known, so the host and the store use the
-    /// same test instead of each inferring it from the other flags (D-236).
+    /// Steam finished the `hasplayers` answer, uncapped: only such a refresh may withdraw
+    /// the vouch from servers it did not list (D-233). Decided here, where the partition
+    /// answers are known, so the host and the store use the same test instead of each
+    /// inferring it from the other flags (D-236); on that partition alone (`vouch_complete`,
+    /// D-271).
     #[serde(default)]
     pub complete: bool,
     /// `steam` for the master server, `lan` for LAN discovery (D-087), `dzsa` for
@@ -1473,22 +1474,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                         // throttle and `last_refresh` were armed, every Steam vouch was
                         // withdrawn (D-233), and "0 from Steam" read as a result (D-236).
                         let unanswered = !lan_only && total == 0;
-                        // Vouches may only be withdrawn by a `hasplayers` answer Steam
-                        // finished: a timed-out or throttled one never reached every
-                        // populated server, and withdrawing on it punished the rest.
-                        let populated: Vec<&PartitionResult> = r
-                            .results
-                            .iter()
-                            .filter(|p| p.filters.contains_key("hasplayers"))
-                            .collect();
-                        let complete = !lan_only
-                            && !unanswered
-                            && !capped
-                            && !r.stopped_early
-                            && !populated.is_empty()
-                            && populated
-                                .iter()
-                                .all(|p| p.total > 0 && p.response != "NoAnswer");
+                        let complete = !unanswered && vouch_complete(&r.results, lan_only);
                         let done = RefreshDone {
                             source: if lan_only { "lan" } else { "steam" },
                             total,
@@ -1896,6 +1882,22 @@ fn row_from(item: GameServerItem, steam_empty: Option<bool>) -> ServerRow {
     }
 }
 
+/// Whether a finished refresh may withdraw the vouch from servers it did not list: on the
+/// `hasplayers` partition's own answer, finished and uncapped (D-236 (3)). It used to
+/// need every partition uncapped and nothing stopped early, and since D-245 three map
+/// partitions of the empty list cap at Steam's 10 000 on every full refresh, so only the
+/// populated-only start refresh ever withdrew anything; a throttled empty partition
+/// blocked it the same way though the populated answer was whole (D-271).
+fn vouch_complete(results: &[PartitionResult], lan_only: bool) -> bool {
+    let mut populated = results
+        .iter()
+        .filter(|p| p.filters.contains_key("hasplayers"))
+        .peekable();
+    !lan_only
+        && populated.peek().is_some()
+        && populated.all(|p| p.total > 0 && !p.capped && p.response != "NoAnswer")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1915,6 +1917,47 @@ mod tests {
             p.last().unwrap().contains_key("noplayers") && !p.last().unwrap().contains_key("map")
         );
         assert_eq!(steam_empty_for(&HashMap::new()), None);
+        // The catch-all empty partition asks for one server per address (S-83).
+        assert!(p.last().unwrap().contains_key(COLLAPSE_KEY));
+    }
+
+    #[test]
+    fn a_capped_map_partition_does_not_keep_the_vouches() {
+        let part = |key: &str, total: usize, capped: bool, response: &str| PartitionResult {
+            filters: HashMap::from([(key.to_string(), String::new())]),
+            total,
+            responded: total,
+            failed: 0,
+            inflated: 0,
+            elapsed_ms: 1,
+            response: response.to_string(),
+            capped,
+        };
+        let populated = part("hasplayers", 2_210, false, "ServerResponded");
+        let capped_map = part("noplayers", STEAM_LIST_CAP, true, "ServerResponded");
+        // Three empty map partitions at the cap no longer block a whole populated answer.
+        assert!(vouch_complete(
+            &[populated.clone(), capped_map.clone()],
+            false
+        ));
+        // Stopped early after the populated partition answered: its answer is still whole.
+        assert!(vouch_complete(std::slice::from_ref(&populated), false));
+        // The populated answer itself must be whole, answered and non-empty.
+        assert!(!vouch_complete(
+            &[part("hasplayers", STEAM_LIST_CAP, true, "ServerResponded")],
+            false
+        ));
+        assert!(!vouch_complete(
+            &[part("hasplayers", 12, false, "NoAnswer")],
+            false
+        ));
+        assert!(!vouch_complete(
+            &[part("hasplayers", 0, false, "ServerResponded")],
+            false
+        ));
+        // No populated partition, or a LAN scan: nothing to decide from.
+        assert!(!vouch_complete(&[capped_map], false));
+        assert!(!vouch_complete(&[populated], true));
     }
 
     #[test]

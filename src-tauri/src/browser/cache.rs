@@ -3,7 +3,7 @@
 //! rusqlite 0.40 with the bundled SQLite; WAL journal; one connection behind a mutex.
 //! Pre-release schema policy: a version mismatch drops and recreates the table.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -398,13 +398,6 @@ impl Cache {
         }
     }
 
-    /// For the two writes whose durability the user would notice: a favourite and a
-    /// join. A PASSIVE checkpoint can copy nothing at all — measured at
-    /// `(busy 0, log 12, checkpointed 0)` with one reader on an older snapshot — and
-    /// then the row exists only in the write-ahead log, which is exactly the state
-    /// Q22 kept producing. FULL waits for the readers instead of stepping around
-    /// them, bounded by the connection's busy timeout so a stuck reader costs a few
-    /// seconds and a log line rather than the thread (D-194).
     /// Checkpoints and then truncates the write-ahead log, for the way out.
     ///
     /// Tauri leaves through `process::exit`, so the `Connection` is never dropped and
@@ -422,6 +415,13 @@ impl Cache {
             });
     }
 
+    /// For the two writes whose durability the user would notice: a favourite and a
+    /// join. A PASSIVE checkpoint can copy nothing at all — measured at
+    /// `(busy 0, log 12, checkpointed 0)` with one reader on an older snapshot — and
+    /// then the row exists only in the write-ahead log, which is exactly the state
+    /// Q22 kept producing. FULL waits for the readers instead of stepping around
+    /// them, bounded by the connection's busy timeout so a stuck reader costs a few
+    /// seconds and a log line rather than the thread (D-194).
     pub fn checkpoint_durable(&self) {
         if self.checkpoint() {
             return;
@@ -798,10 +798,17 @@ impl Cache {
     /// absent from the latest refresh, 19 of them among the 27 rows the vouch was
     /// rescuing from an "unverifiable" verdict. A vouch is now good for one refresh;
     /// a server Steam does not list this time goes back to unknown (D-233).
-    pub fn unvouch_unseen(&self, refresh_started: i64) -> rusqlite::Result<usize> {
+    ///
+    /// By the ids Steam listed as populated, not by `last_seen`: an INFO check advances
+    /// `last_seen` too, so a vouched row checked during the refresh kept its vouch here
+    /// while the store withdrew it, and it came back vouched at the next start (D-271).
+    /// 2 175 ids against the 71 397-row cache measured 12.1 ms.
+    pub fn unvouch_unlisted(&self, listed: &HashSet<String>) -> rusqlite::Result<usize> {
+        let ids = serde_json::to_string(listed).unwrap_or_else(|_| "[]".to_string());
         self.conn.execute(
-            "UPDATE servers SET steam_empty = NULL WHERE steam_empty = 0 AND last_seen < ?1",
-            params![refresh_started],
+            "UPDATE servers SET steam_empty = NULL
+              WHERE steam_empty = 0 AND id NOT IN (SELECT value FROM json_each(?1))",
+            params![ids],
         )
     }
 
@@ -861,7 +868,12 @@ impl Cache {
             // Row loss has been a mystery before (Q22), so every deletion is recorded —
             // before the sweep, which used to skip the line and lose the ids with it
             // when it failed after the rows were already gone (D-236).
-            crate::log_info!("cache", "pruned {n} server(s) unseen since {cutoff}");
+            // Most go by the three-day and listing lanes, not the 30-day cutoff the line
+            // used to name (D-271).
+            crate::log_info!(
+                "cache",
+                "pruned {n} server(s): unseen for 30 days, never counted in 3, or left out of the latest empty-list listing"
+            );
             // `prune` is the only DELETE on `servers`, so nothing can be orphaned unless
             // it deleted something — and the sweep measured 23.6 ms over 127 000 mod rows
             // every completed refresh (D-175). The one other way to orphan them is a
@@ -870,11 +882,15 @@ impl Cache {
             // The three sweeps scan the 375 000 mod rows whether or not anything was
             // orphaned — 101–113 ms for nothing after every refresh that pruned a row
             // without a mod list, which the fake-at-listing lane makes the common case.
-            // One existence probe over the 23 000 scanned servers decides (D-246).
+            // One existence probe over the 23 000 scanned servers decides (D-246) — and
+            // one over the failure rows, which a server that never answered RULES has
+            // without any `server_mods_at` row: those were never swept, and a server
+            // coming back at the same id inherited the old back-off (D-271).
             let orphaned = self
                 .conn
                 .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM server_mods_at WHERE server_id NOT IN (SELECT id FROM servers))",
+                    "SELECT EXISTS(SELECT 1 FROM server_mods_at WHERE server_id NOT IN (SELECT id FROM servers))
+                         OR EXISTS(SELECT 1 FROM server_mods_failed WHERE server_id NOT IN (SELECT id FROM servers))",
                     [],
                     |r| r.get::<_, bool>(0),
                 )
@@ -1548,6 +1564,46 @@ mod tests {
             (None, None, Some("synthetic"))
         );
         assert!(c.synthetic_ids().unwrap().contains(&farm.id));
+    }
+
+    /// D-271: a vouch goes by the ids Steam listed, not by `last_seen`, which an INFO
+    /// check during the refresh advances too.
+    #[test]
+    fn a_vouch_goes_by_what_steam_listed() {
+        let mut c = Cache::open_in_memory().unwrap();
+        let mut listed = row(27017, 12);
+        listed.steam_empty = Some(false);
+        let mut checked = row(27018, 25);
+        checked.steam_empty = Some(false);
+        let mut quiet = row(27019, 8);
+        quiet.steam_empty = Some(false);
+        c.upsert(&[listed.clone(), checked.clone(), quiet.clone()])
+            .unwrap();
+        // An INFO check on the unlisted one moves its last_seen past the refresh start.
+        c.apply_verifications(&[Verification {
+            id: checked.id.clone(),
+            verdict: Verdict::Unverifiable,
+            reported: 30,
+            verified: None,
+            max_players: 50,
+            ping_ms: Some(40),
+            player_rtt_ms: None,
+            keywords: None,
+            tags: None,
+            verified_at: ServerRow::now_unix() + 60,
+            reason: "test".into(),
+        }])
+        .unwrap();
+        let ids = HashSet::from([listed.id.clone()]);
+        assert_eq!(c.unvouch_unlisted(&ids).unwrap(), 2);
+        let vouch = |id: &str| c.get(id).unwrap().unwrap().steam_empty;
+        assert_eq!(vouch(&listed.id), Some(false));
+        assert_eq!(
+            vouch(&checked.id),
+            None,
+            "checked during the refresh, still not listed"
+        );
+        assert_eq!(vouch(&quiet.id), None);
     }
 
     /// D-268: the first fresh INFO on a row listed empty decides R0, whether or not
