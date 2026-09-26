@@ -17,19 +17,26 @@ pub struct ModLink {
     pub created: bool,
 }
 
-/// Folder name for a mod: `@` + meta.cpp name with characters Windows forbids removed.
+/// Folder name for a mod: `@` + meta.cpp name in printable ASCII, without the characters
+/// Windows forbids or the `-mod=` separator.
 pub fn junction_name(id: u64, meta_name: Option<&str>) -> String {
     let cleaned: String = meta_name
         .unwrap_or("")
         .chars()
         .filter(|c| {
-            // `;` is not forbidden by Windows but it separates -mod= entries
-            // (launch/args.rs), so a mod name carrying one would split its own
-            // path into two arguments and the launch would fail (D-160).
-            !matches!(
-                c,
-                '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' | ';'
-            ) && !c.is_control()
+            // ASCII only: DayZ reads its command line in the ANSI code page, where
+            // Windows' best-fit conversion turns look-alikes such as U+FF02 into `"`
+            // and U+FF1B into `;`, so a Workshop author's name could close the quoted
+            // `-mod=` and add arguments of its own (D-283). A name that is only
+            // non-ASCII falls back to the id below.
+            (c.is_ascii_graphic() || *c == ' ')
+                // `;` is not forbidden by Windows but it separates -mod= entries
+                // (launch/args.rs), so a mod name carrying one would split its own
+                // path into two arguments and the launch would fail (D-160).
+                && !matches!(
+                    c,
+                    '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' | ';'
+                )
         })
         .collect::<String>()
         .trim()
@@ -145,6 +152,18 @@ mod tests {
         assert_eq!(junction_name(7, Some("Mod .")), "@Mod");
         assert_eq!(junction_name(7, Some("Mod . .")), "@Mod");
         assert_eq!(junction_name(7, Some(" . ")), "@7");
+        // Look-alikes that best-fit to `"`, `;` and `\` in the ANSI code page go, and so
+        // does everything else outside printable ASCII (D-283).
+        assert_eq!(
+            junction_name(7, Some("Mod\u{FF02} -filePatching \u{FF02}-x")),
+            "@Mod -filePatching -x"
+        );
+        assert_eq!(
+            junction_name(7, Some("A\u{FF1B}B\u{FF3C}C\u{02BA}")),
+            "@ABC"
+        );
+        assert_eq!(junction_name(7, Some("\u{41C}\u{43E}\u{434}")), "@7");
+        assert_eq!(junction_name(7, Some("Caf\u{E9}\tMod")), "@CafMod");
     }
 
     #[test]

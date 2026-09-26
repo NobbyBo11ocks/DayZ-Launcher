@@ -219,8 +219,11 @@ impl Cache {
             let _ = std::fs::create_dir_all(dir);
         }
         let conn = Connection::open(path)?;
+        // `secure_delete=FAST`: deleted rows (a cleared join history, a removed favourite)
+        // are zeroed where that costs no extra I/O, instead of staying readable in free
+        // pages for as long as the file lasts (D-283).
         conn.execute_batch(
-            "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY;",
+            "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY; PRAGMA secure_delete=FAST;",
         )?;
         Self::migrate(conn)
     }
@@ -1162,6 +1165,20 @@ mod tests {
             "everything is older than 'now + 1 s'"
         );
         assert_eq!(c.row_counts().unwrap().servers, 0);
+    }
+
+    /// D-283: the file cache zeroes deleted rows where that costs no I/O (FAST is 2).
+    #[test]
+    fn deleted_rows_are_zeroed_in_the_file() {
+        let dir = std::env::temp_dir().join(format!("dzl-secure-delete-{}", std::process::id()));
+        let c = Cache::open(&dir.join("cache.db")).unwrap();
+        let mode: i64 = c
+            .conn
+            .query_row("PRAGMA secure_delete", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(mode, 2);
+        drop(c);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// D-244: a failed read waits 6 h, 12 h, then a day; a good read clears the wait.
