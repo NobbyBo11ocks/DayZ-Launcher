@@ -150,6 +150,7 @@ No accounts, no API keys, no telemetry. Every destination it contacts is listed 
 - Missing mods subscribed, downloaded and linked automatically, with **the rate and how long is left** — the median server needs 26 mods and the worst in this cache needs 139
 - **Wait for a free slot** on a full server, then start the moment one opens
 - Launch profiles: saved sets of launch options, picked in the join dialog
+- **DayZ's performance limits sized to your PC** — `-cpuCount`, `-maxMem` and `-maxVRAM` from its own threads, memory and graphics card, unless you set them yourself
 - Direct connect by address; the game port is resolved to the query port
 - Workshop updates read from the **running Steam client**, not from a file it refreshes when it feels like it
 - Joins that would be rejected are stopped before the game starts
@@ -196,7 +197,7 @@ flowchart LR
 
 1. **List.** The Steamworks matchmaking API supplies the server list with pings, the same list the in-game browser sees. It is cached in SQLite so the previous list appears instantly and is refreshed in the background.
 2. **Verify.** Populated servers are queried directly with A2S (INFO, RULES, PLAYER). The advertised count is checked against the player list, against Steam, and against the previous check: real sessions carry over between checks advanced by the gap, while a fabricated list is re-drawn on every query. A claim above the engine's 127-slot ceiling and an exact copy of a verified server's name on another address count against a row as well. Servers that fail the trust rules are marked inflated or fake. The rules, and what each one caught, are in [docs/11](docs/11-fake-population-detection.md).
-3. **Join.** The join plan compares the server's mod list with your Workshop items, subscribes and downloads what is missing, creates `!Workshop\@<mod>` junctions matched by Workshop ID, and starts `DayZ_BE.exe` with the official argument form.
+3. **Join.** The join plan compares the server's mod list with your Workshop items, subscribes and downloads what is missing, creates `!Workshop\@<mod>` junctions matched by Workshop ID, and starts `DayZ_BE.exe` with the official argument form, plus the three performance limits DayZ still reads, sized to the PC.
 4. **Friends and news.** Friends' servers come from Steam's game info and rich presence. News comes from Steam's news feed for DayZ; pictures are shrunk on the host — 360 px for the cards, 640 for the featured one — so the window stays light.
 
 > [!NOTE]

@@ -792,6 +792,7 @@ dependencies = [
  "tauri-plugin-window-state",
  "thiserror 2.0.20",
  "tokio",
+ "windows",
  "windows-sys 0.61.2",
  "winreg 0.56.0",
 ]

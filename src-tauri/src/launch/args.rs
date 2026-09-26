@@ -23,6 +23,9 @@ pub struct LaunchSpec {
     pub skip_intro: bool,
     pub no_splash: bool,
     pub no_pause: bool,
+    /// `-cpuCount`, `-maxMem`, `-maxVRAM` made for this PC, less any the extra
+    /// arguments set themselves (D-267).
+    pub perf_args: Vec<String>,
     /// Raw extra arguments from settings, split on whitespace (quotes respected).
     pub extra_args: String,
 }
@@ -60,6 +63,7 @@ pub fn build_args(spec: &LaunchSpec) -> Vec<String> {
     if spec.no_pause {
         v.push("-noPause".into());
     }
+    v.extend(spec.perf_args.iter().cloned());
     // The join's own keys come from the join: `-connect`, `-port`, `-mod`, `-password`
     // or `-name` in the extra arguments or a launch profile came after ours, and DayZ
     // could take the later one and land the player somewhere else (D-265).
@@ -160,6 +164,7 @@ mod tests {
             skip_intro: true,
             no_splash: true,
             no_pause: false,
+            perf_args: Vec::new(),
             extra_args: String::new(),
         };
         let args = build_args(&spec);
@@ -246,6 +251,22 @@ mod tests {
             .iter()
             .any(|a| a.starts_with("-password=") || a.starts_with("-name=")));
         assert!(args.ends_with(&["-cpuCount=8".to_string(), r"-profiles=D:\P".to_string()]));
+    }
+
+    #[test]
+    fn performance_arguments_sit_between_the_flags_and_the_extras() {
+        let spec = LaunchSpec {
+            ip: "1.2.3.4".into(),
+            game_port: 2302,
+            no_pause: true,
+            perf_args: vec!["-cpuCount=32".into(), "-maxMem=30626".into()],
+            extra_args: "-maxVRAM=4096".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            &build_args(&spec)[7..],
+            &["-noPause", "-cpuCount=32", "-maxMem=30626", "-maxVRAM=4096"]
+        );
     }
 
     #[test]

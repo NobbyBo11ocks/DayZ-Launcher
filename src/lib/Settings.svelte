@@ -239,7 +239,7 @@
             <label class="check"><input type="checkbox" bind:checked={launch.noPause} onchange={scheduleSave} /> <span>Keep running when unfocused <code>-noPause</code></span></label>
             <label class="row">
               <span class="label">Extra args</span>
-              <input class="text mono" type="text" bind:value={launch.extraArgs} oninput={scheduleSave} placeholder="-cpuCount=8 -profiles=&quot;D:\Profiles&quot;" aria-label="Extra launch arguments" />
+              <input class="text mono" type="text" bind:value={launch.extraArgs} oninput={scheduleSave} placeholder="-profiles=&quot;D:\Profiles&quot; -limitFPS=144" aria-label="Extra launch arguments" />
             </label>
 
             <h3>Saved profiles</h3>

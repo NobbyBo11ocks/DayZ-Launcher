@@ -6,6 +6,7 @@ pub mod browser;
 mod commands;
 pub mod error;
 pub mod geoip;
+mod hardware;
 pub mod http;
 mod icon;
 pub mod launch;

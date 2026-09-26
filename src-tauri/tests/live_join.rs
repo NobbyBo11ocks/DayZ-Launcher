@@ -177,6 +177,7 @@ fn live_join() {
         skip_intro: true,
         no_splash: true,
         no_pause: false,
+        perf_args: Vec::new(),
         extra_args: String::new(),
     };
     let args = build_args(&spec);

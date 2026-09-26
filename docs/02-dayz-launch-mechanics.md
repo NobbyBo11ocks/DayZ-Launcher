@@ -126,7 +126,7 @@ Working directory = game folder. Spawn `DayZ_BE.exe` with:
 | `-noPause` | keep running when unfocused |
 | `-window` | windowed mode (official launcher exposes `window`) |
 | `-profiles=<dir>` | profile folder (default `%USERPROFILE%\Documents\DayZ`) |
-| `-cpuCount=<n>`, `-maxMem=<MB>`, `-maxVRAM=<MB>` | performance limits the 1.29 client still parses (S-90): cores to use, and the physical-memory and video-memory ceilings. Set through extra arguments; the launcher adds none of them itself |
+| `-cpuCount=<n>`, `-maxMem=<MB>`, `-maxVRAM=<MB>` | performance limits the 1.29 client still parses (S-90): threads to use, and the physical-memory and video-memory ceilings. The launcher adds all three sized to the PC it runs on — every active thread, physical RAM less 2 GB (above 4 GB), the largest GPU's dedicated memory from 2 GB up — and leaves out any key the extra arguments set themselves (D-267, S-91) |
 | `-exThreads=<n>`, `-enableHT`, `-malloc=`, `-high` | Arma-era options **the DayZ 1.29 executable does not contain** (S-90): passing them does nothing. Process priority is set by the launcher itself (D-118) |
 | `-world=empty` | Linux launcher passes it to skip loading the menu world (C); `world=` is not in the 1.29 executable's option table (S-90), so its effect is unconfirmed |
 | `-filePatching`, `-doLogs`, `-BEpath=` | server/diag oriented, not exposed |

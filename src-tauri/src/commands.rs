@@ -1754,6 +1754,11 @@ pub async fn launch_game(
             skip_intro: settings.skip_intro,
             no_splash: settings.no_splash,
             no_pause: settings.no_pause,
+            // Read here, off the async threads: the first call enumerates the GPUs.
+            perf_args: crate::hardware::launch_args(
+                &crate::hardware::detect(),
+                &settings.extra_args,
+            ),
             extra_args: settings.extra_args.clone(),
         };
         Ok::<_, AppError>((game.folder, links, spec))

@@ -34,7 +34,11 @@ windows-sys = { version = "0.61.2", features = [
     # The window's icons from the exe's icon group at its DPI (D-264).
     "Win32_System_LibraryLoader",
     "Win32_UI_HiDpi",
+    # This PC's threads and memory for the launch's performance arguments (D-267).
+    "Win32_System_SystemInformation",
 ] }
+# The GPU's dedicated memory through DXGI (D-267); tauri already builds this version.
+windows = { version = "0.61.3", features = ["Win32_Graphics_Dxgi"] }
 tokio = { version = "1.53.1", features = ["net", "time", "sync", "macros", "rt-multi-thread"] }
 # DZSA server-list fallback when Steam is unavailable (D-089); the updater already pulls this version.
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "gzip"] }
