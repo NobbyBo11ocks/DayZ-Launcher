@@ -25,7 +25,7 @@ Mark a row `IN PROGRESS` before starting it, and leave notes there if work stops
 ## Waiting for approval (visual changes are never applied without it)
 
 - From D-248: one word for the hidden set ("Hide inflated" vs "fake" vs "untrusted"); the "Has queue" chip (it filtered 4 488 rows to 2 on 2026-09-25); inline confirmations that replace the focused button (Unsubscribe, Clean, Clear list); a keys hint for ←/→, Space and Esc on the grid.
-- ~~From D-268: keep the trust box's R0 text whenever the row is R0, in the warning colour~~ approved 2026-09-26 and applied in v0.1.57, wording unchanged. Still to approve: add "its player list shows N" to that text; add R8's explanation (D-238 said R8 and R9 explain themselves, only R10 does); relabel "Verified head-count" on the path where PLAYER did not answer and INFO said 0.
+- ~~From D-268: keep the trust box's R0 text whenever the row is R0, in the warning colour~~ approved 2026-09-26 and applied in v0.1.57, wording unchanged. ~~Add "its player list shows N" to that text; relabel "Verified head-count" on the path where PLAYER did not answer and INFO said 0~~ approved the same day and applied in v0.1.57 ("Empty server"). Still to approve: R8's explanation (D-238 said R8 and R9 explain themselves, only R10 does); no row needs it today, since every R8 row is also R0.
 
 ## Waiting for a check on the reference PC
 

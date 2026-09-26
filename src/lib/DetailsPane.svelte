@@ -234,6 +234,10 @@
     synthetic: "Fabricated player list",
     offline: "Not answering",
   };
+  /** "Verified head-count" over a check that counted nobody, because the player list
+   *  never came and the server said 0, promised a count there was not (D-268). */
+  const heading = (v: Verification) =>
+    v.verdict === "verified" && v.reason.startsWith("INFO reports 0") ? "Empty server" : verdictLabel[v.verdict];
   const fmtDur = (s: number) => (s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} m` : `${Math.floor(s / 60)} m`);
 
   async function copyAddress() {
@@ -257,6 +261,9 @@
     {@const vouched = row.steamEmpty === false && verdict === "unverifiable"}
     {@const counted = row.verifiedPlayers != null}
     {@const r0 = isInflated(row)}
+    <!-- What this pane's own check just counted: a fabricated list is no count, and a
+         stored one can be hours old. -->
+    {@const listed = v && v.verdict !== "synthetic" ? v.verified : null}
     {@const versionOk = !localVersion || row.version === localVersion}
 
     <header class="head">
@@ -293,7 +300,7 @@
              to the pane's own check, which then showed a green "Verified head-count"
              beside a row the list still hid (D-268). -->
         <strong>Inflated player count</strong>
-        <span class="muted">Steam reports 0 authenticated players; the server claims {row.players}.</span>
+        <span class="muted">Steam reports 0 authenticated players; the server claims {row.players}{#if listed != null}, and its player list shows {listed}{/if}.</span>
       {:else if v && vouched && counted}
         <strong>Last counted {row.verifiedPlayers}</strong>
         <span class="muted">The server has stopped answering player queries; Steam still sees players on it. Showing the last head-count, not the server's claim.</span>
@@ -301,7 +308,7 @@
         <strong>Player count unconfirmed</strong>
         <span class="muted">The server does not answer player queries. Steam sees at least one session, which does not confirm the {row.players} it claims.</span>
       {:else if v}
-        <strong>{verdictLabel[v.verdict]}</strong>
+        <strong>{heading(v)}</strong>
         <!-- The rule's own words stay on hover; the sentence is for the player (D-248). -->
         <span class="muted" title={v.reason}>{explain(v)}</span>
       {:else}
