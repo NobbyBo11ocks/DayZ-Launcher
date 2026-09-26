@@ -17,7 +17,7 @@ Mark a row `IN PROGRESS` before starting it, and leave notes there if work stops
 | 6 | **Installer and updater**: NSIS template and `hooks.nsh` (D-262 icons included), update and uninstall modes, the updater manifest, the release workflow | done 2026-09-26 | D-279, released as v0.1.64: installs from before the rename updated into a second copy; a wrong signing key would have been caught only after publishing; the updater kept offering a deleted release; 10 more. The three approved visible changes shipped in the same release (D-280) |
 | 7 | **Front-end state and flows**: the servers store, filters, sort and counts, dialogs, event listeners — non-visual bugs only | done 2026-09-26 | D-281, released as v0.1.65: the details pane kept a server's first verdict; its missing marks disagreed with the join plan; uncountable rows were checked again on every scroll; 8 more |
 | 8 | **Security and privacy** (the `junction` crate's `unstable_admin` carry-over from row 5 is fixed already, D-282) | done 2026-09-26 | D-283, released as v0.1.67: a Workshop mod's name could add game arguments through Windows' best-fit conversion; the News player's popups escaped its sandbox; a cleared history stayed readable in free pages |
-| 9 | **Performance** at the current row counts (~40 000 cached servers) | todo | |
+| 9 | **Performance** at the current row counts (~40 000 cached servers) | IN PROGRESS since 2026-09-26T13:38Z | |
 | 10 | **Docs against code** | todo | |
 | 11 | **Accessibility** — report only: every item needs approval first | todo | |
 
