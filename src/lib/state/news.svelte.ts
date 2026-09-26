@@ -75,7 +75,7 @@ class NewsStore {
     this.seenLoaded = true;
     try {
       const c = await invoke<NewsCached>("news_cached");
-      this.items = c.items;
+      this.#setItems(c.items);
     } catch {
       /* nothing cached yet */
     }
@@ -111,7 +111,7 @@ class NewsStore {
       // Switched off while that was in flight: no toast, no taskbar flash and no
       // Windows notification for a page that has left the sidebar (D-185, D-256).
       if (!this.#started) return;
-      this.items = c.items;
+      this.#setItems(c.items);
       this.error = null;
       if (before === 0) {
         // First run: the newest few are "new", not the whole archive.
@@ -182,6 +182,20 @@ class NewsStore {
    * featured post and video-less posts use the backend's 640 px thumbnail, which
    * arrives asynchronously (null until then). Steam's originals are 3840×2160.
    */
+  /** The feed replaced, and the pictures of posts that left it released: each is an object
+   *  URL holding its bytes until revoked, and they were kept for the whole run (D-282). */
+  #setItems(items: NewsItem[]) {
+    this.items = items;
+    const keep = new Set(items.map((n) => n.gid));
+    const gone = [...this.thumbs.keys()].filter((k) => !keep.has(k.slice(0, k.lastIndexOf(":"))));
+    for (const k of gone) {
+      const url = this.thumbs.get(k);
+      if (url) URL.revokeObjectURL(url);
+      this.thumbs.delete(k);
+    }
+    for (const k of [...this.#thumbFailed]) if (!keep.has(k.slice(0, k.lastIndexOf(":")))) this.#thumbFailed.delete(k);
+  }
+
   thumbUrl(n: NewsItem, featured = false): string | null {
     const yt = n.video ? `https://i.ytimg.com/vi/${n.video}/${featured ? "hqdefault" : "mqdefault"}.jpg` : null;
     if (!featured && yt) return yt;

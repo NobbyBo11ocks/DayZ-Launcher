@@ -463,7 +463,9 @@ class ServersStore {
   moreFilterCount = $derived.by(() => {
     const f = this.filters;
     return (
-      [f.notFull, f.notEmpty, f.hasQueue, f.noPassword, f.dayOnly, f.versionMine].filter(Boolean).length +
+      // "My version" filters nothing while DayZ's own version is unknown, and was
+      // counted in "Reset · N" all the same (D-282).
+      [f.notFull, f.notEmpty, f.hasQueue, f.noPassword, f.dayOnly, f.versionMine && this.localVersion != null].filter(Boolean).length +
       (f.mod ? 1 : 0) +
       (f.maxPing > 0 ? 1 : 0) +
       (f.hideUntrusted ? 0 : 1) +
@@ -702,6 +704,17 @@ class ServersStore {
     }
   }
 
+  /** Moves a catalogue entry's server count. One that reaches 0 leaves the list, as the
+   *  stored catalogue would drop it at the next start: it stayed in the dropdown as
+   *  "(0)". The mod the filter is set to keeps its entry, and so its name (D-282). */
+  #countMod(m: number, d: number) {
+    const e = this.modCatalog.get(m);
+    if (!e || d === 0) return;
+    const n = Math.max(0, e.servers + d);
+    if (n === 0 && m !== this.filters.mod) this.modCatalog.delete(m);
+    else this.modCatalog.set(m, { name: e.name, servers: n });
+  }
+
   /** A batch of freshly scanned servers, the names of the mods they mention, and the
    *  servers whose read failed. */
   applyMods(list: ServerMods[], names: [number, string][], failed: string[]) {
@@ -719,10 +732,7 @@ class ServersStore {
       for (const m of s.mods) delta.set(m, (delta.get(m) ?? 0) + 1);
       this.modsByServer.set(s.id, s.mods);
     }
-    for (const [m, d] of delta) {
-      const e = this.modCatalog.get(m);
-      if (e && d !== 0) this.modCatalog.set(m, { name: e.name, servers: Math.max(0, e.servers + d) });
-    }
+    for (const [m, d] of delta) this.#countMod(m, d);
   }
 
   async scanMods() {
@@ -1193,10 +1203,7 @@ class ServersStore {
       this.modsUnreadable.delete(id);
     }
     if (n === 0) return;
-    for (const [m, d] of delta) {
-      const e = this.modCatalog.get(m);
-      if (e) this.modCatalog.set(m, { name: e.name, servers: Math.max(0, e.servers + d) });
-    }
+    for (const [m, d] of delta) this.#countMod(m, d);
     for (const id of ids) this.friendsOn.delete(id);
     if (this.selectedId && !this.rows.has(this.selectedId)) this.selectedId = null;
     // A join dialog open on a pruned row would fail its next step with "unknown
