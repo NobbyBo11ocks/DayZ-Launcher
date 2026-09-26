@@ -10,7 +10,7 @@ Mark a row `IN PROGRESS` before starting it, and leave notes there if work stops
 | # | Area | Status | Result |
 |---|---|---|---|
 | 1 | **Join path**: Join button → mod plan (RULES, cached fallback) → Steam downloads (sync, stall, failures) → `!Workshop` junctions → launch arguments → `DayZ_BE.exe` start and exit watch | done 2026-09-26 | D-265, released as v0.1.55: `-mod=` was in the reverse of the server's load order; a missing-folder mod waited 15 min; a closed dialog could still launch; 9 more |
-| 2 | **Trust and verification**: R0–R12 (`browser/verify.rs`, `src/lib/types.ts` `isUntrusted`/`trustedPlayers`/`queueOf`, `cache.rs` `apply_verifications`), R11 continuity, the stale re-read after a pass, the details pane's verdict text | todo | |
+| 2 | **Trust and verification**: R0–R12 (`browser/verify.rs`, `src/lib/types.ts` `isUntrusted`/`trustedPlayers`/`queueOf`, `cache.rs` `apply_verifications`), R11 continuity, the stale re-read after a pass, the details pane's verdict text | IN PROGRESS since 2026-09-26T01:06Z | |
 | 3 | **Refresh and cache lifecycle**: Steam partitions and the `collapse_addr_hash` follow-up, upsert variants, the three prune lanes, vouch withdrawal, `servers:pruned`, WAL checkpoints, start-up load | todo | |
 | 4 | **Steam session lifecycle**: `steam/sdk.rs` worker — init retry, idle release, Steam closing/restarting, friends and rich presence, the Workshop update poll | todo | |
 | 5 | **Mods page and Workshop management**: scan, subscribe/unsubscribe, the update badge, the dangling-junction clean-up (never delete a junction the app did not create) | todo | |
