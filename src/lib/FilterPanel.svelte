@@ -93,8 +93,9 @@
 
     <!-- Real checkboxes now that the toggles have a column of their own: a ticked row
          is ticked, where a chip only changed colour. Two to a row for the short ones;
-         the two with a count get the full width so the number lines up at the right.
-         The block needs no heading: every row names itself. -->
+         the one with a count gets the full width so the number lines up at the right
+         (Hide inflated, the other, went down with the foot). The block needs no
+         heading: every row names itself. -->
     <div class="checks" role="group" aria-label="Status">
       <label class="check"><input type="checkbox" checked={f.notEmpty} onchange={() => toggle("notEmpty")} />Not empty</label>
       <label class="check"><input type="checkbox" checked={f.notFull} onchange={() => toggle("notFull")} />Not full</label>
@@ -107,100 +108,106 @@
       <label class="check wide" title="Only servers a Steam friend is playing on right now">
         <input type="checkbox" checked={f.friendsOnly} onchange={() => toggle("friendsOnly")} />Friends playing <span class="num">{servers.friendsOn.size}</span>
       </label>
-      <label class="check wide" title="Hide servers whose player count cannot be trusted: inflated, fabricated, not answering, or a copy of another server's name">
+    </div>
+
+    <!-- The foot: from Hide inflated down to the mod search, at the bottom of the rail
+         with the free height above it, on the user's call (D-270). A window with no
+         height to spare leaves it where it was, under the checkboxes. -->
+    <div class="foot">
+      <label class="check" title="Hide servers whose player count cannot be trusted: inflated, fabricated, not answering, or a copy of another server's name">
         <input type="checkbox" checked={f.hideUntrusted} onchange={() => toggle("hideUntrusted")} />Hide inflated <span class="num">{fmt.format(servers.untrustedCount)}</span>
       </label>
-    </div>
 
-    <!-- Official is Bohemia's public hive, where your character follows you between
-         servers; Community is a private shard, where it does not. The in-game browser
-         makes this a top-level tab, and the tag is already on every row (D-195). -->
-    <div class="row" role="group" aria-labelledby="{uid}-hive">
-      <span class="tag" id="{uid}-hive">Hive</span>
-      <div class="seg">
-        {#each [["any", "Any", "Both hives"], ["official", "Official", "Bohemia's public hive: your character follows you between these"], ["community", "Community", "Private shards: your character lives on that one server"]] as [v, label, hint] (v)}
-          <button class="segbtn" class:on={f.hive === v} aria-pressed={f.hive === v} title={hint} onclick={() => setHive(v as HiveFilter)}>{label}</button>
-        {/each}
-      </div>
-    </div>
-
-    <!-- The label wraps the select, so it names it and a click on it opens it. -->
-    <label class="row" class:on={f.map !== ""}>
-      <span class="tag">Map</span>
-      <select bind:value={servers.filters.map} onchange={() => servers.saveFilters()}>
-        <option value="">All maps</option>
-        {#each shownMaps as [id, label, n] (id)}
-          <option value={id}>{label} ({n})</option>
-        {/each}
-        <!-- A map filtered to and then ranked out of the top 40, or restored from a
-             saved filter, still has to name itself (D-222). -->
-        {#if f.map && !shownMaps.some(([id]) => id === f.map)}
-          <option value={f.map}>{mapLabel(f.map)}</option>
-        {/if}
-      </select>
-    </label>
-    <label class="row" class:on={f.country !== ""}>
-      <span class="tag">Country</span>
-      <select bind:value={servers.filters.country} onchange={() => servers.saveFilters()}>
-        <option value="">All countries</option>
-        {#each shownCountries as [cc, n] (cc)}
-          <option value={cc}>{countryName(cc)} ({n})</option>
-        {/each}
-        {#if f.country && !shownCountries.some(([cc]) => cc === f.country)}
-          <option value={f.country}>{countryName(f.country)}</option>
-        {/if}
-      </select>
-    </label>
-
-    <!-- Presets rather than a number field: this was the one filter you had to click
-         into and type a number for, and an emptied number input binds as null (D-211).
-         A value saved before this, or set some other way, keeps its own option. -->
-    <label class="row" class:on={f.maxPing > 0} title="Hide servers slower than this">
-      <span class="tag">Max ping</span>
-      <select bind:value={servers.filters.maxPing} onchange={() => servers.saveFilters()}>
-        <option value={0}>Any</option>
-        {#each PING_PRESETS as ms (ms)}
-          <option value={ms}>{ms} ms</option>
-        {/each}
-        {#if f.maxPing > 0 && !PING_PRESETS.includes(f.maxPing)}
-          <option value={f.maxPing}>{f.maxPing} ms</option>
-        {/if}
-      </select>
-    </label>
-
-    <div class="row" role="group" aria-labelledby="{uid}-mods">
-      <span class="tag" id="{uid}-mods">Mods</span>
-      <div class="seg">
-        {#each [["any", "Any"], ["modded", "Modded"], ["vanilla", "Vanilla"]] as [v, label] (v)}
-          <button class="segbtn" class:on={f.mods === v} aria-pressed={f.mods === v} onclick={() => setMods(v as ModFilter)}>{label}</button>
-        {/each}
-      </div>
-    </div>
-    {#if servers.modCatalog.size > 0 || f.mod}
-      <div class="modf" role="group" aria-label="Running a specific mod">
-        <input class="modsearch" type="search" placeholder="Find a mod" bind:value={modQuery} aria-label="Search the mod list" spellcheck="false" />
-        <select class="modselect" class:on={f.mod !== 0} bind:value={servers.filters.mod} onchange={() => servers.saveFilters()} aria-label="Servers running this mod" title="Servers whose mod list includes this Workshop item">
-          <option value={0}>Any mod</option>
-          {#each modOptions as m (m.id)}
-            <option value={m.id}>{m.name} ({m.servers})</option>
+      <!-- Official is Bohemia's public hive, where your character follows you between
+           servers; Community is a private shard, where it does not. The in-game browser
+           makes this a top-level tab, and the tag is already on every row (D-195). -->
+      <div class="row" role="group" aria-labelledby="{uid}-hive">
+        <span class="tag" id="{uid}-hive">Hive</span>
+        <div class="seg">
+          {#each [["any", "Any", "Both hives"], ["official", "Official", "Bohemia's public hive: your character follows you between these"], ["community", "Community", "Private shards: your character lives on that one server"]] as [v, label, hint] (v)}
+            <button class="segbtn" class:on={f.hive === v} aria-pressed={f.hive === v} title={hint} onclick={() => setHive(v as HiveFilter)}>{label}</button>
           {/each}
-        </select>
+        </div>
       </div>
-    {/if}
-    <!-- A mod filter only matches servers whose mod list has been read. The scan runs
-         after every refresh; this asks for it now (D-160). It sat on the status line
-         under the search until that went, and it matters only with a mod chosen (D-250).
-         One line, so it costs the column 21 px rather than a wrapped paragraph. -->
-    {#if f.mod && (servers.modScanning || servers.unscannedModded > 0)}
-      <p class="hint">
-        {#if servers.modScanning}
-          Reading mod lists…
-        {:else}
-          {fmt.format(servers.unscannedModded)} not scanned yet ·
-          <button class="link" onclick={() => void servers.scanMods(false)} title="Read the mod list of every populated modded server that has not been scanned">Scan now</button>
-        {/if}
-      </p>
-    {/if}
+
+      <!-- The label wraps the select, so it names it and a click on it opens it. -->
+      <label class="row" class:on={f.map !== ""}>
+        <span class="tag">Map</span>
+        <select bind:value={servers.filters.map} onchange={() => servers.saveFilters()}>
+          <option value="">All maps</option>
+          {#each shownMaps as [id, label, n] (id)}
+            <option value={id}>{label} ({n})</option>
+          {/each}
+          <!-- A map filtered to and then ranked out of the top 40, or restored from a
+               saved filter, still has to name itself (D-222). -->
+          {#if f.map && !shownMaps.some(([id]) => id === f.map)}
+            <option value={f.map}>{mapLabel(f.map)}</option>
+          {/if}
+        </select>
+      </label>
+      <label class="row" class:on={f.country !== ""}>
+        <span class="tag">Country</span>
+        <select bind:value={servers.filters.country} onchange={() => servers.saveFilters()}>
+          <option value="">All countries</option>
+          {#each shownCountries as [cc, n] (cc)}
+            <option value={cc}>{countryName(cc)} ({n})</option>
+          {/each}
+          {#if f.country && !shownCountries.some(([cc]) => cc === f.country)}
+            <option value={f.country}>{countryName(f.country)}</option>
+          {/if}
+        </select>
+      </label>
+
+      <!-- Presets rather than a number field: this was the one filter you had to click
+           into and type a number for, and an emptied number input binds as null (D-211).
+           A value saved before this, or set some other way, keeps its own option. -->
+      <label class="row" class:on={f.maxPing > 0} title="Hide servers slower than this">
+        <span class="tag">Max ping</span>
+        <select bind:value={servers.filters.maxPing} onchange={() => servers.saveFilters()}>
+          <option value={0}>Any</option>
+          {#each PING_PRESETS as ms (ms)}
+            <option value={ms}>{ms} ms</option>
+          {/each}
+          {#if f.maxPing > 0 && !PING_PRESETS.includes(f.maxPing)}
+            <option value={f.maxPing}>{f.maxPing} ms</option>
+          {/if}
+        </select>
+      </label>
+
+      <div class="row" role="group" aria-labelledby="{uid}-mods">
+        <span class="tag" id="{uid}-mods">Mods</span>
+        <div class="seg">
+          {#each [["any", "Any"], ["modded", "Modded"], ["vanilla", "Vanilla"]] as [v, label] (v)}
+            <button class="segbtn" class:on={f.mods === v} aria-pressed={f.mods === v} onclick={() => setMods(v as ModFilter)}>{label}</button>
+          {/each}
+        </div>
+      </div>
+      {#if servers.modCatalog.size > 0 || f.mod}
+        <div class="modf" role="group" aria-label="Running a specific mod">
+          <input class="modsearch" type="search" placeholder="Find a mod" bind:value={modQuery} aria-label="Search the mod list" spellcheck="false" />
+          <select class="modselect" class:on={f.mod !== 0} bind:value={servers.filters.mod} onchange={() => servers.saveFilters()} aria-label="Servers running this mod" title="Servers whose mod list includes this Workshop item">
+            <option value={0}>Any mod</option>
+            {#each modOptions as m (m.id)}
+              <option value={m.id}>{m.name} ({m.servers})</option>
+            {/each}
+          </select>
+        </div>
+      {/if}
+      <!-- A mod filter only matches servers whose mod list has been read. The scan runs
+           after every refresh; this asks for it now (D-160). It sat on the status line
+           under the search until that went, and it matters only with a mod chosen (D-250).
+           One line, so it costs the column 21 px rather than a wrapped paragraph. -->
+      {#if f.mod && (servers.modScanning || servers.unscannedModded > 0)}
+        <p class="hint">
+          {#if servers.modScanning}
+            Reading mod lists…
+          {:else}
+            {fmt.format(servers.unscannedModded)} not scanned yet ·
+            <button class="link" onclick={() => void servers.scanMods(false)} title="Read the mod list of every populated modded server that has not been scanned">Scan now</button>
+          {/if}
+        </p>
+      {/if}
+    </div>
   </div>
 </section>
 
@@ -249,6 +256,9 @@
   .row select:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
 
   .checks { display: grid; grid-template-columns: 1fr 1fr; column-gap: 8px; margin: 5px 0; }
+  /* `margin-top: auto` takes whatever height the body has spare, so the foot sits on
+     the rail's floor; with none spare it is 0 and the body scrolls as before (D-270). */
+  .foot { flex: none; margin-top: auto; display: flex; flex-direction: column; gap: 5px; }
   .check { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 19px; color: var(--fg-muted); font-size: 12.5px; white-space: nowrap; cursor: pointer; }
   .check.wide { grid-column: 1 / -1; }
   .check:not(.off):hover, .check:has(:checked) { color: var(--fg); }
