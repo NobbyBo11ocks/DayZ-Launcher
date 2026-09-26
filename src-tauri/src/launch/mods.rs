@@ -33,7 +33,10 @@ pub fn junction_name(id: u64, meta_name: Option<&str>) -> String {
         })
         .collect::<String>()
         .trim()
-        .trim_end_matches('.')
+        // Dots and spaces together: Windows drops both from the end of a name, and
+        // "Mod ." trimmed the dot first and kept the space, a `-mod=` path ending in
+        // `@Mod ` that nothing under it resolves through (D-276).
+        .trim_end_matches(|c: char| c == '.' || c.is_whitespace())
         .to_string();
     if cleaned.is_empty() {
         format!("@{id}")
@@ -138,6 +141,10 @@ mod tests {
         assert_eq!(junction_name(7, Some("Bad:Name?/")), "@BadName");
         assert_eq!(junction_name(7, Some("   ")), "@7");
         assert_eq!(junction_name(7, None), "@7");
+        // Windows drops trailing dots and spaces alike (D-276).
+        assert_eq!(junction_name(7, Some("Mod .")), "@Mod");
+        assert_eq!(junction_name(7, Some("Mod . .")), "@Mod");
+        assert_eq!(junction_name(7, Some(" . ")), "@7");
     }
 
     #[test]

@@ -27,5 +27,5 @@ Windows-only DayZ Standalone launcher: Tauri 2 (Rust) + Svelte 5, key-free serve
 2. **Verify live where possible.** Protocol claims are checked with `tools/a2s_probe.js`; file-layout claims against this machine's Steam install; versions against the registries with the commands in 04 §5.
 3. **Optimise per file.** Apply the checklist in 05 §7 to every file touched; log deviations.
 4. **Match mods by Workshop ID**, never by name (02 §3).
-5. **Keep the official launcher working.** Reuse its `!Workshop` junctions; never delete or rename them on the launcher's own initiative. The only removal is the user's confirmed clean-up action on the Mods page, limited to junctions whose target folder is gone (D-093, D-170).
+5. **Keep the official launcher working.** Reuse its `!Workshop` junctions; never delete or rename them on the launcher's own initiative. The only removal is the user's confirmed clean-up action on the Mods page, limited to junctions whose target is a Workshop item folder that is certainly gone (D-093, D-170, D-276).
 6. **No telemetry, no accounts.** One exception to "no remote code" since D-150: the home page's YouTube player, sandboxed and created only while a video is open. Adding a second one needs a decision row.

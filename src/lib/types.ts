@@ -63,6 +63,8 @@ export type JunctionInfo = {
   target: string | null;
   workshopId: number | null;
   targetExists: boolean;
+  /** Target certainly gone and a Workshop item: what "Clean" removes (D-276). */
+  removable: boolean;
 };
 
 /**
@@ -424,7 +426,7 @@ export type ModPlanItem = {
 /** Mod lists collected from A2S_RULES across servers (D-080). */
 export type ModCatalogEntry = { id: number; name: string; servers: number };
 export type ServerMods = { id: string; mods: number[] };
-export type ModsIndex = { catalog: ModCatalogEntry[]; index: ServerMods[] };
+export type ModsIndex = { catalog: ModCatalogEntry[]; index: ServerMods[]; unreadable: string[] };
 export type ModScanSummary = { total: number; scanned: number; failed: number; elapsedMs: number };
 
 /** Dangling `!Workshop` junctions removed on request from the Mods page (D-093, D-170). */

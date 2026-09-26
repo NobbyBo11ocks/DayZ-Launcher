@@ -12,7 +12,7 @@
   import { external } from "./external";
   import { modUpdates } from "./state/mods.svelte";
   import { servers } from "./state/servers.svelte";
-  import { fmtBytes, type Diagnostics, type JunctionCleanup, type SyncDone, type SyncProgress, type UnsubscribeResult, type WorkshopItemInfo } from "./types";
+  import { fmtBytes, type Diagnostics, type JunctionCleanup, type JunctionInfo, type SyncDone, type SyncProgress, type UnsubscribeResult, type WorkshopItemInfo } from "./types";
 
   /** Jump to the server list filtered to servers running this mod (D-080). */
   function showServers(id: number) {
@@ -26,7 +26,9 @@
   let notice = $state<string | null>(null);
   let busyIds = $state<Set<number>>(new Set());
   let updating = $state<SyncProgress | null>(null);
-  let updateJob = 0;
+  // The page's own update job id lives in the store: a per-page variable was 0 again
+  // after leaving the page and coming back, so its own update read as "Downloading for
+  // a join…" (D-276).
   /** The download in flight was started elsewhere (the join dialog), not by this page. */
   let fromJoin = $state(false);
   let search = $state("");
@@ -85,12 +87,15 @@
         // the one the user is most likely to come here to watch (D-184).
         listen<SyncProgress>("mods:progress", (ev) => {
           updating = ev.payload;
-          fromJoin = ev.payload.job !== updateJob;
+          fromJoin = ev.payload.job !== modUpdates.pageJob;
         }),
         listen<SyncDone>("mods:done", (ev) => {
           updating = null;
           fromJoin = false;
-          notice = ev.payload.ok ? `Downloaded ${ev.payload.items.length} mod${ev.payload.items.length === 1 ? "" : "s"}.` : null;
+          // An update leaves out mods no longer subscribed (D-276), so it can finish with
+          // nothing downloaded; "Downloaded 0 mods." said otherwise.
+          const n = ev.payload.items.length;
+          notice = ev.payload.ok && n ? `Downloaded ${n} mod${n === 1 ? "" : "s"}.` : null;
           error = ev.payload.ok ? null : (ev.payload.error ?? "Download failed");
           void load();
         }),
@@ -107,8 +112,20 @@
       return stale === i.needsUpdate ? i : { ...i, needsUpdate: stale };
     }),
   );
-  const junctionsById = $derived(new Map((data?.junctions ?? []).filter((j) => j.workshopId != null).map((j) => [j.workshopId as number, j])));
-  const dangling = $derived((data?.junctions ?? []).filter((j) => !j.targetExists).length);
+  // A live junction wins over a stale one for the same item: in name order, a stale
+  // `@Community Framework` left from an old library replaced a live `@CF` and the cell
+  // showed "target gone" for a mod that was linked (D-276).
+  const junctionsById = $derived.by(() => {
+    const m = new Map<number, JunctionInfo>();
+    for (const j of data?.junctions ?? []) {
+      if (j.workshopId == null) continue;
+      const have = m.get(j.workshopId);
+      if (!have || (!have.targetExists && j.targetExists)) m.set(j.workshopId, j);
+    }
+    return m;
+  });
+  // What the clean-up will remove, counted by the host's own rule (D-276).
+  const dangling = $derived((data?.junctions ?? []).filter((j) => j.removable).length);
   /** `mod.cpp` names are sometimes a localisation key (`$STR_nam_mod_terrain_name`);
    *  the Workshop's own name is the readable one in that case (D-143). */
   const nameOf = (i: WorkshopItemInfo) => {
@@ -175,14 +192,16 @@
 
   async function update(ids: number[]) {
     if (!ids.length || updating) return;
-    updateJob = Date.now();
+    modUpdates.pageJob = Date.now();
     notice = null;
     error = null;
     // Optimistic, so the buttons disable at once instead of waiting for the first
     // progress event (D-151); `mods:done` clears it.
-    updating = { job: updateJob, items: [], installed: 0, total: ids.length, elapsedMs: 0 };
+    updating = { job: modUpdates.pageJob, items: [], installed: 0, total: ids.length, elapsedMs: 0 };
     try {
-      await invoke("mods_sync", { job: updateJob, ids });
+      // Update only: never re-subscribe a mod that was unsubscribed since the badge
+      // last heard from Steam (D-276).
+      await invoke("mods_sync", { job: modUpdates.pageJob, ids, subscribe: false });
     } catch (e) {
       // The backend rejects synchronously when Steam is not connected, and then no
       // `mods:done` ever arrives — without this the toolbar stayed disabled reading

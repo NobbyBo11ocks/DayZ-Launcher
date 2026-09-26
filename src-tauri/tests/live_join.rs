@@ -54,7 +54,7 @@ fn live_join() {
 
     // --- Sync (subscribe + download) ---------------------------------------
     let t1 = Instant::now();
-    steam.sync(42, vec![mod_id]).expect("sync queued");
+    steam.sync(42, vec![mod_id], true).expect("sync queued");
     let mut last_state = String::new();
     let done = loop {
         match rx.try_recv() {

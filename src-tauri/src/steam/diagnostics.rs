@@ -77,6 +77,8 @@ pub struct JunctionInfo {
     pub target: Option<String>,
     pub workshop_id: Option<u64>,
     pub target_exists: bool,
+    /// What the clean-up would remove: target certainly gone, and a Workshop item (D-276).
+    pub removable: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -162,11 +164,23 @@ pub fn collect() -> AppResult<Diagnostics> {
 
         let workshop_read = match workshop::read(&g.library.path) {
             Ok(Some(w)) => Some(w),
-            // Steam writes the list with the first DayZ Workshop item, so no list is
-            // "nothing installed": an empty section, and the Mods page says so. No
-            // section at all is left to mean "could not be read", which the page
-            // reports with the warning that says why (D-256).
-            Ok(None) => Some(workshop::from_folders(&g.library.path, &[])),
+            // No list with no item folders is "nothing installed": an empty section, and
+            // the Mods page says so. No section at all is left to mean "could not be
+            // read", which the page reports with the warning that says why (D-256). But
+            // deleting the list is ordinary Workshop troubleshooting and leaves the
+            // folders, which the join and the launch already fall back to (D-256,
+            // D-265): the page said "no Workshop mods installed" and the badge cleared
+            // over mods that were there (D-276).
+            Ok(None) => {
+                let ids = workshop::installed_ids(&g.library.path);
+                if !ids.is_empty() {
+                    warnings.push(format!(
+                        "Steam's Workshop list is missing; {} mod(s) are listed from their folders, without sizes or update times.",
+                        ids.len()
+                    ));
+                }
+                Some(workshop::from_folders(&g.library.path, &ids))
+            }
             Err(e) => {
                 warnings.push(format!(
                     "Steam's Workshop list could not be read ({e}); installed mods cannot be checked."
@@ -221,9 +235,10 @@ pub fn collect() -> AppResult<Diagnostics> {
                 target: j.target.as_deref().map(s),
                 workshop_id: j.workshop_id,
                 target_exists: j.target_exists,
+                removable: j.removable,
             })
             .collect();
-        let dangling = junctions.iter().filter(|j| !j.target_exists).count();
+        let dangling = junctions.iter().filter(|j| j.removable).count();
         if dangling > 0 {
             warnings.push(format!(
                 "{dangling} junction(s) in !Workshop point at missing folders."

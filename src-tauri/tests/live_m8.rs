@@ -40,7 +40,7 @@ fn unsubscribe_roundtrip() {
 
     // Subscribe + download so there is something to unsubscribe from.
     let t1 = Instant::now();
-    steam.sync(8, vec![mod_id]).expect("sync queued");
+    steam.sync(8, vec![mod_id], true).expect("sync queued");
     let done = loop {
         match rx.try_recv() {
             Ok(SteamEvent::SyncDone(d)) => break d,

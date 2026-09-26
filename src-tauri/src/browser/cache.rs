@@ -187,6 +187,9 @@ pub struct ServerMods {
 pub struct ModsIndex {
     pub catalog: Vec<ModCatalogEntry>,
     pub index: Vec<ServerMods>,
+    /// Servers with no list whose last read failed: a scan waits before asking them
+    /// again (D-244), so they are not "not scanned yet" (D-276).
+    pub unreadable: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -552,12 +555,12 @@ impl Cache {
     /// not been verified yet), and not scanned inside `max_age_secs`.
     ///
     /// A server whose last read failed waits `scan_retry_after` before it is asked
-    /// again, unless `force`: the same ~170 servers that never answer RULES were
-    /// re-queried on every pass, one NAT flow each, for nothing (D-244). Returns the
-    /// targets and how many were held back that way.
+    /// again: the same ~170 servers that never answer RULES were re-queried on every
+    /// pass, one NAT flow each, for nothing (D-244). Returns the targets and how many
+    /// were held back that way. The store's "not scanned yet" count mirrors these rules
+    /// (`unscannedModded`, D-276).
     pub fn scan_targets(
         &self,
-        force: bool,
         now: i64,
         max_age_secs: i64,
     ) -> rusqlite::Result<(Vec<(String, std::net::SocketAddr)>, usize)> {
@@ -608,14 +611,12 @@ impl Cache {
             }
             // A stamp in the future — the clock was set back — reads as stale, as
             // `last_refresh` does since D-236 (D-245).
-            if !force && scanned_at.is_some_and(|at| at <= now && now - at <= max_age_secs) {
+            if scanned_at.is_some_and(|at| at <= now && now - at <= max_age_secs) {
                 continue;
             }
-            if !force
-                && failed_at.is_some_and(|at| {
-                    at <= now && now - at < scan_retry_after(failures.unwrap_or(1), max_age_secs)
-                })
-            {
+            if failed_at.is_some_and(|at| {
+                at <= now && now - at < scan_retry_after(failures.unwrap_or(1), max_age_secs)
+            }) {
                 held_back += 1;
                 continue;
             }
@@ -1026,7 +1027,18 @@ impl Cache {
             .into_iter()
             .map(|(id, mods)| ServerMods { id, mods })
             .collect();
-        Ok(ModsIndex { catalog, index })
+        let mut stmt = self.conn.prepare(
+            "SELECT server_id FROM server_mods_failed
+             WHERE server_id NOT IN (SELECT server_id FROM server_mods_at)",
+        )?;
+        let unreadable = stmt
+            .query_map([], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(ModsIndex {
+            catalog,
+            index,
+            unreadable,
+        })
     }
 
     /// Row counts for the four tables that hold anything the user would miss.
@@ -1152,8 +1164,7 @@ mod tests {
         assert_eq!(c.row_counts().unwrap().servers, 0);
     }
 
-    /// A favourite must survive the 30-day prune (D-159): losing the row empties the
-    /// Favourites view for anything that has been offline for a month.
+    /// D-244: a failed read waits 6 h, 12 h, then a day; a good read clears the wait.
     #[test]
     fn a_failed_mod_read_waits_before_it_is_asked_again() {
         let mut c = Cache::open_in_memory().unwrap();
@@ -1165,21 +1176,21 @@ mod tests {
         let now = 1_000_000;
         let ids = |t: (Vec<(String, std::net::SocketAddr)>, usize)| (t.0.len(), t.1);
 
-        assert_eq!(ids(c.scan_targets(false, now, day).unwrap()), (1, 0));
+        assert_eq!(ids(c.scan_targets(now, day).unwrap()), (1, 0));
         c.record_scan_failures(std::slice::from_ref(&r.id), now)
             .unwrap();
         assert_eq!(
-            ids(c.scan_targets(false, now + 3600, day).unwrap()),
+            ids(c.scan_targets(now + 3600, day).unwrap()),
             (0, 1),
             "held back"
         );
         assert_eq!(
-            ids(c.scan_targets(true, now + 3600, day).unwrap()),
-            (1, 0),
-            "a forced scan asks anyway"
+            c.mods_index().unwrap().unreadable,
+            vec![r.id.clone()],
+            "no list and a failed read: not offered as 'not scanned yet'"
         );
         assert_eq!(
-            ids(c.scan_targets(false, now + 6 * 3600, day).unwrap()),
+            ids(c.scan_targets(now + 6 * 3600, day).unwrap()),
             (1, 0),
             "6 h after the first"
         );
@@ -1189,26 +1200,26 @@ mod tests {
         c.record_scan_failures(std::slice::from_ref(&r.id), now)
             .unwrap();
         assert_eq!(
-            ids(c.scan_targets(false, now + 12 * 3600, day).unwrap()),
+            ids(c.scan_targets(now + 12 * 3600, day).unwrap()),
             (0, 1),
             "a day after the third"
         );
-        assert_eq!(ids(c.scan_targets(false, now + day, day).unwrap()), (1, 0));
+        assert_eq!(ids(c.scan_targets(now + day, day).unwrap()), (1, 0));
 
         // A read that succeeds clears the wait; the list is then fresh for a day anyway.
         c.replace_server_mods_many(&[(r.id.clone(), vec![(1_559_212_036, "CF".into())])], now)
             .unwrap();
-        assert_eq!(
-            ids(c.scan_targets(false, now + day + 1, day).unwrap()),
-            (1, 0)
-        );
+        assert_eq!(ids(c.scan_targets(now + day + 1, day).unwrap()), (1, 0));
         let failed: i64 = c
             .conn
             .query_row("SELECT COUNT(*) FROM server_mods_failed", [], |r| r.get(0))
             .unwrap();
         assert_eq!(failed, 0);
+        assert!(c.mods_index().unwrap().unreadable.is_empty());
     }
 
+    /// A favourite must survive the 30-day prune (D-159): losing the row empties the
+    /// Favourites view for anything that has been offline for a month.
     #[test]
     fn prune_keeps_favourites() {
         let mut c = Cache::open_in_memory().unwrap();

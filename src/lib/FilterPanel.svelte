@@ -203,7 +203,7 @@
             Reading mod lists…
           {:else}
             {fmt.format(servers.unscannedModded)} not scanned yet ·
-            <button class="link" onclick={() => void servers.scanMods(false)} title="Read the mod list of every populated modded server that has not been scanned">Scan now</button>
+            <button class="link" onclick={() => void servers.scanMods()} title="Read the mod list of every populated modded server that has not been scanned">Scan now</button>
           {/if}
         </p>
       {/if}

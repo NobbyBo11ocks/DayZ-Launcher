@@ -349,6 +349,9 @@ class ServersStore {
   /** Mod ids per scanned server and the mod catalogue with server counts (D-080). */
   modsByServer = new SvelteMap<string, number[]>();
   modCatalog = new SvelteMap<number, { name: string; servers: number }>();
+  /** Servers with no mod list whose last read failed; a scan waits before asking them
+   *  again (D-244), so they are not "not scanned yet" (D-276). */
+  modsUnreadable = new SvelteSet<string>();
   modScanning = $state(false);
   /** Set by a view that wants the app to switch section (Mods → Servers with a mod filter). */
   navigate = $state<string | null>(null);
@@ -639,12 +642,17 @@ class ServersStore {
       .sort((a, b) => b.servers - a.servers || a.name.localeCompare(b.name)),
   );
 
-  /** Populated modded servers whose mod list has not been scanned yet. */
+  /** Populated modded servers whose mod list has not been scanned yet, by the host's own
+   *  target rule (`Cache::scan_targets`): counted with the store's head-count instead, it
+   *  took in servers no scan reads — unverified ones Steam had not called populated, and
+   *  ones waiting after a failed read — so "Scan now" could never bring it down (D-276). */
   unscannedModded = $derived.by(() => {
     void this.#rowsVersion;
     let n = 0;
     for (const r of this.rows.values()) {
-      if (r.tags.modded && trustedPlayers(r) > 0 && !this.modsByServer.has(r.id)) n++;
+      if (!r.tags.modded || this.modsByServer.has(r.id) || this.modsUnreadable.has(r.id)) continue;
+      if (r.steamEmpty === true && r.players > 0) continue; // rule R0
+      if (r.verifiedPlayers != null ? r.verifiedPlayers > 0 : r.steamEmpty === false && r.players > 0) n++;
     }
     return n;
   });
@@ -656,14 +664,20 @@ class ServersStore {
       for (const c of idx.catalog) this.modCatalog.set(c.id, { name: c.name, servers: c.servers });
       this.modsByServer.clear();
       for (const s of idx.index) this.modsByServer.set(s.id, s.mods);
+      this.modsUnreadable.clear();
+      for (const id of idx.unreadable) this.modsUnreadable.add(id);
     } catch {
       /* the scan will fill it in */
     }
   }
 
-  /** A batch of freshly scanned servers plus the names of the mods they mention. */
-  applyMods(list: ServerMods[], names: [number, string][]) {
-    for (const [id, name] of names) if (!this.modCatalog.has(id)) this.modCatalog.set(id, { name, servers: 0 });
+  /** A batch of freshly scanned servers, the names of the mods they mention, and the
+   *  servers whose read failed. */
+  applyMods(list: ServerMods[], names: [number, string][], failed: string[]) {
+    // Id 0 is no Workshop item and the catalogue leaves it out (D-221, D-276).
+    for (const [id, name] of names) if (id > 0 && !this.modCatalog.has(id)) this.modCatalog.set(id, { name, servers: 0 });
+    for (const s of list) this.modsUnreadable.delete(s.id);
+    for (const id of failed) if (!this.modsByServer.has(id)) this.modsUnreadable.add(id);
     const delta = new Map<number, number>();
     for (const s of list) {
       for (const m of this.modsByServer.get(s.id) ?? []) delta.set(m, (delta.get(m) ?? 0) - 1);
@@ -676,9 +690,9 @@ class ServersStore {
     }
   }
 
-  async scanMods(force: boolean) {
+  async scanMods() {
     try {
-      await invoke("mods_scan", { force });
+      await invoke("mods_scan");
     } catch (e) {
       this.error = String(e);
     }
@@ -831,7 +845,7 @@ class ServersStore {
         this.modScanning = ev.payload.total > 0;
         this.#scanningSince = Date.now();
       }),
-      await listen<[ServerMods[], [number, string][]]>("servers:mods", (ev) => this.applyMods(ev.payload[0], ev.payload[1])),
+      await listen<[ServerMods[], [number, string][], string[]]>("servers:mods", (ev) => this.applyMods(ev.payload[0], ev.payload[1], ev.payload[2])),
       await listen<ModScanSummary>("servers:mods-done", () => {
         this.modScanning = false;
         this.#scanningSince = 0;
@@ -1129,6 +1143,7 @@ class ServersStore {
         for (const m of mods) delta.set(m, (delta.get(m) ?? 0) - 1);
         this.modsByServer.delete(id);
       }
+      this.modsUnreadable.delete(id);
     }
     if (n === 0) return;
     for (const [m, d] of delta) {

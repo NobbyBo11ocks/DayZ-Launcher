@@ -67,7 +67,7 @@ timestamp = 5250757174595880000;
 
 `<game>\!Workshop\` holds one **NTFS junction** per subscribed mod, named `@<meta.cpp name>` (spaces allowed, e.g. `@Dabs Framework`), pointing at `<lib>\steamapps\workshop\content\221100\<id>`. Live: 20 junctions plus a marker file `!DO_NOT_CHANGE_FILES_IN_THESE_FOLDERS`. **16 of the 20 are dangling** (the official launcher does not remove junctions when Workshop content is deleted; only 4 items are actually installed), so an inventory must read junctions with `symlink_metadata` + reparse data, never by following them (D-027).
 
-Junctions need no admin rights (unlike symlinks), which is why the official launcher uses them. Use the `junction` crate. We reuse the **same folder and naming** so the official launcher, DZSA and ours interoperate; create a junction only when missing, never delete ones we did not create.
+Junctions need no admin rights (unlike symlinks), which is why the official launcher uses them. Use the `junction` crate. We reuse the **same folder and naming** so the official launcher, DZSA and ours interoperate; create a junction only when missing, never delete ones we did not create. The one removal is the Mods page's confirmed clean-up, which takes only a junction whose target is a `…\steamapps\workshop\content\221100\<id>` folder that is not found (not one that cannot be read), and deletes it by the path it was listed at (D-093, D-276).
 
 ## 5. Launch command line
 

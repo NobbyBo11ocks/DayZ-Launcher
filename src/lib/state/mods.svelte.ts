@@ -30,6 +30,8 @@ class ModUpdates {
    *  update only the client knew about vanished, and a leftover the user had
    *  unsubscribed came back flagged, where "Update" subscribed it again (D-191, D-275). */
   #live: { ids: Set<number>; versions: Map<number, number> } | null = null;
+  /** The Mods page's own update job, kept here so it outlives the page (D-276). */
+  pageJob = 0;
 
   get count(): number {
     return this.stale.size;

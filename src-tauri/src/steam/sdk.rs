@@ -384,6 +384,9 @@ enum Cmd {
     Sync {
         job: u64,
         ids: Vec<u64>,
+        /// Subscribe to items that are not subscribed: a join needs them; an update
+        /// from the Mods page must not bring back what was unsubscribed (D-276).
+        subscribe: bool,
     },
     /// Which of these Workshop items Steam says are out of date, live (D-191).
     /// `None` means the client could not be asked, which is not the same as "none".
@@ -575,7 +578,7 @@ impl SteamWorker {
 
     /// Subscribes, downloads and installs Workshop items; progress arrives as
     /// `SteamEvent::SyncProgress`, completion as `SteamEvent::SyncDone`.
-    pub fn sync(&self, job: u64, ids: Vec<u64>) -> Result<(), String> {
+    pub fn sync(&self, job: u64, ids: Vec<u64>, subscribe: bool) -> Result<(), String> {
         let s = self.status();
         if !s.initialized {
             return Err(s.error.unwrap_or_else(|| "Steam is not initialised".into()));
@@ -584,7 +587,11 @@ impl SteamWorker {
             return Err("nothing to sync".into());
         }
         self.cmd
-            .send(Cmd::Sync { job, ids })
+            .send(Cmd::Sync {
+                job,
+                ids,
+                subscribe,
+            })
             .map_err(|_| "steamworks thread has stopped".to_string())
     }
 
@@ -772,6 +779,9 @@ struct ActiveRefresh {
 struct ActiveSync {
     job: u64,
     ids: Vec<u64>,
+    /// A join (true) subscribes to what it needs; an update (false) only refreshes what
+    /// is still subscribed (D-276).
+    subscribe: bool,
     started: Instant,
     /// When the bytes downloaded or the items installed last changed, and what they were.
     progressed: Instant,
@@ -785,8 +795,23 @@ struct ActiveSync {
     kicked: HashMap<u64, Instant>,
 }
 
-fn start_sync(ugc: &UGC, job: u64, ids: Vec<u64>) -> ActiveSync {
+fn start_sync(ugc: &UGC, job: u64, mut ids: Vec<u64>, subscribe: bool) -> ActiveSync {
     let (tx, rx) = mpsc::channel();
+    // The Mods page offers Update from Steam's last answer or from the Workshop file,
+    // either of which can be older than an unsubscribe; subscribing here brought the
+    // mod back. An update leaves it out instead: `DownloadItem` fetches unsubscribed
+    // items too, so kicking it would still download it (S-94, D-276).
+    if !subscribe {
+        ids.retain(|&id| {
+            let kept = ugc
+                .item_state(PublishedFileId(id))
+                .contains(ItemState::SUBSCRIBED);
+            if !kept {
+                crate::log_info!("mods", "update skipped {id}: not subscribed in Steam");
+            }
+            kept
+        });
+    }
     let mut kicked = HashMap::with_capacity(ids.len());
     for &id in &ids {
         let file = PublishedFileId(id);
@@ -804,6 +829,7 @@ fn start_sync(ugc: &UGC, job: u64, ids: Vec<u64>) -> ActiveSync {
     ActiveSync {
         job,
         ids,
+        subscribe,
         started: Instant::now(),
         progressed: Instant::now(),
         progress_mark: (0, 0),
@@ -1207,7 +1233,11 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
             let Some(s) = session.as_ref() else { return }; // only reachable for Shutdown
             let ugc = &s.ugc;
             match cmd {
-                Cmd::Sync { job, ids } => {
+                Cmd::Sync {
+                    job,
+                    ids,
+                    subscribe,
+                } => {
                     if let Some(old) = sync.take() {
                         let _ = events.send(SteamEvent::SyncDone(SyncDone {
                             job: old.job,
@@ -1217,7 +1247,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                             elapsed_ms: old.started.elapsed().as_millis() as u64,
                         }));
                     }
-                    sync = Some(start_sync(ugc, job, ids));
+                    sync = Some(start_sync(ugc, job, ids, subscribe));
                 }
                 Cmd::StaleItems { ids, reply } => {
                     // Subscribed *and* out of date. An item can be installed on disk
@@ -1237,6 +1267,28 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                 }
                 Cmd::ItemDetails { ids, reply } => query_details(ugc, ids, reply),
                 Cmd::Unsubscribe { ids, reply } => {
+                    // An item unsubscribed while a download holds it was re-kicked every
+                    // five seconds, which Steam serves for unsubscribed items too (S-94),
+                    // and then reported as downloaded. An update drops it; a join needs
+                    // it, so the join stops with the reason instead of launching without
+                    // it (D-276).
+                    if let Some(s) = sync.as_mut() {
+                        if s.subscribe {
+                            for id in ids.iter().filter(|id| s.ids.contains(id)) {
+                                s.failed.insert(
+                                    *id,
+                                    "It was unsubscribed while it downloaded; join again to download it".into(),
+                                );
+                            }
+                        } else {
+                            s.ids.retain(|id| !ids.contains(id));
+                            for id in &ids {
+                                s.kicked.remove(id);
+                                s.failed.remove(id);
+                                s.download_errors.remove(id);
+                            }
+                        }
+                    }
                     if let Some(old) = unsub.take() {
                         let _ = old.reply.send(Err("superseded by a newer request".into()));
                     }

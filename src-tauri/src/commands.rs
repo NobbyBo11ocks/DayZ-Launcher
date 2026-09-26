@@ -710,7 +710,6 @@ pub async fn run_mod_scan(
     cache: Arc<Mutex<Cache>>,
     client: Client,
     scanning: Arc<AtomicBool>,
-    force: bool,
 ) -> ModScanSummary {
     use crate::browser::ServerMods;
 
@@ -733,7 +732,7 @@ pub async fn run_mod_scan(
             // summary with nothing in the log (D-236).
             c.lock()
                 .ok()?
-                .scan_targets(force, now, MOD_SCAN_MAX_AGE_SECS)
+                .scan_targets(now, MOD_SCAN_MAX_AGE_SECS)
                 .map_err(|e| crate::log_warn!("cache", "mod scan targets unreadable: {e}"))
                 .ok()
         })
@@ -769,12 +768,14 @@ pub async fn run_mod_scan(
             set.spawn(async move {
                 let mods = c.rules(addr).await.ok().map(|r| {
                     r.value.dayz.map_or_else(Vec::new, |d| {
-                        // Each published id once, where it first appears (D-265); the
-                        // server-side ones (id 0) all stay, the count shows them.
+                        // Each id once, where it first appears (D-265), id 0 included:
+                        // the cache keeps one row per id, so a list sent with every
+                        // server-side mod counted more in the Mods column than the same
+                        // list read back after a restart (D-276).
                         let mut seen = HashSet::new();
                         d.mods
                             .into_iter()
-                            .filter(|m| m.workshop_id == 0 || seen.insert(m.workshop_id))
+                            .filter(|m| seen.insert(m.workshop_id))
                             .map(|m| (m.workshop_id, m.name))
                             .collect::<Vec<(u64, String)>>()
                     })
@@ -810,12 +811,17 @@ pub async fn run_mod_scan(
         let mut names: Vec<(u64, String)> = Vec::with_capacity(256);
         for (_, mods) in &batch {
             for (id, name) in mods {
-                if seen.insert(*id) {
+                // Id 0 is no Workshop item; the catalogue leaves it out (D-221), and a
+                // name sent here put it back in the dropdown until a restart (D-276).
+                if *id > 0 && seen.insert(*id) {
                     names.push((*id, name.clone()));
                 }
             }
         }
-        let _ = app.emit("servers:mods", &(payload, names));
+        // The failed ids too: they have no list and wait before the next read (D-244),
+        // so the "not scanned yet" count leaves them out rather than offering a scan
+        // that will not ask them (D-276).
+        let _ = app.emit("servers:mods", &(payload, names, &failed));
         let c = Arc::clone(&cache);
         let _ = tauri::async_runtime::spawn_blocking(move || {
             if let Ok(mut c) = c.lock() {
@@ -884,10 +890,12 @@ pub async fn mods_index(state: State<'_, AppState>) -> AppResult<crate::browser:
     .map_err(|e| AppError::Internal(format!("mods index task failed: {e}")))?
 }
 
-/// Starts a mod scan now; `force` ignores the one-day freshness and the wait after a
-/// failed read (D-244). The targets and the outcome arrive as `servers:mods-*` events.
+/// Starts a mod scan now, by the automatic scan's rules: the lists missing or a day old,
+/// less the servers waiting after a failed read (D-244). Nothing ever asked for the
+/// `force` that skipped both, so it went (D-276). The targets and the outcome arrive as
+/// `servers:mods-*` events.
 #[tauri::command]
-pub async fn mods_scan(app: AppHandle, state: State<'_, AppState>, force: bool) -> AppResult<()> {
+pub async fn mods_scan(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
     // The claim lives inside `run_mod_scan` so that the automatic scan after a refresh
     // is covered too — it calls the function directly and took no flag at all, which is
     // two scans at 200 pps over the same chunks (D-204).
@@ -903,7 +911,7 @@ pub async fn mods_scan(app: AppHandle, state: State<'_, AppState>, force: bool) 
         state.a2s.clone(),
         Arc::clone(&state.scanning),
     );
-    tauri::async_runtime::spawn(run_mod_scan(app2, cache, client, scanning, force));
+    tauri::async_runtime::spawn(run_mod_scan(app2, cache, client, scanning));
     Ok(())
 }
 
@@ -994,10 +1002,19 @@ pub async fn junctions_remove_dangling() -> AppResult<JunctionCleanup> {
             removed: Vec::new(),
             failed: Vec::new(),
         };
-        for (name, r) in workshop::remove_dangling(&game.workshop_dir()) {
+        // One line per junction, target included: the counts alone could not say what a
+        // clean-up had removed (D-276).
+        for (name, target, r) in workshop::remove_dangling(&game.workshop_dir()) {
+            let to = target.as_deref().map_or_else(|| "?".into(), |t| t.display().to_string());
             match r {
-                Ok(()) => out.removed.push(name),
-                Err(error) => out.failed.push(JunctionFailure { name, error }),
+                Ok(()) => {
+                    crate::log_info!("junctions", "removed {name} -> {to}");
+                    out.removed.push(name);
+                }
+                Err(error) => {
+                    crate::log_warn!("junctions", "could not remove {name} -> {to}: {error}");
+                    out.failed.push(JunctionFailure { name, error });
+                }
             }
         }
         if !out.removed.is_empty() || !out.failed.is_empty() {
@@ -1656,7 +1673,12 @@ fn worker_persona(state: &State<'_, AppState>) -> Option<String> {
 /// Subscribe + download the given Workshop items; progress via `mods:progress`,
 /// completion via `mods:done` (both carry `job`).
 #[tauri::command]
-pub fn mods_sync(state: State<'_, AppState>, job: u64, ids: Vec<u64>) -> AppResult<()> {
+pub fn mods_sync(
+    state: State<'_, AppState>,
+    job: u64,
+    ids: Vec<u64>,
+    subscribe: Option<bool>,
+) -> AppResult<()> {
     crate::log_info!(
         "mods",
         "download requested for {} item(s): {}",
@@ -1666,7 +1688,12 @@ pub fn mods_sync(state: State<'_, AppState>, job: u64, ids: Vec<u64>) -> AppResu
             .collect::<Vec<_>>()
             .join(", ")
     );
-    state.steam.sync(job, ids).map_err(AppError::Internal)
+    // A join subscribes to what the server needs; the Mods page's Update passes false,
+    // so it can only update what is still subscribed (D-276).
+    state
+        .steam
+        .sync(job, ids, subscribe.unwrap_or(true))
+        .map_err(AppError::Internal)
 }
 
 /// Builds junctions and the argument line, then starts `DayZ_BE.exe`. Emits

@@ -583,7 +583,7 @@ pub fn run() {
                                     // inside that window was simply lost (D-204).
                                     drop(guard);
                                     if let Some(scanning) = scanning {
-                                        commands::run_mod_scan(h, c, client, scanning, false).await;
+                                        commands::run_mod_scan(h, c, client, scanning).await;
                                     }
                                 });
                             } else if full_list {
