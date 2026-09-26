@@ -9,6 +9,7 @@
   import { ACCENTS, prefs, type Theme } from "./state/prefs.svelte";
   import { servers } from "./state/servers.svelte";
   import { updates } from "./state/updates.svelte";
+  import { modUpdates } from "./state/mods.svelte";
   import type { Settings } from "./types";
 
   type AppInfo = { name: string; version: string; tauri: string; os: string; elevated?: boolean };
@@ -18,6 +19,34 @@
       .then((i) => (app = i))
       .catch(() => {});
   });
+
+  // "Install and restart" asks first while DayZ is running or a mod download is in
+  // progress (D-280): the update restarts only the launcher, but a player in a game or
+  // waiting on a download should know before it goes. A check that fails does not block.
+  let installWarning = $state<string | null>(null);
+  async function askInstall() {
+    let game = false;
+    try {
+      game = await invoke<boolean>("game_running");
+    } catch {
+      /* unknown: install as asked */
+    }
+    const download = modUpdates.downloading;
+    if (!game && !download) {
+      void updates.install();
+      return;
+    }
+    installWarning =
+      game && download
+        ? "DayZ is running and a mod download is in progress."
+        : game
+          ? "DayZ is running; it keeps running while the launcher restarts."
+          : "A mod download is in progress; Steam finishes it on its own.";
+  }
+  function confirmInstall() {
+    installWarning = null;
+    void updates.install();
+  }
 
   let launch = $state<Settings | null>(null);
   let saved = $state(false);
@@ -208,7 +237,13 @@
               {#if updates.state === "none"}<span class="ok">Up to date.</span>{/if}
               {#if updates.state === "available"}
                 <span>Version {updates.version} is available.</span>
-                <button class="chip accent" onclick={() => updates.install()}>Install and restart</button>
+                {#if installWarning}
+                  <span class="warn">{installWarning} Install and restart now?</span>
+                  <button class="chip accent" onclick={confirmInstall}>Yes</button>
+                  <button class="chip" onclick={() => (installWarning = null)}>No</button>
+                {:else}
+                  <button class="chip accent" onclick={askInstall}>Install and restart</button>
+                {/if}
               {/if}
               {#if updates.state === "downloading"}<span class="muted">Downloading… {updates.progress}%</span>{/if}
               {#if updates.state === "ready"}<span class="ok">Installed, restarting…</span>{/if}

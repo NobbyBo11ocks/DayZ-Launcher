@@ -8,6 +8,7 @@
 // Every command through the logging wrapper: a failure is recorded with its
 // command name before it is rethrown (D-158).
 import { invokeLogged as invoke } from "../log";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { SvelteSet } from "svelte/reactivity";
 import { servers } from "./servers.svelte";
 import type { Diagnostics } from "../types";
@@ -32,6 +33,10 @@ class ModUpdates {
   #live: { ids: Set<number>; versions: Map<number, number> } | null = null;
   /** The Mods page's own update job, kept here so it outlives the page (D-276). */
   pageJob = 0;
+  /** A Workshop download this launcher started is running (a join's or an update's),
+   *  for the confirmation before "Install and restart" (D-280). */
+  downloading = $state(false);
+  #unlisten: Promise<UnlistenFn>[] = [];
 
   get count(): number {
     return this.stale.size;
@@ -82,6 +87,10 @@ class ModUpdates {
 
   start() {
     if (this.#timer !== undefined) return;
+    this.#unlisten.push(
+      listen("mods:progress", () => (this.downloading = true)),
+      listen("mods:done", () => (this.downloading = false)),
+    );
     this.#timer = setTimeout(() => {
       void this.check();
       this.#timer = setInterval(() => void this.check(), RECHECK_MS);
@@ -93,6 +102,8 @@ class ModUpdates {
     clearTimeout(this.#timer);
     clearInterval(this.#timer);
     this.#timer = undefined;
+    for (const p of this.#unlisten) void p.then((u) => u());
+    this.#unlisten = [];
   }
 }
 

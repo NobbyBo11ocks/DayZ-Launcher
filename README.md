@@ -295,7 +295,7 @@ flowchart LR
 
 1. Download `DZSA CrayZ Launcher_<version>_x64-setup.exe` from the [latest release](https://github.com/NobbyBo11ocks/DayZ-Launcher/releases/latest).
 2. Run it. It installs per user to `%LOCALAPPDATA%\Programs\DZSA CrayZ Launcher` and adds a Start menu entry. WebView2 is installed silently if Windows does not have it.
-3. Start Steam, then the launcher. Updates are one click: the launcher checks for a new release when it starts (at most once a day) and offers it in Settings and the side rail; each release is signed with a minisign key and the app verifies the signature before installing.
+3. Start Steam, then the launcher. Updates are one click: the launcher checks for a new release when it starts and when you come back to its window (at most once a day) and offers it in Settings and the side rail; each release is signed with a minisign key and the app verifies the signature before installing.
 
 > [!WARNING]
 > **SmartScreen.** The installer is not code-signed yet, so Windows shows "Windows protected your PC" on first run. Click **More info**, then **Run anyway**. Code signing is tracked in [docs/12](docs/12-code-signing.md).

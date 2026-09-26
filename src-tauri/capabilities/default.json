@@ -12,6 +12,8 @@
     "core:window:allow-close",
     "core:window:allow-start-dragging",
     "core:window:allow-request-user-attention",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
     "updater:default",
     "process:allow-restart",
     "notification:default",

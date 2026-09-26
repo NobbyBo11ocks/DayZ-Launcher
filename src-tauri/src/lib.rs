@@ -741,6 +741,7 @@ pub fn run() {
             commands::logs_path,
             commands::log_ui,
             commands::launch_game,
+            commands::game_running,
             commands::favourites_list,
             commands::favourite_set,
             commands::history_list,

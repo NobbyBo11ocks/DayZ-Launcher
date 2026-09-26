@@ -141,7 +141,7 @@ jobs:
           tagName: ${{ env.PUBLISH == 'true' && 'v__VERSION__' || '' }}
           releaseName: ${{ env.PUBLISH == 'true' && 'v__VERSION__' || '' }}
           releaseBody: |
-            Existing installs offer this update in Settings and in the side rail (they check at start-up, at most once a day); it installs with one click.
+            Existing installs offer this update in Settings and in the side rail (they check at start-up and when their window comes back into focus, at most once a day); it installs with one click.
             The installer is not code-signed yet, so Windows SmartScreen shows an "unknown publisher" warning on first run: choose "More info", then "Run anyway".
           generateReleaseNotes: ${{ env.PUBLISH == 'true' }}
           # A draft until the smoke test below has passed: published here, a build that

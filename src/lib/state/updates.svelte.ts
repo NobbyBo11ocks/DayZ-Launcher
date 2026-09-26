@@ -3,6 +3,7 @@
 // check time is kept in the settings file (D-070) with localStorage as a cache.
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { uiPrefs } from "./uiprefs.svelte";
 import { describe, logInfo, logWarn } from "../log";
 
@@ -29,6 +30,13 @@ class Updates {
     }
     if (Date.now() - last < AUTO_CHECK_INTERVAL_MS) return;
     await this.checkNow(true);
+  }
+
+  /** The start-up check again when the window comes back into focus, so a launcher left
+   *  open learns of a release without a restart; still at most once a day, and only from
+   *  a settled state, never over an offer, a download or an error on screen (D-280). */
+  focusCheck() {
+    if (this.state === "idle" || this.state === "none") void this.autoCheck();
   }
 
   async checkNow(silent = false) {
@@ -84,8 +92,10 @@ class Updates {
     logInfo("update", `installing ${u.version}`);
     let total = 0;
     let got = 0;
+    // Download, then install, as two steps: a failure in the first leaves the launcher as
+    // it was, one in the second does not (below, D-280).
     try {
-      await u.downloadAndInstall(
+      await u.download(
         (ev) => {
           if (ev.event === "Started") total = ev.data.contentLength ?? 0;
           else if (ev.event === "Progress") {
@@ -97,7 +107,6 @@ class Updates {
         // "Downloading… N%" for good, with the Check button disabled (D-279).
         { timeout: DOWNLOAD_TIMEOUT_MS },
       );
-      this.state = "ready";
     } catch (e) {
       // Back to "available", not "error" (D-184): the update is still there and still
       // installable, and the error card offered only "Check for updates", which is
@@ -106,6 +115,29 @@ class Updates {
       this.state = "available";
       this.progress = 0;
       logWarn("update", `install of ${u.version} failed: ${describe(e)}`);
+      return;
+    }
+    try {
+      // On Windows this starts the setup and ends the process: it returns only when
+      // the setup could not be started.
+      await u.install();
+      this.state = "ready";
+    } catch (e) {
+      // Before it starts the setup, the updater hides the window and closes the app's
+      // resources, the Steam session with them, and it does not undo that when Windows
+      // refuses the setup (an antivirus holding the unsigned file, for one): the launcher
+      // was left running with no window and no Steam (tauri-plugin-updater 2.12.0,
+      // D-279). The window comes back with what happened and what to do (D-280).
+      this.state = "error";
+      this.error = `Could not start the ${u.version} setup (${describe(e)}). Restart the launcher to use it again.`;
+      logWarn("update", `the ${u.version} setup did not start: ${describe(e)}`);
+      try {
+        const w = getCurrentWindow();
+        await w.show();
+        await w.setFocus();
+      } catch {
+        /* the message is there for whenever the window is next shown */
+      }
       return;
     }
     // Outside the try: the installer has already run by now, so a failure here is a

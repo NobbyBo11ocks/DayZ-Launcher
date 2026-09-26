@@ -1943,6 +1943,20 @@ pub async fn launch_game(
     Ok(launched)
 }
 
+/// Whether DayZ is running, for the confirmation before "Install and restart" (D-280):
+/// the update restarts only the launcher, and a player in a game should know first.
+/// Off the main thread, where a plain command would run (D-239).
+#[tauri::command]
+pub async fn game_running() -> AppResult<bool> {
+    tauri::async_runtime::spawn_blocking(|| {
+        crate::steam::registry::process::find_named("DayZ_x64.exe")
+            .or_else(|| crate::steam::registry::process::find_named("DayZ_BE.exe"))
+            .is_some()
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("process check failed: {e}")))
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LaunchExited {

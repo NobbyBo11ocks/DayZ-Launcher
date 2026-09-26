@@ -48,6 +48,14 @@
     else news.stop();
   });
 
+  // Coming back to the window checks for a release again once a day has passed, so a
+  // launcher left open learns of one without a restart (D-280).
+  $effect(() => {
+    const onFocus = () => updates.focusCheck();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  });
+
   // The welcome overlay shows until the settings file says onboarded (D-070). A flag
   // left in localStorage by earlier builds counts and is migrated silently.
   const ONBOARDED_KEY = "dayz-launcher.onboarded.v1";
