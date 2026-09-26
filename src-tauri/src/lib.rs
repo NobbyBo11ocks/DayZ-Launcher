@@ -619,12 +619,20 @@ pub fn run() {
                                     d.items.len(),
                                     d.elapsed_ms
                                 );
+                            } else if d.superseded {
+                                // Not a failure: a newer download took over (D-277).
+                                log_info!(
+                                    "mods",
+                                    "download replaced by a newer one after {} ms",
+                                    d.elapsed_ms
+                                );
                             } else {
                                 log_warn!(
                                     "mods",
-                                    "download of {} item(s) failed after {} ms: {}",
+                                    "download of {} item(s) failed after {} ms: {}{}",
                                     d.items.len(),
                                     d.elapsed_ms,
+                                    d.failed_id.map(|id| format!("{id}: ")).unwrap_or_default(),
                                     d.error.as_deref().unwrap_or("no reason given")
                                 );
                             }

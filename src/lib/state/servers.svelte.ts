@@ -352,6 +352,9 @@ class ServersStore {
   /** Servers with no mod list whose last read failed; a scan waits before asking them
    *  again (D-244), so they are not "not scanned yet" (D-276). */
   modsUnreadable = new SvelteSet<string>();
+  /** The stored mod lists are in. Until then every mod's server count is unknown, not 0,
+   *  and the Mods page shows "—" (D-277). */
+  modsIndexLoaded = $state(false);
   modScanning = $state(false);
   /** Set by a view that wants the app to switch section (Mods → Servers with a mod filter). */
   navigate = $state<string | null>(null);
@@ -657,7 +660,15 @@ class ServersStore {
     return n;
   });
 
-  private async loadModsIndex() {
+  #modsIndexRead: Promise<void> | null = null;
+
+  /** Reads the stored mod lists and the catalogue. The Mods page asks again while
+   *  the first read has not succeeded, so a call during a read shares it (D-277). */
+  loadModsIndex(): Promise<void> {
+    return (this.#modsIndexRead ??= this.#readModsIndex().finally(() => (this.#modsIndexRead = null)));
+  }
+
+  async #readModsIndex() {
     try {
       const idx = await invoke<ModsIndex>("mods_index");
       this.modCatalog.clear();
@@ -666,8 +677,10 @@ class ServersStore {
       for (const s of idx.index) this.modsByServer.set(s.id, s.mods);
       this.modsUnreadable.clear();
       for (const id of idx.unreadable) this.modsUnreadable.add(id);
+      this.modsIndexLoaded = true;
     } catch {
-      /* the scan will fill it in */
+      // Logged by the wrapper. A scan does not fill this in: it sends only the servers
+      // it reads, so the counts stay unknown until a read succeeds (D-277).
     }
   }
 

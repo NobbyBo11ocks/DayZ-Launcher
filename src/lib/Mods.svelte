@@ -42,6 +42,9 @@
   let view = $state<View>("all");
 
   async function load() {
+    // The server counts come from the server list's stored mod lists; a failed first
+    // read left every mod at 0 for the rest of the run (D-277).
+    if (!servers.modsIndexLoaded) void servers.loadModsIndex();
     try {
       data = await invoke<Diagnostics>("diagnostics");
       error = null;
@@ -92,11 +95,18 @@
         listen<SyncDone>("mods:done", (ev) => {
           updating = null;
           fromJoin = false;
-          // An update leaves out mods no longer subscribed (D-276), so it can finish with
-          // nothing downloaded; "Downloaded 0 mods." said otherwise.
-          const n = ev.payload.items.length;
-          notice = ev.payload.ok && n ? `Downloaded ${n} mod${n === 1 ? "" : "s"}.` : null;
-          error = ev.payload.ok ? null : (ev.payload.error ?? "Download failed");
+          const d = ev.payload;
+          if (d.superseded) {
+            // Not a failure: a newer download took over (D-277).
+            notice = "Replaced by a newer download.";
+            error = null;
+          } else {
+            // An update leaves out mods no longer subscribed (D-276), so it can finish
+            // with nothing downloaded; "Downloaded 0 mods." said otherwise.
+            const n = d.items.length;
+            notice = d.ok && n ? `Downloaded ${n} mod${n === 1 ? "" : "s"}.` : null;
+            error = d.ok ? null : failureText(d);
+          }
           void load();
         }),
       );
@@ -133,6 +143,13 @@
     return (n && !n.startsWith("$") ? n : null) ?? i.metaName ?? n ?? String(i.id);
   };
   const serversFor = (id: number) => servers.modCatalog.get(id)?.servers ?? 0;
+  /** A failed download's message, led by the mod it failed on (D-277). */
+  function failureText(d: SyncDone): string {
+    const why = d.error ?? "Download failed";
+    if (d.failedId == null) return why;
+    const it = data?.workshop?.items.find((i) => i.id === d.failedId);
+    return `${it ? nameOf(it) : `Workshop item ${d.failedId}`}: ${why}`;
+  }
 
   const stale = $derived(all.filter((i) => i.needsUpdate));
   const unused = $derived(all.filter((i) => serversFor(i.id) === 0));
@@ -281,8 +298,11 @@
       <div class="chips" role="group" aria-label="Mod filter">
         {#each views as v (v.id)}
           {@const n = v.count()}
-          <button class="chip" class:on={view === v.id} aria-pressed={view === v.id} onclick={() => (view = v.id)} disabled={n === 0 && v.id !== "all"}>
-            {v.label} <span class="n">{n}</span>
+          <!-- "On no server" needs the stored mod lists; before they load every count
+               is 0, and this chip offered every mod for a bulk Unsubscribe (D-277). -->
+          {@const known = v.id !== "unused" || servers.modsIndexLoaded}
+          <button class="chip" class:on={view === v.id} aria-pressed={view === v.id} onclick={() => (view = v.id)} disabled={!known || (n === 0 && v.id !== "all")}>
+            {v.label} <span class="n">{known ? n : "—"}</span>
           </button>
         {/each}
       </div>
@@ -337,7 +357,7 @@
             <th class="num"><button class="th" onclick={() => setSort("size")}>Size{mark("size")}</button></th>
             <th><button class="th" onclick={() => setSort("updated")}>Updated{mark("updated")}</button></th>
             <th>Junction</th>
-            <th class="num" title="Populated servers whose scanned mod list includes this item">
+            <th class="num" title="Servers whose scanned mod list includes this item">
               <button class="th" onclick={() => setSort("servers")}>Servers{mark("servers")}</button>
             </th>
             <th></th>
@@ -359,7 +379,7 @@
               <td>{new Date(it.timeUpdated * 1000).toLocaleDateString()}{it.needsUpdate ? " ⚠ update" : ""}</td>
               <td class={j ? (j.targetExists ? "ok" : "warn") : "muted"}>{j ? (j.targetExists ? j.name : `${j.name} (target gone)`) : "none (created on first join)"}</td>
               <td class="num">
-                {#if running}<button class="btn slim" onclick={() => showServers(it.id)} title="Show these servers">{running}</button>{:else}<span class="muted">0</span>{/if}
+                {#if !servers.modsIndexLoaded}<span class="muted" title="The server list's mod lists have not loaded yet">—</span>{:else if running}<button class="btn slim" onclick={() => showServers(it.id)} title="Show these servers">{running}</button>{:else}<span class="muted">0</span>{/if}
               </td>
               <td class="act">
                 {#if busyIds.has(it.id)}

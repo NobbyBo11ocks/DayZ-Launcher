@@ -15,6 +15,8 @@
   let phase = $state<Phase>("planning");
   let plan = $state<JoinPlan | null>(null);
   let error = $state<string | null>(null);
+  /** What happened that is not a failure: a download replaced by a newer one (D-277). */
+  let note = $state<string | null>(null);
   let password = $state("");
   let progress = $state<Map<number, ItemProgress>>(new Map());
   let syncInfo = $state<SyncProgress | null>(null);
@@ -135,8 +137,16 @@
           if (plan) plan = { ...plan, mods: plan.mods.map((m) => ({ ...m, installed: true, needsUpdate: false })), missing: 0, updates: 0 };
           phase = "ready";
           if (autoLaunch) void joinNow();
+        } else if (ev.payload.superseded) {
+          // Not a failure: a newer download took over, and this one can be started
+          // again from here (D-277).
+          note = "Replaced by a newer download.";
+          phase = "ready";
         } else {
-          error = ev.payload.error ?? "Mod download failed";
+          // Led by the mod it failed on (D-277).
+          const why = ev.payload.error ?? "Mod download failed";
+          const m = plan?.mods.find((x) => x.id === ev.payload.failedId);
+          error = m ? `${m.title ?? m.name}: ${why}` : why;
           phase = "error";
         }
       }),
@@ -172,6 +182,7 @@
     if (!plan) return;
     autoLaunch = thenLaunch;
     error = null;
+    note = null;
     phase = "syncing";
     try {
       await invoke("mods_sync", { job, ids: toSync.map((m) => m.id) });
@@ -191,6 +202,7 @@
     stopWaiting();
     phase = "waiting";
     error = null;
+    note = null;
     checks = 0;
     waitedSecs = 0;
     const started = Date.now();
@@ -231,6 +243,7 @@
   async function launch() {
     if (!plan) return;
     error = null;
+    note = null;
     phase = "launching";
     // The plan was never made again, so a mod the server added or updated while this
     // dialog waited for a slot sent the launch into "not installed; sync mods first",
@@ -462,7 +475,7 @@
       {/if}
     {/if}
 
-    {#if error}<p class="error" role="alert">{error}</p>{/if}
+    {#if error}<p class="error" role="alert">{error}</p>{:else if note}<p class="muted small" role="status">{note}</p>{/if}
 
     <footer>
       {#if phase === "waiting"}

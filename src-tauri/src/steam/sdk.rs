@@ -240,6 +240,8 @@ fn abandon_in_flight(
             job: job.job,
             ok: false,
             error: Some(format!("{why} during the download")),
+            failed_id: None,
+            superseded: false,
             items: Vec::new(),
             elapsed_ms: job.started.elapsed().as_millis() as u64,
         }));
@@ -366,6 +368,11 @@ pub struct SyncDone {
     pub job: u64,
     pub ok: bool,
     pub error: Option<String>,
+    /// The item `error` is about, when it is about one, so the message can name the
+    /// mod (D-277).
+    pub failed_id: Option<u64>,
+    /// Replaced by a newer download, which is not a failure (D-277).
+    pub superseded: bool,
     pub items: Vec<ItemProgress>,
     pub elapsed_ms: u64,
 }
@@ -967,17 +974,28 @@ fn tick_sync(
     }
     let elapsed_ms = sync.started.elapsed().as_millis() as u64;
     let finished = installed == items.len();
-    let failed = !sync.failed.is_empty();
+    // The first failure in the order the items were asked for, not whichever the map
+    // returned first, and with its id so the message can name the mod (D-277).
+    let first_failed = sync
+        .ids
+        .iter()
+        .find_map(|id| sync.failed.get(id).map(|e| (*id, e.clone())));
+    let failed = first_failed.is_some();
     let stalled = sync.progressed.elapsed() > SYNC_STALL;
     let capped = sync.started.elapsed() > SYNC_CAP;
     if finished || failed || stalled || capped {
         return Some(SyncDone {
             job: sync.job,
             ok: finished,
+            failed_id: first_failed
+                .as_ref()
+                .filter(|_| !finished)
+                .map(|(id, _)| *id),
+            superseded: false,
             error: if finished {
                 None
-            } else if failed {
-                sync.failed.values().next().cloned()
+            } else if let Some((_, e)) = first_failed {
+                Some(e)
             } else if stalled {
                 // What to do next, not only what happened (D-265).
                 Some(format!(
@@ -1070,6 +1088,8 @@ fn reject(cmd: Cmd, events: &UnboundedSender<SteamEvent>, e: String) {
                 job,
                 ok: false,
                 error: Some(e),
+                failed_id: None,
+                superseded: false,
                 items: Vec::new(),
                 elapsed_ms: 0,
             }));
@@ -1243,6 +1263,8 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                             job: old.job,
                             ok: false,
                             error: Some("superseded by a newer sync".into()),
+                            failed_id: None,
+                            superseded: true,
                             items: Vec::new(),
                             elapsed_ms: old.started.elapsed().as_millis() as u64,
                         }));

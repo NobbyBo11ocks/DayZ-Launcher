@@ -486,7 +486,9 @@ export type ItemProgress = {
 };
 
 export type SyncProgress = { job: number; items: ItemProgress[]; installed: number; total: number; elapsedMs: number };
-export type SyncDone = { job: number; ok: boolean; error: string | null; items: ItemProgress[]; elapsedMs: number };
+/** `failedId`: the item `error` is about, when it is about one; `superseded`: a newer
+ *  download took over, which is not a failure (D-277). */
+export type SyncDone = { job: number; ok: boolean; error: string | null; failedId: number | null; superseded: boolean; items: ItemProgress[]; elapsedMs: number };
 export type Launched = { pid: number; exe: string; commandLine: string };
 export type LaunchExited = { pid: number; code: number | null };
 
