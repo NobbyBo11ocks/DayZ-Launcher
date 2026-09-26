@@ -405,6 +405,9 @@ const VERIFY_FLUSH_EVERY: std::time::Duration = std::time::Duration::from_millis
 /// How long after a pass the servers still offline at its end are read once more:
 /// long enough for a scheduled restart to come back (D-268).
 const OFFLINE_REREAD_AFTER: std::time::Duration = std::time::Duration::from_secs(240);
+/// The second look a server that answered nothing gets, before it is called offline:
+/// a longer wait than the first, INFO included (D-160).
+const PATIENT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(2500);
 
 pub async fn run_verification(
     app: AppHandle,
@@ -492,9 +495,7 @@ pub async fn run_verification(
     // Second chance for targets that did not answer: a longer timeout, INFO included,
     // so a server that is merely slow or drops PLAYER is not reported as down.
     if !offline.is_empty() {
-        let patient = client
-            .clone()
-            .with_timeout(std::time::Duration::from_millis(2500));
+        let patient = client.clone().with_timeout(PATIENT_TIMEOUT);
         let results = verify::verify_many(&patient, offline, true).await;
         publish(&app, &cache, &mut latest, results).await;
     }
@@ -545,9 +546,7 @@ pub async fn run_verification(
         let n = still_offline.len();
         let app = app.clone();
         let cache = Arc::clone(&cache);
-        let patient = client
-            .clone()
-            .with_timeout(std::time::Duration::from_millis(2500));
+        let patient = client.clone().with_timeout(PATIENT_TIMEOUT);
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(OFFLINE_REREAD_AFTER).await;
             let results = verify::verify_many(&patient, still_offline, true).await;
@@ -1210,8 +1209,32 @@ pub async fn server_details(
         .as_ref()
         .is_some_and(|r| r.verdict.as_deref() == Some("synthetic"));
 
-    let (info, rules, players) =
+    let (mut info, mut rules, mut players) =
         tokio::join!(client.info(addr), client.rules(addr), client.players(addr));
+    // A server that answered nothing gets the second, patient look every other check
+    // gives one (the pass and the visible rows, D-160). Without it one timed-out click
+    // published "offline" and hid a server verified a minute before, and a hidden row
+    // is checked again only when something else looks at it (D-272).
+    if info.is_err() && players.is_err() {
+        let patient = client.clone().with_timeout(PATIENT_TIMEOUT);
+        let rules_failed = rules.is_err();
+        let (i, r, p) = tokio::join!(
+            patient.info(addr),
+            async {
+                if rules_failed {
+                    Some(patient.rules(addr).await)
+                } else {
+                    None
+                }
+            },
+            patient.players(addr)
+        );
+        info = i;
+        players = p;
+        if let Some(r) = r {
+            rules = r;
+        }
+    }
     // With INFO lost, a cached count older than a minute is no count, as in
     // `verify_one` (D-245): judged against a fresh PLAYER, an hour-old 60 read as
     // "advertises 60; 20 actually connected" and hid the row the user had open (D-268).
