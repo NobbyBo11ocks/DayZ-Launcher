@@ -1,5 +1,6 @@
 <script lang="ts">
   import { listen } from "@tauri-apps/api/event";
+  import { untrack } from "svelte";
   import { describe, installErrorHooks, logError } from "./lib/log";
   import Favourites from "./lib/Favourites.svelte";
   import FilterPanel from "./lib/FilterPanel.svelte";
@@ -39,11 +40,17 @@
 
   // The server store lives for the whole session: its listeners must not depend on
   // which section is open (D-084).
+  // Once per session: read inside the News effect below, the News setting re-ran these
+  // on every change, a second update check included (D-281).
   $effect(() => {
-    void servers.start();
-    void updates.autoCheck();
-    // Nothing is fetched when the page is off, and switching it off mid-session
-    // stops the 30-minute refresh rather than leaving it armed (D-174, D-185).
+    untrack(() => {
+      void servers.start();
+      void updates.autoCheck();
+    });
+  });
+  // Nothing is fetched when the page is off, and switching it off mid-session
+  // stops the 30-minute refresh rather than leaving it armed (D-174, D-185).
+  $effect(() => {
     if (prefs.news) void news.start();
     else news.stop();
   });

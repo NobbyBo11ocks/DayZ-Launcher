@@ -13,7 +13,11 @@
     const start = now - hours * 3600;
     const out: (number | null)[] = Array.from({ length: hours }, () => null);
     for (const s of samples) {
-      const i = Math.floor((s.ts - start) / 3600);
+      let i = Math.floor((s.ts - start) / 3600);
+      // A sample stamped this very second lands one past the end: samples are stamped as
+      // a check ends and the chart reloads them moments later, so the newest was dropped
+      // and a first check drew nothing under its own peak (D-281).
+      if (i === hours) i = hours - 1;
       if (i < 0 || i >= hours) continue;
       out[i] = Math.max(out[i] ?? 0, s.players);
     }

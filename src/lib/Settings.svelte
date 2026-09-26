@@ -89,21 +89,32 @@
   }
 
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
+  async function saveNow() {
+    saveTimer = undefined;
+    if (!launch) return;
+    try {
+      await invoke("settings_set", { settings: launch });
+      // A failure from an earlier save stayed on screen beside "Saved" (D-240).
+      saveError = null;
+      saved = true;
+      setTimeout(() => (saved = false), 1200);
+    } catch (e) {
+      saveError = String(e);
+    }
+  }
   function scheduleSave() {
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(async () => {
-      if (!launch) return;
-      try {
-        await invoke("settings_set", { settings: launch });
-        // A failure from an earlier save stayed on screen beside "Saved" (D-240).
-        saveError = null;
-        saved = true;
-        setTimeout(() => (saved = false), 1200);
-      } catch (e) {
-        saveError = String(e);
-      }
-    }, 300);
+    saveTimer = setTimeout(() => void saveNow(), 300);
   }
+  // A change still waiting when the page closes is saved at once. The timer outlived the
+  // page, and Logs, opened inside those 300 ms, read the file before the save and later
+  // wrote its older copy back over the edit (D-281).
+  $effect(() => () => {
+    if (saveTimer !== undefined) {
+      clearTimeout(saveTimer);
+      void saveNow();
+    }
+  });
 
   // An emptied number field binds as null and Rust's u32 refuses it, so the save
   // throws — and because the null stays in `launch`, every later save throws too and

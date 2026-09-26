@@ -20,15 +20,29 @@ class Updates {
   progress = $state(0);
   #update: Update | null = null;
 
-  /** Silent startup check, at most once a day. */
-  async autoCheck() {
-    let last = (await uiPrefs.ready).lastUpdateCheckMs ?? 0;
+  #autoRun: Promise<void> | null = null;
+
+  /** Silent startup check, at most once a day. One at a time and only from a settled
+   *  state: two calls close together ran two checks, and one during a download turned
+   *  "downloading" back into "checking" and then "available", putting the Install
+   *  button back beside a download still running (D-281). */
+  autoCheck(): Promise<void> {
+    return (this.#autoRun ??= this.#autoCheck().finally(() => (this.#autoRun = null)));
+  }
+
+  async #autoCheck() {
+    const settled = () => this.state === "idle" || this.state === "none";
+    if (!settled()) return;
+    await uiPrefs.ready;
+    // The file's current value, not the snapshot taken at start-up, which never saw
+    // this session's own checks (D-281).
+    let last = uiPrefs.current?.lastUpdateCheckMs ?? 0;
     try {
       last = Math.max(last, Number(localStorage.getItem(LAST_CHECK_KEY) ?? 0));
     } catch {
       /* storage unavailable */
     }
-    if (Date.now() - last < AUTO_CHECK_INTERVAL_MS) return;
+    if (Date.now() - last < AUTO_CHECK_INTERVAL_MS || !settled()) return;
     await this.checkNow(true);
   }
 
@@ -51,8 +65,10 @@ class Updates {
       } catch {
         /* ignore */
       }
+      // The handle a previous check left is replaced, and released (D-281).
+      if (this.#update && this.#update !== u) void this.#update.close().catch(() => {});
+      this.#update = u;
       if (u) {
-        this.#update = u;
         this.version = u.version;
         this.state = "available";
         logInfo("update", `version ${u.version} is available`);
@@ -67,7 +83,8 @@ class Updates {
   }
 
   async install() {
-    if (!this.#update) return;
+    // A second click, or a second confirmation, while one install runs (D-281).
+    if (!this.#update || this.state === "downloading" || this.state === "ready") return;
     this.state = "downloading";
     // A retry must not keep the last attempt's error next to its progress (D-279).
     this.error = null;

@@ -12,6 +12,12 @@
   import { countryName } from "./types";
   import { mapLabel } from "./maps";
 
+  // The mod filter matches stored lists; after a failed first read only this session's
+  // scans were there to match, and the scan skips lists read in the last day (D-281).
+  $effect(() => {
+    if (!servers.modsIndexLoaded) void servers.loadModsIndex();
+  });
+
   /** Prefix for the ids that tie each group to its visible label. */
   const uid = $props.id();
 

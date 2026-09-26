@@ -62,8 +62,10 @@
     if (!settings) return;
     const before = { muted, settings };
     muted = isMuted(id) ? muted.filter((m) => m !== id) : [...muted, id];
-    settings = { ...settings, logMuted: muted };
     try {
+      // The file as it is now, with only this page's field changed: the copy read when
+      // the page opened wrote back over anything Settings saved since (D-281).
+      settings = { ...(await invoke<Settings>("settings_get")), logMuted: muted };
       await invoke("settings_set", { settings });
       settingsError = null;
       await load();
@@ -81,8 +83,9 @@
     if (!settings) return;
     const before = { recording, settings };
     recording = on;
-    settings = { ...settings, logging: on };
     try {
+      // As in toggleArea: the current file, with only `logging` changed (D-281).
+      settings = { ...(await invoke<Settings>("settings_get")), logging: on };
       await invoke("settings_set", { settings });
       settingsError = null;
       if (!on) logs = [];

@@ -131,6 +131,10 @@ function loadFilters(): Filters {
 
 /** Re-verify a visible row when its verification is older than this. */
 const STALE_SECS = 120;
+/** The same for a row whose last check could not count players (offline, refusing
+ *  PLAYER, or a list judged synthetic): nothing new comes back sooner, and each offline
+ *  probe costs the host a patient retry (D-272, D-281). */
+const UNCOUNTED_STALE_SECS = 600;
 /** Title-bar friend count poll (D-103); Steam answers from its local cache. */
 const FRIENDS_POLL_MS = 60_000;
 /** One collator for the whole session: `localeCompare` builds one per call (D-152). */
@@ -364,6 +368,9 @@ class ServersStore {
   friendsOn = new SvelteMap<string, string[]>();
 
   #pending = new Set<string>();
+  /** When each row was last checked, whatever the outcome. `verifiedAt` moves only when a
+   *  check counted players, so it cannot say when an uncountable row was asked (D-281). */
+  #checkedAt = new Map<string, number>();
   #unlisten: UnlistenFn[] = [];
   #started = false;
   #autoRefreshed = false;
@@ -661,6 +668,8 @@ class ServersStore {
   });
 
   #modsIndexRead: Promise<void> | null = null;
+  /** `servers:mods` batches that arrived while a read was out (D-281). */
+  #heldMods: [ServerMods[], [number, string][], string[]][] | null = null;
 
   /** Reads the stored mod lists and the catalogue. The Mods page asks again while
    *  the first read has not succeeded, so a call during a read shares it (D-277). */
@@ -669,6 +678,7 @@ class ServersStore {
   }
 
   async #readModsIndex() {
+    this.#heldMods = [];
     try {
       const idx = await invoke<ModsIndex>("mods_index");
       this.modCatalog.clear();
@@ -681,12 +691,24 @@ class ServersStore {
     } catch {
       // Logged by the wrapper. A scan does not fill this in: it sends only the servers
       // it reads, so the counts stay unknown until a read succeeds (D-277).
+    } finally {
+      // Whatever arrived while the read was out goes on top: a snapshot is older than
+      // all of it, and the host stores a batch before it sends it, so the snapshot
+      // holds every batch sent before the read began. On a failed read they go on top
+      // of what was there, as they would have without the read (D-281).
+      const held = this.#heldMods;
+      this.#heldMods = null;
+      for (const [list, names, failed] of held ?? []) this.applyMods(list, names, failed);
     }
   }
 
   /** A batch of freshly scanned servers, the names of the mods they mention, and the
    *  servers whose read failed. */
   applyMods(list: ServerMods[], names: [number, string][], failed: string[]) {
+    if (this.#heldMods) {
+      this.#heldMods.push([list, names, failed]);
+      return;
+    }
     // Id 0 is no Workshop item and the catalogue leaves it out (D-221, D-276).
     for (const [id, name] of names) if (id > 0 && !this.modCatalog.has(id)) this.modCatalog.set(id, { name, servers: 0 });
     for (const s of list) this.modsUnreadable.delete(s.id);
@@ -704,6 +726,9 @@ class ServersStore {
   }
 
   async scanMods() {
+    // A failed first read of the stored lists left the mod filter matching only what
+    // this session scanned; the scan skips anything read in the last day (D-281).
+    if (!this.modsIndexLoaded) void this.loadModsIndex();
     try {
       await invoke("mods_scan");
     } catch (e) {
@@ -841,6 +866,7 @@ class ServersStore {
         }
       }),
       await listen<SteamStatus>("steam:status", (ev) => {
+        this.#statusEvents++;
         this.steam = ev.payload;
         this.maybeAutoRefresh();
         if (this.friendsInDayz == null) void this.pollFriends();
@@ -862,6 +888,7 @@ class ServersStore {
       await listen<ModScanSummary>("servers:mods-done", () => {
         this.modScanning = false;
         this.#scanningSince = 0;
+        if (!this.modsIndexLoaded) void this.loadModsIndex();
       }),
     );
     // Only now that `steam:status` is being listened for. The worker emits the
@@ -870,7 +897,12 @@ class ServersStore {
     // disabled, nothing refreshed automatically, and the DZSA fallback downloaded
     // ~24 MB instead (D-190).
     try {
-      this.steam = await invoke<SteamStatus>("steam_status");
+      // An event handled while this read was out is newer than its reply: the one-time
+      // "session open" was overwritten by an older "not initialised", and Refresh stayed
+      // disabled until the next status change (D-281).
+      const seen = this.#statusEvents;
+      const status = await invoke<SteamStatus>("steam_status");
+      if (this.#statusEvents === seen) this.steam = status;
       this.localVersion = await invoke<string | null>("local_game_version");
     } catch (e) {
       logWarn("steam", `status unavailable at start: ${describe(e)}`);
@@ -1049,6 +1081,7 @@ class ServersStore {
   }
 
   #versionReadAt = Date.now();
+  #statusEvents = 0;
   /**
    * The installed DayZ build, read again on window focus and after a Steam refresh.
    * Read only at start, a DayZ update that Steam applied mid-session left the old build
@@ -1151,6 +1184,7 @@ class ServersStore {
       this.#hay.delete(id);
       this.#cloneKeys.delete(id);
       this.#pending.delete(id);
+      this.#checkedAt.delete(id);
       const mods = this.modsByServer.get(id);
       if (mods) {
         for (const m of mods) delta.set(m, (delta.get(m) ?? 0) - 1);
@@ -1197,6 +1231,7 @@ class ServersStore {
       const r = this.rows.get(v.id);
       if (!r) continue;
       this.#pending.delete(v.id);
+      this.#checkedAt.set(v.id, v.verifiedAt);
       // Mirrors `apply_verifications` (cache.rs), rule for rule (D-236).
       const infoAnswered = v.pingMs != null;
       const synthetic = v.verdict === "synthetic";
@@ -1236,7 +1271,9 @@ class ServersStore {
       const r = this.rows.get(id);
       if (!r || this.#pending.has(id)) return false;
       if (isInflated(r)) return false; // R0 already decided
-      return r.verifiedAt == null || now - r.verifiedAt > STALE_SECS;
+      const last = Math.max(r.verifiedAt ?? 0, this.#checkedAt.get(id) ?? 0);
+      const uncounted = r.verdict === "offline" || r.verdict === "unverifiable" || r.verdict === "synthetic";
+      return last === 0 || now - last > (uncounted ? UNCOUNTED_STALE_SECS : STALE_SECS);
     });
     if (stale.length === 0) return;
     for (const id of stale) this.#pending.add(id);
@@ -1291,7 +1328,10 @@ class ServersStore {
   }
 
   /** Adds a server by address, selects it, and returns it. */
-  async directConnect(address: string): Promise<ServerRow | null> {
+  /** `select`: false for the join paths, which select the row only when their dialog
+   *  opens; a probe that finished after another dialog opened moved the selection
+   *  behind it (D-281). */
+  async directConnect(address: string, select = true): Promise<ServerRow | null> {
     this.error = null;
     try {
       const row = await invoke<ServerRow>("direct_connect", { address });
@@ -1301,7 +1341,7 @@ class ServersStore {
       this.#put(prev ? this.#merge(prev, row, false) : row);
       this.#namesDirty = true;
       this.rowsChanged();
-      this.selectedId = row.id;
+      if (select) this.selectedId = row.id;
       return row;
     } catch (e) {
       this.error = String(e);

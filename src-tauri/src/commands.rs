@@ -319,19 +319,13 @@ pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResu
         reason: None,
         source: "dzsa",
     };
+    // No `servers:mods-done` here any more: it fed a scan summary line that went in
+    // D-250, the store reads the stored lists again itself, and a scan still running
+    // lost its "reading mod lists" flag to it (D-281).
     let _ = app.emit("servers:done", &done);
-    let _ = app.emit(
-        "servers:mods-done",
-        &ModScanSummary {
-            total: with_mods,
-            scanned: with_mods,
-            failed: 0,
-            elapsed_ms: done.elapsed_ms,
-        },
-    );
-    #[cfg(debug_assertions)]
-    eprintln!(
-        "[dzsa] imported {n} servers ({with_mods} with mods) in {} ms; verifying {}",
+    crate::log_info!(
+        "steam",
+        "DZSA list imported: {n} server(s), {with_mods} with a mod list, in {} ms; verifying {}",
         done.elapsed_ms,
         targets.len()
     );
@@ -818,11 +812,11 @@ pub async fn run_mod_scan(
                 }
             }
         }
-        // The failed ids too: they have no list and wait before the next read (D-244),
-        // so the "not scanned yet" count leaves them out rather than offering a scan
-        // that will not ask them (D-276).
-        let _ = app.emit("servers:mods", &(payload, names, &failed));
+        // Stored first, then sent: sent first, a batch could miss the snapshot of a
+        // stored-list read already under way and be overwritten by it in the store
+        // (D-281).
         let c = Arc::clone(&cache);
+        let failed_store = failed.clone();
         let _ = tauri::async_runtime::spawn_blocking(move || {
             if let Ok(mut c) = c.lock() {
                 // One transaction for the chunk, not one per server: measured
@@ -835,12 +829,16 @@ pub async fn run_mod_scan(
                     );
                 }
                 // So the next pass waits on them instead of asking again (D-244).
-                if let Err(e) = c.record_scan_failures(&failed, now) {
+                if let Err(e) = c.record_scan_failures(&failed_store, now) {
                     crate::log_warn!("cache", "failed mod reads not recorded: {e}");
                 }
             }
         })
         .await;
+        // The failed ids too: they have no list and wait before the next read (D-244),
+        // so the "not scanned yet" count leaves them out rather than offering a scan
+        // that will not ask them (D-276).
+        let _ = app.emit("servers:mods", &(payload, names, &failed));
     }
     summary.elapsed_ms = t0.elapsed().as_millis() as u64;
     if summary.total > 0 || held_back > 0 {
@@ -2355,7 +2353,13 @@ pub async fn import_official_favourites(
             for (row, from_xml) in new_rows {
                 if from_xml {
                     if let Some(cached) = c.get(&row.id).map_err(|e| e.to_string())? {
-                        shown.push(cached);
+                        // Sent without Steam's word on it: on `servers:batch` a row that
+                        // says Steam listed it populated counts as listed by this refresh,
+                        // and kept a vouch the cache withdrew (D-271, D-281).
+                        shown.push(ServerRow {
+                            steam_empty: None,
+                            ..cached
+                        });
                         continue;
                     }
                 }

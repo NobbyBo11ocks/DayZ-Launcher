@@ -71,24 +71,53 @@
   let details = $state<ServerDetails | null>(null);
   let loading = $state(false);
   let error = $state<string | null>(null);
+  /** Workshop items with a folder on disk; null while unknown (not read yet, or the
+   *  inventory could not be read), which marks nothing as missing (D-281). */
   let installed = $state<Set<number> | null>(null);
+  /** Bumped when a Workshop download finishes, to read the inventory again. */
+  let inventoryRead = $state(0);
   let copied = $state(false);
   let allMods = $state(false);
   let fullDesc = $state(false);
 
   // Installed Workshop items (diagnostics is a few ms). Read once, then again after
   // any Workshop download finishes: it was read once per session, so mods installed
-  // during the session kept their "missing" mark until a restart (D-160).
+  // during the session kept their "missing" mark until a restart (D-160). By the join
+  // plan's rule (D-265): installed means the folder is there, which Steam's list alone
+  // does not say, and an unreadable list is "unknown", not "nothing installed", where
+  // every mod showed as missing (D-256, D-281).
   $effect(() => {
-    if (installed) return;
+    void inventoryRead;
+    let cancelled = false;
     invoke<Diagnostics>("diagnostics")
-      .then((d) => (installed = new Set(d.workshop?.items.map((i) => i.id) ?? [])))
-      .catch(() => (installed = new Set()));
+      .then((d) => {
+        if (!cancelled) installed = d.workshop ? new Set(d.workshop.items.filter((i) => i.folder).map((i) => i.id)) : null;
+      })
+      .catch(() => {
+        if (!cancelled) installed = null;
+      });
+    return () => {
+      cancelled = true;
+    };
   });
   $effect(() => {
     // The unlisten handle arrives after an await, so cleanup has to wait for the
     // promise rather than read a variable that may still be undefined (D-222).
-    const pending = listen("mods:done", () => (installed = null));
+    const pending = listen("mods:done", () => inventoryRead++);
+    return () => void pending.then((f) => f());
+  });
+
+  // Later checks of the selected server replace the pane's own: a restart, an R11 strike
+  // or an inflated verdict kept the first check's green "Verified head-count" on screen
+  // while the row had left the grid (D-281). No new query (D-065): the verification the
+  // pass or the visible-row check already made is the one shown.
+  $effect(() => {
+    const pending = listen<Verification[]>("servers:verified", (ev) => {
+      const d = details;
+      if (!d) return;
+      const v = ev.payload.find((x) => x.id === d.id);
+      if (v) details = { ...d, verification: v };
+    });
     return () => void pending.then((f) => f());
   });
 
@@ -157,7 +186,9 @@
     allSiblings = false;
   });
   const shownMods = $derived(allMods ? mods : mods.slice(0, MODS_COLLAPSED));
-  const missing = $derived(installed ? mods.filter((m) => !installed!.has(m.workshopId)).length : 0);
+  // What the join plan would download: Workshop ids above 0, each once (`required_mods`,
+  // D-221, D-265). Server-side mods (id 0) and a repeated id counted as missing (D-281).
+  const missing = $derived(installed ? new Set(mods.filter((m) => m.workshopId > 0 && !installed!.has(m.workshopId)).map((m) => m.workshopId)).size : 0);
   const description = $derived((details?.info?.game || row?.description || "").trim());
   const descLong = $derived(description.length > 220 || description.split("\n").length > 3);
 
@@ -401,8 +432,8 @@
       {:else if mods.length}
         <ul class="mods">
           {#each shownMods as m, i (`${m.workshopId}#${i}`)}
-            <li class:missing={installed && !installed.has(m.workshopId)}>
-              <span class="tick" aria-hidden="true">{installed ? (installed.has(m.workshopId) ? "✓" : "○") : "·"}</span>
+            <li class:missing={installed && m.workshopId > 0 && !installed.has(m.workshopId)}>
+              <span class="tick" aria-hidden="true">{installed && m.workshopId > 0 ? (installed.has(m.workshopId) ? "✓" : "○") : "·"}</span>
               <span class="mname" title={m.name}>{m.name}</span>
               <a class="mid" href="https://steamcommunity.com/sharedfiles/filedetails/?id={m.workshopId}" onclick={external} title="Open in the Steam Workshop">{m.workshopId}</a>
             </li>

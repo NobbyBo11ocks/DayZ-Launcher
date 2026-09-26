@@ -152,14 +152,17 @@
     // (733 of 5 249 in the 2026-09-24 cache, D-245). The typed port is tried as the
     // query port first, so the address form needs no host change.
     const port = f.server.queryPort > 0 ? f.server.queryPort : f.server.gamePort;
-    const row = await servers.directConnect(`${f.server.ip}:${port}`);
+    const row = await servers.directConnect(`${f.server.ip}:${port}`, false);
     joining = null;
-    // A probe that answers late must not replace a dialog opened meanwhile, which could
-    // be mid-download or mid-launch (D-265).
-    if (row && servers.joiningId === null) servers.joiningId = row.id;
     // The store records the reason, but this page shows its own error line, so a
     // friend on an unreachable server looked like a button that does nothing (D-160).
-    else error = servers.error ?? `${f.name}'s server did not answer; it may block queries or be behind a firewall.`;
+    if (!row) error = servers.error ?? `${f.name}'s server did not answer; it may block queries or be behind a firewall.`;
+    // A probe that answers late must not replace a dialog opened meanwhile, which could
+    // be mid-download or mid-launch (D-265), nor be reported as silent (D-281).
+    else if (servers.joiningId === null) {
+      servers.selectedId = row.id;
+      servers.joiningId = row.id;
+    }
   }
 </script>
 
