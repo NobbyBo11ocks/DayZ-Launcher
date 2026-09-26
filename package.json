@@ -1,6 +1,6 @@
 {
   "name": "dayz-launcher",
-  "version": "0.1.62",
+  "version": "0.1.63",
   "private": true,
   "description": "Windows DayZ Standalone launcher: fast server browser, one-click mod sync, direct launch.",
   "type": "module",
