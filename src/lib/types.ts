@@ -198,7 +198,8 @@ export type SteamStatus = {
   persona: string | null;
   refreshing: boolean;
   lastRefreshSecsAgo: number | null;
-  /** Steamworks was released after inactivity; any Steam command re-initialises it (Q16). */
+  /** Steamworks was released after inactivity (Q16); the next command that needs a
+   *  session re-opens it, while the cache reads (Workshop flags, avatars) do not (D-275). */
   idle: boolean;
 };
 

@@ -9,6 +9,7 @@
 // command name before it is rethrown (D-158).
 import { invokeLogged as invoke } from "../log";
 import { SvelteSet } from "svelte/reactivity";
+import { servers } from "./servers.svelte";
 import type { Diagnostics } from "../types";
 
 /** How often the installed set is re-checked while the launcher is open. */
@@ -23,6 +24,12 @@ class ModUpdates {
   /** The delay before the first check, then the repeating one — both plain numbers
    *  in the WebView, so one field and one `clear` covers either. */
   #timer: ReturnType<typeof setTimeout> | undefined;
+  /** The running client's last answer, with the installed version of every item when
+   *  it was given. The session is released after 15 idle minutes and cannot be asked
+   *  then (D-220), so from the second check on the badge fell back to the file: an
+   *  update only the client knew about vanished, and a leftover the user had
+   *  unsubscribed came back flagged, where "Update" subscribed it again (D-191, D-275). */
+  #live: { ids: Set<number>; versions: Map<number, number> } | null = null;
 
   get count(): number {
     return this.stale.size;
@@ -49,12 +56,22 @@ class ModUpdates {
     // The file's own view, which is right whenever Steam has checked recently and is
     // all there is when it is not running.
     let next = new Set(items.filter((i) => i.needsUpdate).map((i) => i.id));
+    let live: number[] | null = null;
     try {
-      const live = await invoke<number[] | null>("mods_stale", { ids: items.map((i) => i.id) });
-      // `null` is "could not ask", which is not "nothing is stale".
-      if (live) next = new Set(live);
+      live = await invoke<number[] | null>("mods_stale", { ids: items.map((i) => i.id) });
     } catch {
-      /* keep the file's answer */
+      /* treated as "could not ask" */
+    }
+    // `null` is "could not ask", which is not "nothing is stale".
+    if (live) {
+      next = new Set(live);
+      this.#live = { ids: next, versions: new Map(items.map((i) => [i.id, i.timeUpdated])) };
+    } else if (this.#live && servers.steam?.initialized) {
+      // Steam is there, only not asked: released, or slow to answer. Its last answer
+      // stands for every item still installed at the version it was given for; the
+      // file is for when Steam is not running, or has not answered once yet.
+      const { ids, versions } = this.#live;
+      next = new Set(items.filter((i) => ids.has(i.id) && versions.get(i.id) === i.timeUpdated).map((i) => i.id));
     }
     // One pass, so a re-check with the same answer produces no reactive churn.
     for (const id of this.stale) if (!next.has(id)) this.stale.delete(id);

@@ -138,17 +138,18 @@ pub struct SteamStatus {
     pub refreshing: bool,
     /// Seconds since the last completed refresh, if any.
     pub last_refresh_secs_ago: Option<u64>,
-    /// The Steamworks client was released after inactivity (Q16, D-057); the
-    /// next command re-initialises it transparently.
+    /// The Steamworks client was released after inactivity (Q16, D-057); the next
+    /// command that needs a session re-opens it. The reads Steam answers from its cache
+    /// (the Workshop update flags, friends' avatars) do not (D-220, D-275).
     pub idle: bool,
 }
 
-/// Release Steamworks after this long without a command or active job. Disabled by
-/// default: measured on 2026-09-21, `SteamAPI_Shutdown` unloads `steamclient64.dll`
-/// but the host's private bytes stayed at 61 MB (D-057). The reason to release is a
-/// different one (D-077): while a Steamworks session for app 221100 exists, Steam
-/// shows the user as playing DayZ and counts playtime. The Settings value drives it;
-/// `DAYZ_STEAM_IDLE_SECS=<n>` overrides it for experiments.
+/// Release Steamworks after this long without a command or active job: 15 minutes by
+/// default, from Settings (D-077). Memory is not the reason — measured on 2026-09-21,
+/// `SteamAPI_Shutdown` unloads `steamclient64.dll` but the host's private bytes stayed
+/// at 61 MB (D-057) — playtime is: while a Steamworks session for app 221100 exists,
+/// Steam shows the user as playing DayZ and counts it. `DAYZ_STEAM_IDLE_SECS=<n>`
+/// overrides the setting for experiments.
 fn idle_timeout() -> Option<Duration> {
     std::env::var("DAYZ_STEAM_IDLE_SECS")
         .ok()
@@ -406,6 +407,22 @@ enum Cmd {
         reply: mpsc::Sender<Option<Avatar>>,
     },
     Shutdown,
+}
+
+impl Cmd {
+    /// What a command is, for the line that says which one opened a session (D-275).
+    fn name(&self) -> &'static str {
+        match self {
+            Cmd::Refresh(_) => "a server list refresh",
+            Cmd::Sync { .. } => "a Workshop download",
+            Cmd::StaleItems { .. } => "the Workshop update check",
+            Cmd::ItemDetails { .. } => "a Workshop details query",
+            Cmd::Unsubscribe { .. } => "an unsubscribe",
+            Cmd::Friends { .. } => "the friends list",
+            Cmd::FriendAvatar { .. } => "a friend's avatar",
+            Cmd::Shutdown => "shutdown",
+        }
+    }
 }
 
 /// A friend's 32×32 Steam avatar as raw RGBA. It crosses IPC as bytes rather than
@@ -676,8 +693,13 @@ impl SteamWorker {
     /// threads were still live when the process went away — `steamclient` then asserts
     /// *"Illegal termination of worker thread 'SocketThread'"* and fast-fails with
     /// 0xC0000409 instead of exiting, which also abandons whatever is still in the
-    /// write-ahead log. Waiting is bounded: the thread checks for commands every
-    /// 100 ms at worst (D-190).
+    /// write-ahead log (D-190).
+    ///
+    /// The thread reads the command between Steam calls, so this is quick — but one
+    /// stuck inside `SteamAPI_Init`, a Steam call or `SteamAPI_Shutdown` against a hung
+    /// Steam kept a windowless launcher alive for good. Three seconds, then the exit
+    /// goes on without it (D-275). Safe to call twice: the second call finds the handle
+    /// gone.
     pub fn shutdown(&self) {
         if !self.owner {
             return;
@@ -685,7 +707,15 @@ impl SteamWorker {
         let _ = self.cmd.send(Cmd::Shutdown);
         let handle = self.join.lock().ok().and_then(|mut h| h.take());
         if let Some(h) = handle {
-            let _ = h.join();
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while !h.is_finished() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            if h.is_finished() {
+                let _ = h.join();
+            } else {
+                crate::log_warn!("steam", "the Steam thread did not stop within 3 s");
+            }
         }
     }
 }
@@ -982,8 +1012,10 @@ const STEAM_RETRY: Duration = Duration::from_secs(10);
 /// is a process snapshot measured at 2.46 ms here, so ten seconds keeps it at 0.025 %
 /// of one core against an 0.2 % idle budget (docs/05 §6, D-192).
 const LIVENESS_INTERVAL: Duration = Duration::from_secs(10);
-/// The check has to fail for this long before the session is dropped, so that a
-/// momentary reconnect inside Steam does not tear a working session down.
+/// The check has to fail for this long before Steam is reported gone, so that a
+/// momentary reconnect inside Steam does not tear a working session down. With the
+/// check every ten seconds that is 20–30 s after Steam goes, not the 15–25 s D-192
+/// gave; the session itself is kept until Steam is back (D-190, D-275).
 const LIVENESS_GRACE: Duration = Duration::from_secs(15);
 /// A partition Steam never calls back about is abandoned after this long. The
 /// slowest healthy partition measured on 2026-09-21 took 39 s (D-136).
@@ -1060,7 +1092,12 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
             }
         }
         if session.is_none() {
-            match rx.recv_timeout(Duration::from_millis(250)) {
+            // Until the next attempt, or a command, whichever comes first: a 250 ms
+            // poll woke the thread four times a second for nothing (D-275).
+            let wait = next_try
+                .saturating_duration_since(Instant::now())
+                .max(Duration::from_millis(10));
+            match rx.recv_timeout(wait) {
                 Ok(Cmd::Shutdown) | Err(mpsc::RecvTimeoutError::Disconnected) => return,
                 Ok(cmd) => reject(cmd, &events, "Steam is not running".into()),
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -1075,6 +1112,9 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
         &events,
         session.as_ref().expect("session just opened"),
     );
+    // Opens, releases and failed re-opens were never logged, so whether the idle
+    // release (D-077) worked could not be read from the Logs page (D-158, D-275).
+    crate::log_info!("steam", "session opened");
 
     let env_idle = idle_timeout();
     let mut last_activity = Instant::now();
@@ -1089,6 +1129,8 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
     // unreleased, because releasing one after `SteamAPI_Shutdown` would call into a
     // client that no longer exists.
     let mut unreleased: Vec<Arc<Mutex<ServerListRequest>>> = Vec::new();
+    // A command that woke the thread from its no-session wait at the bottom of the loop.
+    let mut woke_by: Option<Cmd> = None;
 
     loop {
         if let Some(s) = &session {
@@ -1096,10 +1138,13 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
         }
 
         loop {
-            let cmd = match rx.try_recv() {
-                Ok(cmd) => cmd,
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => return,
+            let cmd = match woke_by.take() {
+                Some(cmd) => cmd,
+                None => match rx.try_recv() {
+                    Ok(cmd) => cmd,
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    Err(mpsc::TryRecvError::Disconnected) => return,
+                },
             };
             // Presence reads (friends list, avatar) and the Workshop's own update
             // flags come from Steam's local cache and must not keep an otherwise idle
@@ -1120,8 +1165,13 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
             }
             // A released session answers the Workshop poll with `None`, which
             // `mods_stale` already reads as "could not be asked" rather than "nothing
-            // is stale" - so there is nothing worth re-opening a session for.
-            if session.is_none() && matches!(cmd, Cmd::StaleItems { .. }) {
+            // is stale" - so there is nothing worth re-opening a session for. Nor for
+            // an avatar: the Friends page kept asking for them past the release, and
+            // "Show offline" re-opened the session for the first one it had not
+            // fetched, with Steam back to "Playing DayZ" for the whole idle period.
+            // The page asks again once the session is back (D-165, D-275).
+            if session.is_none() && matches!(cmd, Cmd::StaleItems { .. } | Cmd::FriendAvatar { .. })
+            {
                 reject(cmd, &events, "Steam session released while idle".into());
                 continue;
             }
@@ -1132,12 +1182,21 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                         session = Some(s);
                         last_activity = Instant::now();
                         lost_since = None;
+                        crate::log_info!("steam", "session re-opened for {}", cmd.name());
                     }
                     Err(e) => {
+                        crate::log_warn!(
+                            "steam",
+                            "session did not re-open for {}: {e}",
+                            cmd.name()
+                        );
                         // A failed re-open left `initialized` true, so the UI kept
-                        // reporting a connection that no longer existed (D-160).
+                        // reporting a connection that no longer existed (D-160); and
+                        // `idle` true beside it read as "released while idle,
+                        // reconnects on use" under the error (D-275).
                         shared.set_status(&events, |st| {
                             st.initialized = false;
+                            st.idle = false;
                             st.error = Some(e.clone());
                         });
                         reject(cmd, &events, e);
@@ -1258,6 +1317,11 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
             last_activity = Instant::now();
         } else if session.is_some()
             && steam_present
+            // Nor while the liveness check has started failing and not yet reported
+            // it: releasing then ran `SteamAPI_Shutdown` against a Steam that had just
+            // died — the path D-190 keeps the session for — and the loss was never
+            // reported, because the check stops with the session (D-275).
+            && lost_since.is_none()
             && idle_after.is_some_and(|d| last_activity.elapsed() >= d)
         {
             // Drops Client/MatchmakingServers/UGC → SteamAPI_Shutdown; frees the
@@ -1265,6 +1329,11 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
             unreleased.clear();
             session = None;
             shared.set_status(&events, |st| st.idle = true);
+            crate::log_info!(
+                "steam",
+                "session released after {} min without use",
+                last_activity.elapsed().as_secs() / 60
+            );
         }
 
         // Steam can quit while the launcher runs, and Steamworks does not report it:
@@ -1337,8 +1406,15 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                 session = None;
                 session_pid = 0;
                 lost_since = None;
+                // Released unless the launcher was in use within the idle period: with
+                // `idle` false the title bar's friends poll re-opened the session within
+                // the minute, and Steam showed "Playing DayZ" for a whole idle period
+                // nobody asked for. The no-session branch below already did this (D-236);
+                // these two branches predated it (D-275).
+                let released = idle_after.is_some_and(|d| last_activity.elapsed() >= d);
                 shared.set_status(&events, |st| {
                     st.initialized = true;
+                    st.idle = released;
                     st.refreshing = false;
                     st.error = None;
                 });
@@ -1376,8 +1452,11 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                             session = None;
                             session_pid = 0;
                             crate::log_info!("steam", "Steam is back; the session will re-open");
+                            // As in the "restarted" branch above (D-275).
+                            let released = idle_after.is_some_and(|d| last_activity.elapsed() >= d);
                             shared.set_status(&events, |st| {
                                 st.initialized = true;
+                                st.idle = released;
                                 st.refreshing = false;
                                 st.error = None;
                             });
@@ -1417,14 +1496,23 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
         // running" with Steam up until it was restarted (D-236). Like the start-up
         // retry (D-125), but it only marks Steam available: the session re-opens on
         // use, so a released session stays released (D-077).
+        //
+        // The same probe notices Steam closing while the session is released. Nothing
+        // did: the check above needs a session, so the status kept "connected,
+        // released", the title bar kept its friends in DayZ and the rows their friend
+        // markers, and no "Steam is not running" notice appeared until something failed
+        // to re-open — the values D-222 keeps because "that session comes back", which
+        // it cannot with Steam gone (D-275).
         if session.is_none() && last_liveness.elapsed() >= STEAM_RETRY {
             last_liveness = Instant::now();
-            let unavailable = !shared
+            let available = shared
                 .status
                 .lock()
                 .map(|st| st.initialized)
                 .unwrap_or(false);
-            if unavailable && crate::steam::registry::detect().running {
+            let running = crate::steam::registry::detect().running;
+            if !available && running {
+                lost_since = None;
                 crate::log_info!(
                     "steam",
                     "Steam is running again; the session re-opens on use"
@@ -1434,11 +1522,38 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                     st.idle = true;
                     st.error = None;
                 });
+            } else if available && !running {
+                match lost_since {
+                    None => lost_since = Some(Instant::now()),
+                    Some(t) if t.elapsed() >= LIVENESS_GRACE => {
+                        lost_since = None;
+                        crate::log_warn!("steam", "Steam is no longer running");
+                        shared.set_status(&events, |st| {
+                            st.initialized = false;
+                            st.idle = false;
+                            st.refreshing = false;
+                            st.error = Some("Steam is no longer running".into());
+                        });
+                    }
+                    Some(_) => {}
+                }
+            } else if running {
+                lost_since = None;
             }
         }
 
         let Some(s) = session.as_ref() else {
-            std::thread::sleep(TICK_IDLE);
+            // Nothing to pump without a session: wait for a command or the next check.
+            // A 100 ms sleep woke the thread ten times a second for the whole release,
+            // 36 000 times an hour, to find nothing to do (docs/05 §6, D-275).
+            let wait = STEAM_RETRY
+                .saturating_sub(last_liveness.elapsed())
+                .max(Duration::from_millis(10));
+            match rx.recv_timeout(wait) {
+                Ok(cmd) => woke_by = Some(cmd),
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => return,
+            }
             continue;
         };
         let (mms, ugc) = (&s.mms, &s.ugc);
@@ -1693,11 +1808,15 @@ fn friend_state_name(state: FriendState) -> &'static str {
 /// Server address from a rich-presence `connect` string (S-65): Steam hands this
 /// text to the game as its command line when a friend clicks "Join Game", so it is
 /// whatever the game chose: `+connect 1.2.3.4:2302`, `-connect=1.2.3.4 -port=2302`,
-/// `connect 1.2.3.4`. The first IPv4 wins; a port after a colon or a later bare
-/// number follows it; no port means DayZ's default game port 2302.
+/// `connect 1.2.3.4`. The first IPv4 wins; a port after a colon, or the number after a
+/// `port` key on either side of the address, goes with it; no port means DayZ's
+/// default game port 2302. Port 0 is no port: `1.2.3.4:0` joined `ip:0`, and a
+/// `-port=2402` written before `-connect` fell back to 2302, which at a shared address
+/// can be another server (D-275).
 fn parse_connect(text: &str) -> Option<(std::net::Ipv4Addr, u16)> {
     let mut ip: Option<std::net::Ipv4Addr> = None;
     let mut port: Option<u16> = None;
+    let mut early_port: Option<u16> = None;
     let mut prev_was_port = false;
     for tok in text.split(|c: char| c.is_whitespace() || c == '=' || c == ',' || c == ';') {
         let t = tok.trim_matches(|c| c == '+' || c == '-' || c == '"' || c == '\'');
@@ -1705,12 +1824,14 @@ fn parse_connect(text: &str) -> Option<(std::net::Ipv4Addr, u16)> {
             if let Some((a, p)) = t.rsplit_once(':') {
                 if let Ok(a) = a.parse() {
                     ip = Some(a);
-                    port = p.parse().ok();
+                    port = p.parse().ok().filter(|p: &u16| *p != 0);
                     continue;
                 }
             }
             if let Ok(a) = t.parse() {
                 ip = Some(a);
+            } else if prev_was_port {
+                early_port = t.parse::<u16>().ok().filter(|p| *p != 0);
             }
         } else if port.is_none() && prev_was_port {
             // Only the number that follows a `port` key: any other bare number in the
@@ -1724,7 +1845,7 @@ fn parse_connect(text: &str) -> Option<(std::net::Ipv4Addr, u16)> {
         prev_was_port = t.eq_ignore_ascii_case("port");
     }
     ip.filter(|a| !a.is_unspecified())
-        .map(|a| (a, port.unwrap_or(2302)))
+        .map(|a| (a, port.or(early_port).unwrap_or(2302)))
 }
 
 /// Regular friends (`FriendFlags::IMMEDIATE`) with presence and, for those in DayZ,
@@ -1982,5 +2103,19 @@ mod tests {
         assert_eq!(parse_connect("+connect 0.0.0.0:0"), None);
         assert_eq!(parse_connect(""), None);
         assert_eq!(parse_connect("-nolauncher"), None);
+        // Port 0 is no port, and a `-port` before the address still counts (D-275).
+        assert_eq!(
+            parse_connect("+connect 51.81.8.81:0"),
+            Some((ip("51.81.8.81"), 2302))
+        );
+        assert_eq!(
+            parse_connect("-port=2402 -connect=51.81.8.81"),
+            Some((ip("51.81.8.81"), 2402))
+        );
+        // A port given both ways: the one that goes with the address wins.
+        assert_eq!(
+            parse_connect("-port=2402 +connect 51.81.8.81:2502"),
+            Some((ip("51.81.8.81"), 2502))
+        );
     }
 }

@@ -115,6 +115,33 @@ fn fatal_dialog(message: &str) {
     }
 }
 
+/// Stops the Steam worker and checkpoints the cache, for every way out. Twice is
+/// harmless: the second shutdown finds the thread gone, the checkpoint finds nothing.
+fn close_down(handle: &tauri::AppHandle) {
+    if let Some(state) = handle.try_state::<AppState>() {
+        state.steam.shutdown();
+        if let Ok(c) = state.cache.lock() {
+            c.checkpoint_truncate();
+        }
+    }
+}
+
+/// Runs `close_down` when Tauri clears the app's resource table on the way out. The
+/// updater's "install and restart" leaves through `cleanup_before_exit` and then
+/// `process::exit`, never reaching `RunEvent::Exit`, so every update installed with a
+/// live Steam session took the exit D-190 diagnosed as the 0xC0000409 crash, and
+/// skipped the final checkpoint (tauri-plugin-updater 2.12.0 `on_before_exit`, tauri
+/// 2.11.6 `cleanup_before_exit`; D-275).
+struct ExitGuard(tauri::AppHandle);
+
+impl tauri::Resource for ExitGuard {}
+
+impl Drop for ExitGuard {
+    fn drop(&mut self) {
+        close_down(&self.0);
+    }
+}
+
 pub fn run() {
     let _ = STARTED.set(Instant::now());
     let previous = std::panic::take_hook();
@@ -277,6 +304,7 @@ pub fn run() {
                 dzsa: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 settings,
             });
+            app.resources_table().add(ExitGuard(app.handle().clone()));
 
             // Forwards Steam-thread events to the WebView, persists batches, and
             // verifies populated servers (docs/11 R2–R5) once a refresh completes.
@@ -683,12 +711,7 @@ pub fn run() {
             // fast-failed with 0xC0000409 instead of exiting 0 — abandoning anything
             // still in the write-ahead log on the way out (D-190).
             if matches!(event, tauri::RunEvent::Exit) {
-                if let Some(state) = handle.try_state::<AppState>() {
-                    state.steam.shutdown();
-                    if let Ok(c) = state.cache.lock() {
-                        c.checkpoint_truncate();
-                    }
-                }
+                close_down(handle);
                 log_info!("app", "exited cleanly");
             }
         });

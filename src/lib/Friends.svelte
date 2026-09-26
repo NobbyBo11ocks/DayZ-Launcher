@@ -34,10 +34,13 @@
         const url = buf.byteLength === AVATAR_PX * AVATAR_PX * 4 ? avatarDataUrl({ width: AVATAR_PX, height: AVATAR_PX, rgba: new Uint8ClampedArray(buf) }) : null;
         if (url) avatars.set(id, url);
         else if (retry) {
-          // Steam answers from its cache and may not have it yet: once more, 4 s on.
+          // Steam answers from its cache and may not have it yet: once more, 4 s on —
+          // unless the session has been released since, which the worker would not
+          // re-open for an avatar; then it is asked again when the session is back.
           const t = setTimeout(() => {
             retries.delete(t);
-            requestAvatar(id, false);
+            if (servers.steam?.idle) asked.delete(id);
+            else requestAvatar(id, false);
           }, 4000);
           retries.add(t);
         }
@@ -47,6 +50,11 @@
   function avatarFor(f: FriendInfo): string | null {
     const have = avatars.get(f.steamId);
     if (have) return have;
+    // Not while the session is released: "Show offline" asked for every avatar not yet
+    // fetched, and the first one re-opened the session, putting "Playing DayZ" back on
+    // the user's Steam profile for a whole idle period (D-165, D-275). Reading the flag
+    // here re-runs this once it clears, which is when they are asked for.
+    if (steamIdle) return null;
     if (!asked.has(f.steamId)) {
       asked.add(f.steamId);
       requestAvatar(f.steamId, true);
