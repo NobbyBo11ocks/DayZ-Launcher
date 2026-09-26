@@ -16,8 +16,9 @@ use windows_sys::Win32::Security::{
     GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
 };
 use windows_sys::Win32::System::Threading::{
-    GetCurrentProcess, OpenProcess, OpenProcessToken, SetPriorityClass,
-    BELOW_NORMAL_PRIORITY_CLASS, HIGH_PRIORITY_CLASS, PROCESS_QUERY_LIMITED_INFORMATION,
+    GetCurrentProcess, OpenProcess, OpenProcessToken, SetPriorityClass, WaitForSingleObject,
+    BELOW_NORMAL_PRIORITY_CLASS, HIGH_PRIORITY_CLASS, INFINITE, PROCESS_QUERY_LIMITED_INFORMATION,
+    PROCESS_SYNCHRONIZE,
 };
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
 use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
@@ -62,6 +63,36 @@ fn token_elevated(process: HANDLE) -> Option<bool> {
         CloseHandle(token);
         (ok != 0).then_some(info.TokenIsElevated != 0)
     }
+}
+
+/// Below normal until the DayZ process `pid` exits, then high again: for an instance
+/// started while a game this instance did not launch is running (D-279). A game this
+/// instance launches gets the same from `launch_game`, which waits on its own child.
+pub fn step_down_while_running(pid: u32) {
+    set_priority(Priority::BelowNormal);
+    let _ = std::thread::Builder::new()
+        .name("dayz-watch".into())
+        .spawn(move || {
+            // SAFETY: the handle is checked before use and closed after the wait.
+            let waited = unsafe {
+                let h = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+                if h.is_null() {
+                    false
+                } else {
+                    WaitForSingleObject(h, INFINITE);
+                    CloseHandle(h);
+                    true
+                }
+            };
+            if !waited {
+                // Not ours to wait on (another session, say): the list shows when it goes.
+                while crate::steam::registry::process::find_named("DayZ_x64.exe").is_some() {
+                    std::thread::sleep(std::time::Duration::from_secs(15));
+                }
+            }
+            set_priority(Priority::High);
+            crate::log_info!("app", "DayZ (pid {pid}) exited; back to high priority");
+        });
 }
 
 /// Whether this process runs with an elevated (administrator) token.

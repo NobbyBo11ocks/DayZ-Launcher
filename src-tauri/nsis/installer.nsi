@@ -7,7 +7,10 @@
 ; (D-067, S-56, Q19), an options page before the install (D-206), the flags passed to
 ; the uninstaller an upgrade runs and refusing to skip a locked binary (D-205), and
 ; skipping the reinstall page for a straight upgrade (D-207), keeping the Add/Remove
-; entry through an upgrade and waiting for the old binary's lock to clear (D-214).
+; entry through an upgrade and waiting for the old binary's lock to clear (D-214), the
+; themed pages and their art (D-258), the shell's icon-cache signal after an install
+; (D-260), and the Finish page's desktop shortcut taking the versioned icon (D-262,
+; D-279). The installer hooks live in hooks.nsh, which this check does not cover.
 ; When @tauri-apps/cli is upgraded, run `node tools/nsis_template_check.js --write`,
 ; which re-fetches the template at the new tag and re-applies every marked change.
 ; --- end of DayZ Launcher header; everything below is upstream ---
@@ -1346,6 +1349,10 @@ Function CreateOrUpdateDesktopShortcut
   ; The Finish page makes this shortcut after NSIS_HOOK_POSTINSTALL has written the
   ; versioned icon copy and pointed the other shortcuts at it; this one takes it too,
   ; or it would show whatever Explorer cached for the exe path (hooks.nsh, D-262).
-  !insertmacro DzlSetShortcutIcon "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\icons\${VERSION}.ico"
+  ; A silent or passive install makes it before the hook, when the copy does not exist
+  ; yet; the hook points it there a moment later (D-279).
+  ${If} ${FileExists} "$INSTDIR\icons\${VERSION}.ico"
+    !insertmacro DzlSetShortcutIcon "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\icons\${VERSION}.ico"
+  ${EndIf}
 ; <<< dzl-change
 FunctionEnd

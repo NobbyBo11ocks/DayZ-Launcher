@@ -5,7 +5,7 @@
 // Each page picture comes in seven sizes, one per common display scale (100 % to
 // 300 %). MUI hands Windows a single bitmap to stretch to the control, and Windows
 // stretches it by dropping or doubling pixels, so the installer picks the size that
-// matches at run time instead (installer.nsi, DzlPickArt).
+// matches at run time instead (installer.nsi, DzlPick).
 //
 // NSIS wants BMP, which sharp does not write, so the raw pixels are wrapped in a 24-bit
 // BMP header here. Text uses Bebas Neue (tools/fonts, SIL OFL), vendored so the art

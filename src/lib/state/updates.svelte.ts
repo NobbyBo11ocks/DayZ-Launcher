@@ -8,6 +8,9 @@ import { describe, logInfo, logWarn } from "../log";
 
 const LAST_CHECK_KEY = "dayz-launcher.update-check";
 const AUTO_CHECK_INTERVAL_MS = 24 * 3600 * 1000;
+/** The whole download, not a gap between chunks (reqwest's `timeout`): 7.5 MB in
+ *  30 minutes is 4 KB/s, slower than any connection that can play DayZ. */
+const DOWNLOAD_TIMEOUT_MS = 30 * 60_000;
 
 class Updates {
   state = $state<"idle" | "checking" | "none" | "available" | "downloading" | "ready" | "error">("idle");
@@ -56,20 +59,44 @@ class Updates {
   }
 
   async install() {
-    const u = this.#update;
-    if (!u) return;
+    if (!this.#update) return;
     this.state = "downloading";
+    // A retry must not keep the last attempt's error next to its progress (D-279).
+    this.error = null;
+    this.progress = 0;
+    // The offer can be days old, and only the newest release is kept (D-274): once the
+    // next one shipped, the one offered here was deleted and every retry was a 404.
+    // Ask again first and install whatever is newest now; the fresh handle also
+    // replaces one a failed install may have left invalid (D-279).
+    try {
+      const fresh = await check({ timeout: 10_000 });
+      void this.#update?.close().catch(() => {});
+      this.#update = fresh;
+      this.version = fresh?.version ?? null;
+    } catch {
+      /* the offer in hand stands; its own download says what is wrong */
+    }
+    const u = this.#update;
+    if (!u) {
+      this.state = "none";
+      return;
+    }
     logInfo("update", `installing ${u.version}`);
     let total = 0;
     let got = 0;
     try {
-      await u.downloadAndInstall((ev) => {
-        if (ev.event === "Started") total = ev.data.contentLength ?? 0;
-        else if (ev.event === "Progress") {
-          got += ev.data.chunkLength;
-          this.progress = total ? Math.round((100 * got) / total) : 0;
-        } else if (ev.event === "Finished") this.progress = 100;
-      });
+      await u.downloadAndInstall(
+        (ev) => {
+          if (ev.event === "Started") total = ev.data.contentLength ?? 0;
+          else if (ev.event === "Progress") {
+            got += ev.data.chunkLength;
+            this.progress = total ? Math.round((100 * got) / total) : 0;
+          } else if (ev.event === "Finished") this.progress = 100;
+        },
+        // The download had no limit: one that stalled without closing sat at
+        // "Downloading… N%" for good, with the Check button disabled (D-279).
+        { timeout: DOWNLOAD_TIMEOUT_MS },
+      );
       this.state = "ready";
     } catch (e) {
       // Back to "available", not "error" (D-184): the update is still there and still

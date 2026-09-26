@@ -1,7 +1,10 @@
 # Builds, signs and publishes a release when a `v<version>` tag is pushed (D-071).
-# The release is created as a draft and made public only after the smoke test passes
-# (D-241). Manual runs build only: a manual publishing run skipped the tag-version
-# check and could replace a shipped release's installer with a build of main.
+# Only from a commit whose CI passed. The release is created as a draft and made public
+# only after the smoke test has passed and the final manifest has been written and its
+# signature checked against the app's public key (D-241, D-279). Manual runs build,
+# smoke-test and check the signature, and publish nothing: a manual publishing run
+# skipped the tag-version check and could replace a shipped release's installer with a
+# build of main.
 #
 # Required repository secret:
 #   TAURI_SIGNING_PRIVATE_KEY          content of the minisign private key
@@ -17,10 +20,16 @@ on:
 
 permissions:
   contents: write
+  # The CI gate below reads this commit's CI run (D-279).
+  actions: read
 
+# One queue for every tag, in order. A group per tag let two releases run side by side,
+# and whichever published last became `latest`, whatever its version; `queue: max`
+# keeps a third tag waiting instead of cancelling the second (D-279).
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
+  queue: max
 
 jobs:
   build:
@@ -30,6 +39,32 @@ jobs:
       PUBLISH: ${{ github.event_name == 'push' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0, pinned (D-245)
+
+      # This job runs neither clippy nor the tests, so a tag on a commit whose CI failed,
+      # was cancelled or never ran published anyway; only the local release script
+      # stood in the way (D-269). A tag pushed while CI is still running waits for it.
+      - name: CI passed on this commit
+        if: github.event_name == 'push'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $start = Get-Date
+          while ($true) {
+            $json = gh run list --workflow ci.yml --commit $env:GITHUB_SHA --limit 1 --json status,conclusion,databaseId
+            if ($LASTEXITCODE -ne 0) { throw "could not read the CI runs of $env:GITHUB_SHA" }
+            $run = $json | ConvertFrom-Json | Select-Object -First 1
+            if ($run -and $run.status -eq 'completed') {
+              if ($run.conclusion -ne 'success') { throw "CI run $($run.databaseId) on $env:GITHUB_SHA ended '$($run.conclusion)'; not releasing it" }
+              "CI run $($run.databaseId) on $env:GITHUB_SHA passed"
+              break
+            }
+            $waited = ((Get-Date) - $start).TotalMinutes
+            if (-not $run -and $waited -gt 3) { throw "no CI run for $env:GITHUB_SHA: tag a commit that was pushed to main and passed CI" }
+            if ($waited -gt 30) { throw "CI on $env:GITHUB_SHA did not finish within 30 minutes" }
+            Start-Sleep -Seconds 20
+          }
 
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0, pinned (D-245)
         with:
@@ -106,7 +141,7 @@ jobs:
           tagName: ${{ env.PUBLISH == 'true' && 'v__VERSION__' || '' }}
           releaseName: ${{ env.PUBLISH == 'true' && 'v__VERSION__' || '' }}
           releaseBody: |
-            Existing installs update themselves from Settings, or automatically within 24 hours.
+            Existing installs offer this update in Settings and in the side rail (they check at start-up, at most once a day); it installs with one click.
             The installer is not code-signed yet, so Windows SmartScreen shows an "unknown publisher" warning on first run: choose "More info", then "Run anyway".
           generateReleaseNotes: ${{ env.PUBLISH == 'true' }}
           # A draft until the smoke test below has passed: published here, a build that
@@ -192,31 +227,52 @@ jobs:
             "uninstall clean"
           }
 
-      # tauri-action writes an api.github.com asset URL into latest.json, which serves JSON
-      # metadata rather than the installer unless the caller sends an octet-stream Accept
-      # header; the signature check then fails (v0.1.21, D-147). Our own generator takes
-      # the browser download URL from the release listing, so rewrite the manifest with it.
-      # After publishing: a draft's asset URLs change when it is published. No longer
-      # `always()` (D-160): a release that failed the smoke test never becomes public —
-      # its draft is deleted at the end of the run (D-241, D-245).
-      # Only now does the release become `releases/latest` (D-241).
-      - name: Publish the release
-        if: success() && env.PUBLISH == 'true'
+      # The manifest is written and checked before anything is public (D-279). The Tauri
+      # CLI only warns when the signing key does not match the app's public key (tauri-cli
+      # 2.11.5, bundle.rs), so a wrong key built, passed the smoke test and was published,
+      # and only the check after publishing noticed, with the release already `latest` and
+      # refused by every install. tauri-action's own manifest points at an api.github.com
+      # asset URL, which counts against GitHub's unauthenticated rate limit (D-147); ours
+      # is built from the tag, so it is final while the release is still a draft. The
+      # check reads the installer on disk against the public key the app ships with.
+      - name: Write the manifest and check its signature
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
-        run: gh release edit $env:TAG --draft=false
+        run: |
+          if ($env:PUBLISH -eq 'true') { node tools/make_latest.js $env:TAG } else { node tools/make_latest.js --offline }
+          if ($LASTEXITCODE -ne 0) { throw 'make_latest.js failed' }
+          $setup = Get-ChildItem src-tauri/target/release/bundle/nsis -Filter '*-setup.exe' | Select-Object -First 1
+          node tools/verify_update_sig.js src-tauri/target/release/bundle/nsis/latest.json --installer $setup.FullName
+          if ($LASTEXITCODE -ne 0) { throw 'the manifest or its signature did not verify; nothing is published' }
 
-      - name: Rewrite latest.json with the browser download URL
+      - name: Upload the manifest to the draft
         if: success() && env.PUBLISH == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
-          node tools/make_latest.js $env:TAG
           gh release upload $env:TAG 'src-tauri/target/release/bundle/nsis/latest.json' --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'could not upload latest.json to the draft' }
+
+      # Only now does the release become `releases/latest` (D-241), and never over a newer
+      # one: the queue keeps tags in order, but a re-run of an older tag's failed run
+      # would otherwise take `latest` back (D-279).
+      - name: Publish the release
+        if: success() && env.PUBLISH == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          $latest = gh release view --json tagName --jq '.tagName' 2>$null
+          if ($LASTEXITCODE -eq 0 -and $latest) {
+            if ([version]$latest.TrimStart('v') -ge [version]$env:TAG.TrimStart('v')) { throw "$latest is the latest release; $env:TAG must not replace it" }
+          }
+          gh release edit $env:TAG --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw "could not publish $env:TAG" }
 
       - name: Verify the published manifest and signature
         if: success() && env.PUBLISH == 'true'
@@ -236,10 +292,12 @@ jobs:
           if (-not $ok) { throw 'the published manifest did not verify' }
 
       # A run that failed before publishing leaves a draft carrying an installer that
-      # never passed the smoke test and a manifest that was never rewritten; published
-      # by hand it would skip both gates. The draft goes, the tag stays (D-245).
+      # never passed the smoke test and a manifest that was never checked; published by
+      # hand it would skip both gates. The draft goes, the tag stays (D-245). Cancelled
+      # runs too, the 60-minute timeout included: `failure()` is false for those, and
+      # their drafts stayed (D-279).
       - name: Delete the unpublished draft of a failed run
-        if: failure() && env.PUBLISH == 'true'
+        if: (failure() || cancelled()) && env.PUBLISH == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

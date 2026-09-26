@@ -142,6 +142,45 @@ impl Drop for ExitGuard {
     }
 }
 
+/// The updater leaves every setup it downloads in `%TEMP%\<product>-<version>-updater-*\`:
+/// it keeps the folder and exits before the file's own clean-up runs (tauri-plugin-updater
+/// 2.12.0 `make_temp_dir`, `write_to_temp`), 7.5 MB per update. They go at the next start;
+/// only that shape is touched, the setup file by its exact name and then the folder if
+/// nothing else is in it. A setup still running holds its file, which stays for the next
+/// start (D-279).
+fn sweep_updater_leftovers(product: &str) {
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+        return;
+    };
+    let prefix = format!("{product}-");
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(version) = name
+            .to_str()
+            .and_then(|n| n.strip_prefix(&prefix))
+            .and_then(|rest| rest.split_once("-updater-"))
+            .map(|(v, _)| v.to_owned())
+        else {
+            continue;
+        };
+        if !entry.file_type().is_ok_and(|t| t.is_dir()) {
+            continue;
+        }
+        let dir = entry.path();
+        if std::fs::remove_file(dir.join(format!("{product}-{version}-installer.exe"))).is_ok() {
+            removed += 1;
+        }
+        let _ = std::fs::remove_dir(&dir);
+    }
+    if removed > 0 {
+        log_info!(
+            "update",
+            "removed {removed} downloaded setup(s) left in the temp folder"
+        );
+    }
+}
+
 pub fn run() {
     let _ = STARTED.set(Instant::now());
     let previous = std::panic::take_hook();
@@ -204,6 +243,17 @@ pub fn run() {
                 env!("CARGO_PKG_VERSION"),
                 elevation()
             );
+            // Started while DayZ plays (relaunched by an update, or by hand): this instance
+            // never launched the game, so D-119's step-down never ran and it sat at High
+            // beside the game for the rest of the session (D-279).
+            if let Some(pid) = steam::registry::process::find_named("DayZ_x64.exe") {
+                log_info!("app", "DayZ is running (pid {pid}); starting below normal priority");
+                proc::step_down_while_running(pid);
+            }
+            let product = app.package_info().name.clone();
+            let _ = std::thread::Builder::new()
+                .name("temp-sweep".into())
+                .spawn(move || sweep_updater_leftovers(&product));
             let db_path = data_dir.join("cache.db");
             let cache = Arc::new(Mutex::new(match Cache::open(&db_path) {
                 Ok(c) => c,
@@ -723,4 +773,43 @@ pub fn run() {
                 log_info!("app", "exited cleanly");
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sweep_updater_leftovers;
+
+    /// D-279: the updater's own leftovers go; anything else in the temp folder stays.
+    #[test]
+    fn only_the_updaters_own_leftovers_are_swept() {
+        let product = format!("DzlSweepTest {}", std::process::id());
+        let tmp = std::env::temp_dir();
+        let ours = tmp.join(format!("{product}-0.1.63-updater-Ab3dEf"));
+        let busy = tmp.join(format!("{product}-0.1.64-updater-Xy9zQw"));
+        let alike = tmp.join(format!("{product}-notes"));
+        for d in [&ours, &busy, &alike] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(ours.join(format!("{product}-0.1.63-installer.exe")), b"MZ").unwrap();
+        // Something the updater did not write: the file and so its folder stay.
+        std::fs::write(busy.join("other.txt"), b"x").unwrap();
+        std::fs::write(alike.join(format!("{product}-0.1.63-installer.exe")), b"MZ").unwrap();
+
+        sweep_updater_leftovers(&product);
+
+        assert!(!ours.exists(), "the leftover setup and its folder go");
+        assert!(
+            busy.join("other.txt").exists(),
+            "a file the updater did not write stays"
+        );
+        assert!(
+            alike
+                .join(format!("{product}-0.1.63-installer.exe"))
+                .exists(),
+            "a folder not shaped like the updater's is not touched"
+        );
+        for d in [&busy, &alike] {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
 }

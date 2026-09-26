@@ -91,7 +91,7 @@ No account, no API key, no ads, no sponsored placements and no telemetry. Every 
 <tr><td><b>Full server</b></td><td>✅ Waits for a free slot and joins the moment one opens</td><td>—</td></tr>
 <tr><td><b>Performance options</b></td><td>✅ <code>-cpuCount</code>, <code>-maxMem</code> and <code>-maxVRAM</code> sized to your PC</td><td>—</td></tr>
 <tr><td><b>Look</b></td><td>✅ Dark and light themes, twelve accent colours</td><td>❌ One dark table</td></tr>
-<tr><td><b>Updates</b></td><td>✅ Automatic, and signed so a tampered installer is refused</td><td>—</td></tr>
+<tr><td><b>Updates</b></td><td>✅ In the app, one click, and signed so a tampered installer is refused</td><td>—</td></tr>
 </table>
 
 <sub>DZSA Launcher as checked on its portable build 0.0.6.3 and on dayzsalauncher.com (2026-09-21 and 2026-09-26); — means we found no such feature there, and corrections are welcome. Both launchers use the same <code>!Workshop</code> folder, so they can live side by side. So can Bohemia's official launcher: this one follows its mod order and imports its favourites in one click.</sub>
@@ -244,7 +244,7 @@ Star any server and it lands in **Favourites** with the same verified counts. Yo
 
 </td><td>
 
-- Signed automatic updates
+- Signed one-click updates
 - A per-user installer; the launcher runs at the same elevation as Steam
 - **Steam idle release**, so an open launcher does not count as playtime
 - A Logs page with per-area mutes and an off switch
@@ -295,7 +295,7 @@ flowchart LR
 
 1. Download `DZSA CrayZ Launcher_<version>_x64-setup.exe` from the [latest release](https://github.com/NobbyBo11ocks/DayZ-Launcher/releases/latest).
 2. Run it. It installs per user to `%LOCALAPPDATA%\Programs\DZSA CrayZ Launcher` and adds a Start menu entry. WebView2 is installed silently if Windows does not have it.
-3. Start Steam, then the launcher. Updates are automatic: each release is signed with a minisign key and the app verifies the signature before installing.
+3. Start Steam, then the launcher. Updates are one click: the launcher checks for a new release when it starts (at most once a day) and offers it in Settings and the side rail; each release is signed with a minisign key and the app verifies the signature before installing.
 
 > [!WARNING]
 > **SmartScreen.** The installer is not code-signed yet, so Windows shows "Windows protected your PC" on first run. Click **More info**, then **Run anyway**. Code signing is tracked in [docs/12](docs/12-code-signing.md).
@@ -431,7 +431,7 @@ Output: `src-tauri/target/release/bundle/nsis/` (`DZSA CrayZ Launcher_<version>_
 8. The launcher's own look on every page, uninstaller included: its dark surfaces, light text and lime accent, the logo beside the welcome and finish pages, the gas mask in the header, and a splash for an interactive install that silent, passive and update runs never show. Each picture comes in seven sizes, one per common display scale, and the installer loads the one made for the screen it is on (D-258).
 9. Shortcut icons that follow an update. Explorer keeps the icon it drew for a shortcut by the icon's location, and Tauri's shortcuts take theirs from the exe, whose path never changes — so an update that changed the icon left the desktop and Start menu shortcuts and a pinned taskbar button showing the old one (D-260). The installer now writes a copy of the icon named after the version and points every shortcut of ours at it, the pinned button included, then asks Windows to refresh; most of that lives in `hooks.nsh`, and the one marked block gives the Finish page's desktop shortcut the same icon (D-262).
 
-Auto-updates were never affected by any of this — the updater always passes `/UPDATE`.
+In-app updates were never affected by any of this — the updater always passes `/UPDATE`.
 
 After upgrading `@tauri-apps/cli`, run the check (add `--write` to refresh the copy from the new tag and re-apply every marked change).
 
@@ -445,7 +445,7 @@ TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/dayz-launcher.key)" TAURI_SIGNING_PRIV
 
 `--ci` stops the CLI from prompting for the key password (the key has none). Run this from Git Bash; PowerShell drops empty environment variables, and without the password variable the CLI waits on a prompt forever.
 
-The public key is in `src-tauri/tauri.conf.json`; the updater polls `https://github.com/NobbyBo11ocks/DayZ-Launcher/releases/latest/download/latest.json`.
+The public key is in `src-tauri/tauri.conf.json`; the updater checks `https://github.com/NobbyBo11ocks/DayZ-Launcher/releases/latest/download/latest.json`.
 
 </details>
 

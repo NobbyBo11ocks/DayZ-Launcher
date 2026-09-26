@@ -134,7 +134,9 @@ async function main(write) {
     if (rebuilt.split(b.upstream).length !== 2) {
       return fail(`upstream no longer has the line this change anchors on: ${b.upstream.trim()}`);
     }
-    rebuilt = rebuilt.replace(b.upstream, b.ours);
+    // A function, not a string: a string replacement expands `$$`, `$&` and friends, and
+    // `$$` is how NSIS writes a literal dollar sign (D-279).
+    rebuilt = rebuilt.replace(b.upstream, () => b.ours);
   }
   writeFileSync(localPath, header.replace(/tauri-cli-v[\d.]+/g, tag) + "\n" + rebuilt);
   console.log(`refreshed from upstream ${tag} with ${blocks.length} marked changes; review the diff`);
