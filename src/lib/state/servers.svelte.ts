@@ -1179,10 +1179,14 @@ class ServersStore {
         verifiedPlayers: synthetic ? null : (v.verified ?? r.verifiedPlayers),
         verifiedAt: synthetic ? null : v.verified == null ? r.verifiedAt : v.verifiedAt,
         verdict: v.verdict,
-        // Our own count of real players beats Steam's "empty" from a listing that
-        // also said 0; a farm's listing claimed its number and keeps R0.
+        // Our own look at the server beats Steam's "empty" from a listing that also
+        // said 0; a farm's listing claimed its number and keeps R0. The first fresh
+        // INFO decides even when it could not count yet, since it rewrites `players`
+        // and would leave the listing's 0 behind it (D-268).
         steamEmpty:
-          r.steamEmpty === true && r.players === 0 && infoAnswered && v.verdict === "verified" && (v.verified ?? 0) > 0 ? null : r.steamEmpty,
+          r.steamEmpty === true && r.players === 0 && infoAnswered && (v.reported > 0 || (v.verdict === "verified" && (v.verified ?? 0) > 0))
+            ? null
+            : r.steamEmpty,
       });
     }
     this.#markDirty();

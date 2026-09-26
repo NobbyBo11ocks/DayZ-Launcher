@@ -400,6 +400,9 @@ const VERIFY_FLUSH_ROWS: usize = 128;
 /// …and a partial batch goes out anyway once this long has passed, so the last few
 /// stragglers of a pass are not held back by the ones that will never answer.
 const VERIFY_FLUSH_EVERY: std::time::Duration = std::time::Duration::from_millis(250);
+/// How long after a pass the servers still offline at its end are read once more:
+/// long enough for a scheduled restart to come back (D-268).
+const OFFLINE_REREAD_AFTER: std::time::Duration = std::time::Duration::from_secs(240);
 
 pub async fn run_verification(
     app: AppHandle,
@@ -519,6 +522,42 @@ pub async fn run_verification(
             crate::log_info!(
                 "verify",
                 "{n} standing synthetic verdict(s) compared again: {healed} cleared"
+            );
+        });
+    }
+    // "Offline" counts as untrusted, and a hidden row gets no on-demand check, so a
+    // server restarting as the pass reached it stayed hidden until the next Refresh:
+    // 7 of the 2 210 rows Steam listed as populated on 2026-09-25, one of them counted
+    // at 8 a minute before its pass. Those still offline are read once more, INFO
+    // included, a few minutes on (D-268).
+    let still_offline: Vec<Target> = if announce {
+        latest
+            .iter()
+            .filter(|(_, v)| **v == Verdict::Offline)
+            .filter_map(|(id, _)| by_id.get(id).cloned())
+            .collect()
+    } else {
+        Vec::new()
+    };
+    if !still_offline.is_empty() {
+        let n = still_offline.len();
+        let app = app.clone();
+        let cache = Arc::clone(&cache);
+        let patient = client
+            .clone()
+            .with_timeout(std::time::Duration::from_millis(2500));
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(OFFLINE_REREAD_AFTER).await;
+            let results = verify::verify_many(&patient, still_offline, true).await;
+            let back = results
+                .iter()
+                .filter(|v| v.verdict != Verdict::Offline)
+                .count();
+            let mut latest = HashMap::with_capacity(n);
+            publish(&app, &cache, &mut latest, results).await;
+            crate::log_info!(
+                "verify",
+                "{n} server(s) offline at the pass read again: {back} answered"
             );
         });
     }
@@ -1171,13 +1210,20 @@ pub async fn server_details(
 
     let (info, rules, players) =
         tokio::join!(client.info(addr), client.rules(addr), client.players(addr));
+    // With INFO lost, a cached count older than a minute is no count, as in
+    // `verify_one` (D-245): judged against a fresh PLAYER, an hour-old 60 read as
+    // "advertises 60; 20 actually connected" and hid the row the user had open (D-268).
+    let stale = cached.as_ref().is_none_or(|r| {
+        ServerRow::now_unix().saturating_sub(r.last_seen) > verify::INFO_FRESH_SECS
+    });
+    let judged_against = if stale && info.is_err() { -1 } else { reported };
     // With R11, like every other check: `judge` alone published "verified" over a
     // standing "synthetic" verdict each time the row was opened (D-236).
     let (verdict, verified, reason) = verify::judge_with_continuity(
         &id,
         info.as_ref().ok().map(|r| &r.value),
         players.as_ref().map(|r| &r.value),
-        reported,
+        judged_against,
         max_players,
         was_synthetic,
     );
@@ -2070,22 +2116,32 @@ pub async fn direct_connect(
     };
     let stored = vec![row.clone()];
     let c = Arc::clone(&state.cache);
+    let id = row.id.clone();
     // The write was discarded and not even logged, while the command still returned
     // the row and emitted `servers:batch` - so on an unwritable cache the server
     // appeared in the grid and then `join_plan` and `launch_game`, which both start
     // from `cached_row(..).ok_or("unknown server")`, refused it with nothing in the
     // log to explain why. Every other cache write on this path reports (D-220).
-    tauri::async_runtime::spawn_blocking(move || match c.lock() {
-        Ok(mut c) => c
-            .upsert(&stored)
-            .map_err(|e| format!("could not store the server: {e}")),
+    // The upsert keeps a stored verdict; the probe's row has none, and a check built
+    // from it alone published "verified" over a standing "synthetic" whenever R11 had
+    // no sample yet, as the details pane once did (D-236, D-268).
+    let was_synthetic = tauri::async_runtime::spawn_blocking(move || match c.lock() {
+        Ok(mut c) => {
+            c.upsert(&stored)
+                .map_err(|e| format!("could not store the server: {e}"))?;
+            Ok(c.get(&id)
+                .ok()
+                .flatten()
+                .is_some_and(|r| r.verdict.as_deref() == Some("synthetic")))
+        }
         Err(_) => Err("the server cache is unavailable".to_string()),
     })
     .await
     .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?
     .map_err(AppError::Internal)?;
     let _ = app.emit("servers:batch", &vec![row.clone()]);
-    if let Some(t) = Target::from_row(&row) {
+    if let Some(mut t) = Target::from_row(&row) {
+        t.was_synthetic |= was_synthetic;
         tauri::async_runtime::spawn(run_verification(
             app.clone(),
             Arc::clone(&state.cache),
@@ -2218,41 +2274,47 @@ pub async fn import_official_favourites(
         let n = new_rows.len();
         // The count was already tallied above, so swallowing these writes reported a
         // successful import that saved nothing (D-160). Fail loudly instead.
-        let stored =
-            tauri::async_runtime::spawn_blocking(move || -> Result<Vec<ServerRow>, String> {
-                let mut c = c
-                    .lock()
-                    .map_err(|_| "the cache lock is poisoned".to_string())?;
-                // A server that did not answer this one probe but is already in the list
-                // keeps the row the list has. The XML's copy is however old the official
-                // launcher's file is — name, version, no description, 0 players, 0 ms — and
-                // writing it over a fresh Steam row left a false version warning in the join
-                // plan that no later check repaired (D-239).
-                let mut shown = Vec::with_capacity(new_rows.len());
-                let mut to_store = Vec::with_capacity(new_rows.len());
-                for (row, from_xml) in new_rows {
-                    if from_xml {
-                        if let Some(cached) = c.get(&row.id).map_err(|e| e.to_string())? {
-                            shown.push(cached);
-                            continue;
-                        }
+        type Stored = (Vec<ServerRow>, HashSet<String>);
+        let stored = tauri::async_runtime::spawn_blocking(move || -> Result<Stored, String> {
+            let mut c = c
+                .lock()
+                .map_err(|_| "the cache lock is poisoned".to_string())?;
+            // A server that did not answer this one probe but is already in the list
+            // keeps the row the list has. The XML's copy is however old the official
+            // launcher's file is — name, version, no description, 0 players, 0 ms — and
+            // writing it over a fresh Steam row left a false version warning in the join
+            // plan that no later check repaired (D-239).
+            let mut shown = Vec::with_capacity(new_rows.len());
+            let mut to_store = Vec::with_capacity(new_rows.len());
+            for (row, from_xml) in new_rows {
+                if from_xml {
+                    if let Some(cached) = c.get(&row.id).map_err(|e| e.to_string())? {
+                        shown.push(cached);
+                        continue;
                     }
-                    to_store.push(row.clone());
-                    shown.push(row);
                 }
-                c.upsert(&to_store).map_err(|e| e.to_string())?;
-                // One transaction and one checkpoint for the whole import: per favourite
-                // it measured 111.8 ms for 50 against 6.7 ms this way (D-175).
-                let ids: Vec<String> = shown.iter().map(|r| r.id.clone()).collect();
-                c.favourites_set_many(&ids).map_err(|e| e.to_string())?;
-                Ok(shown)
-            })
-            .await;
-        let shown = match stored {
-            Ok(Ok(rows)) => rows,
+                to_store.push(row.clone());
+                shown.push(row);
+            }
+            c.upsert(&to_store).map_err(|e| e.to_string())?;
+            // One transaction and one checkpoint for the whole import: per favourite
+            // it measured 111.8 ms for 50 against 6.7 ms this way (D-175).
+            let ids: Vec<String> = shown.iter().map(|r| r.id.clone()).collect();
+            c.favourites_set_many(&ids).map_err(|e| e.to_string())?;
+            // The upsert keeps a stored verdict and the probed rows carry none, so
+            // the checks below take a standing "synthetic" from here (D-268).
+            let synthetic = c.synthetic_ids().unwrap_or_default();
+            Ok((shown, synthetic))
+        })
+        .await;
+        let (shown, synthetic) = match stored {
+            Ok(Ok(v)) => v,
             Ok(Err(e)) => return Err(import_failed(n, &e)),
             Err(e) => return Err(import_failed(n, &e.to_string())),
         };
+        for t in &mut targets {
+            t.was_synthetic |= synthetic.contains(&t.id);
+        }
         let _ = app.emit("servers:batch", &shown);
         tauri::async_runtime::spawn(run_verification(
             app.clone(),

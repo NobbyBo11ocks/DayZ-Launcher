@@ -79,7 +79,7 @@ impl Target {
 /// full refresh reaches its verification pass minutes after the populated partition
 /// was listed, and a restart or ordinary churn in between read as "INFO 60 vs PLAYER
 /// 4" — Inflated, and hidden until the next Refresh (D-236).
-const INFO_FRESH_SECS: i64 = 60;
+pub(crate) const INFO_FRESH_SECS: i64 = 60;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -174,6 +174,16 @@ pub fn judge(
                     .iter()
                     .map(|x| x.duration_secs.round() as i64)
                     .collect();
+                // Players who join together land within half a second of each other
+                // (three such groups in one live 114-player list), so in whole seconds a
+                // trio and a duo on a five-player server were two durations; in tenths
+                // they are five. Only a list that repeats itself stays at two (D-268).
+                let distinct_tenths = p
+                    .players
+                    .iter()
+                    .map(|x| (x.duration_secs * 10.0).round() as i64)
+                    .collect::<HashSet<i64>>()
+                    .len();
                 let all_young = p.players.iter().all(|x| x.duration_secs < 60.0);
                 let named = p.players.iter().any(|x| !x.name.is_empty());
                 // "Everyone joined in the last minute" is what an honest server looks
@@ -187,7 +197,7 @@ pub fn judge(
                 // (durations 10.9–11.9 s, 34 more joined within five minutes), so
                 // it needs the list not to be young; a young fabricated list is
                 // still caught by `repetitive` from six entries up (D-233).
-                if (distinct.len() <= 2 && !all_young) || named || (all_young && repetitive) {
+                if (distinct_tenths <= 2 && !all_young) || named || (all_young && repetitive) {
                     return (
                         Verdict::Synthetic,
                         Some(v),
@@ -341,24 +351,31 @@ pub fn carried_over(prev: &[f32], now: &[f32], shift: f32, slack: f32) -> usize 
 }
 
 /// The most of `prev` that any single shift within `window` of `dt` carries into
-/// `now`. Candidate shifts are the differences between each of the first three old
-/// durations and every new one, so a session that left does not hide the shift; at
-/// most 3 × 127 candidates, each scored in one pass (D-233).
+/// `now`. Every pair of an old and a new duration votes for the shift it implies, in
+/// one-second bins, and the five best-supported shifts are scored: the real shift
+/// collects a vote from every session that stayed, wherever it sits in the list.
+/// Candidates used to come from the first three old durations alone, and PLAYER lists
+/// run oldest first, so an honest server whose three longest sessions had left
+/// between checks offered no true candidate and took a strike (D-268).
 pub fn best_carried_over(prev: &[f32], now: &[f32], dt: f32, window: f32, slack: f32) -> usize {
-    let mut best = 0;
-    for &p in prev.iter().take(3) {
+    let w = window.ceil() as i32;
+    let mut votes = vec![0u32; (2 * w + 1) as usize];
+    for &p in prev {
         for &n in now {
-            let shift = n - p;
-            if (shift - dt).abs() > window {
-                continue;
+            let off = n - p - dt;
+            // NaN and infinities fail the test and cast nowhere.
+            if off.abs() <= window {
+                votes[(off.round() as i32 + w) as usize] += 1;
             }
-            let m = carried_over(prev, now, shift, slack);
-            if m > best {
-                best = m;
-                if best == prev.len() {
-                    return best;
-                }
-            }
+        }
+    }
+    let mut bins: Vec<usize> = (0..votes.len()).filter(|&i| votes[i] > 0).collect();
+    bins.sort_unstable_by(|&a, &b| votes[b].cmp(&votes[a]));
+    let mut best = 0;
+    for &i in bins.iter().take(5) {
+        best = best.max(carried_over(prev, now, dt + (i as i32 - w) as f32, slack));
+        if best == prev.len() {
+            break;
         }
     }
     best
@@ -559,6 +576,21 @@ mod tests {
         assert_eq!(best_carried_over(&a, &d, 341.9, 120.0, 3.0), 20);
         let e: Vec<f32> = a.iter().map(|x| x + 126.0).collect();
         assert_eq!(best_carried_over(&a, &e, 120.0, 120.0, 3.0), 20);
+    }
+
+    #[test]
+    fn continuity_survives_the_oldest_sessions_leaving() {
+        // PLAYER lists run oldest first. The three longest sessions left between two
+        // checks twenty minutes apart and three players joined; the other seventeen
+        // carried over. Shifts drawn from the first three entries found none (D-268).
+        let a: Vec<f32> = (0..20).map(|i| 20_000.0 - i as f32 * 613.0).collect();
+        let mut b: Vec<f32> = a[3..].iter().map(|d| d + 1200.0).collect();
+        b.extend([40.0, 25.0, 3.0]);
+        assert_eq!(best_carried_over(&a, &b, 1200.0, 120.0, 3.0), 17);
+        // Five players, the three oldest gone: the two that stayed still line up.
+        let a = [9000.0, 8000.0, 7000.0, 900.0, 300.0];
+        let b = [1500.0, 900.0, 60.0, 30.0, 10.0];
+        assert_eq!(best_carried_over(&a, &b, 600.0, 120.0, 3.0), 2);
     }
 
     #[test]
@@ -819,6 +851,14 @@ mod tests {
             .0,
             Verdict::Verified
         );
+        // A trio and a duo who each joined together, an hour and twenty minutes in:
+        // two durations in whole seconds, five in tenths (D-268).
+        i.players = 5;
+        let squads = players(&[3600.4, 3600.3, 3600.1, 1200.4, 1200.2], "");
+        assert_eq!(judge(Some(&i), Ok(&squads), 0, 0).0, Verdict::Verified);
+        // A list that repeats itself exactly is still what it was.
+        let copies = players(&[3600.0, 3600.0, 3600.0, 1200.0, 1200.0], "");
+        assert_eq!(judge(Some(&i), Ok(&copies), 0, 0).0, Verdict::Synthetic);
     }
 
     #[test]

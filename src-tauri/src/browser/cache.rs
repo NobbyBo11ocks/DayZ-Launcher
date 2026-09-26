@@ -104,6 +104,14 @@ const SELECT_COLUMNS: &str = "id, ip, game_port, query_port, name, map, descript
 static GET_SQL: std::sync::LazyLock<String> =
     std::sync::LazyLock::new(|| format!("SELECT {SELECT_COLUMNS} FROM servers WHERE id = ?1"));
 
+/// A private, loopback or link-local IPv4 server id (`ip:port`): the addresses
+/// `isLanIp` in the servers store accepts, and Steam's LAN discovery returns (D-087).
+fn is_lan_id(id: &str) -> bool {
+    id.rsplit_once(':')
+        .and_then(|(ip, _)| ip.parse::<std::net::Ipv4Addr>().ok())
+        .is_some_and(|ip| ip.is_private() || ip.is_loopback() || ip.is_link_local())
+}
+
 /// The upsert, in two flavours that differ in four columns: a Steam listing writes what
 /// it measured, a DZSA listing keeps what Steam measured when it has only a placeholder
 /// (D-242). `None` in a verification column never erases a stored one, in either.
@@ -707,16 +715,22 @@ impl Cache {
             // * `players` and `max_players` change only when INFO answered (`?7`, the
             //   ping, is set exactly then). The fallback is the count the check started
             //   from, which a later Steam batch may already have replaced.
-            // * Our own count of real players beats Steam's "empty" from when the row
-            //   was listed: a server listed by `noplayers` and filled since read as R0
-            //   the moment we counted it, and was hidden. Only when that listing said 0
+            // * Our own look at the server beats Steam's "empty" from when the row was
+            //   listed: a server listed by `noplayers` and filled since read as R0 the
+            //   moment we counted it, and was hidden. Only when that listing said 0
             //   too — a farm's listing claimed its fabricated number, and keeps R0.
+            //   The first fresh INFO decides, whatever it claims: it also rewrites
+            //   `players`, so a first check that could not count yet (a player still
+            //   loading, a dropped PLAYER, a snapshot host's lagging list) left the
+            //   listing's 0 behind it and R0 on the row for good (D-268).
             // * A ping never measured (0 on a non-LAN row) takes PLAYER's round trip
             //   (`?9`): the automatic pass sends no INFO, so a DZSA row kept its
             //   dash through every pass and fell outside every ping preset (D-247).
             //   With neither round trip (an offline verdict) it stays 0: the CASE gave
             //   NULL there, the NOT NULL column refused it, and the error rolled back
             //   every result in the batch, all of them lost at the next start (D-256).
+            //   A LAN row keeps its 0, as the servers store does; the host gave it the
+            //   round trip, so the two disagreed after a restart (D-268).
             let mut stmt = tx.prepare_cached(
                 "UPDATE servers SET
                    verified_players = CASE WHEN ?4 = 'synthetic' THEN NULL
@@ -727,8 +741,8 @@ impl Cache {
                    players = CASE WHEN ?7 IS NULL THEN players ELSE ?5 END,
                    max_players = CASE WHEN ?7 IS NULL THEN max_players ELSE ?6 END,
                    steam_empty = CASE WHEN steam_empty = 1 AND players = 0 AND ?7 IS NOT NULL
-                                           AND ?4 = 'verified' AND ?2 > 0 THEN NULL
-                                      ELSE steam_empty END,
+                                           AND (?5 > 0 OR (?4 = 'verified' AND ?2 > 0))
+                                      THEN NULL ELSE steam_empty END,
                    ping_ms = COALESCE(?7, NULLIF(ping_ms, 0), ?9, 0),
                    keywords = COALESCE(?8, keywords),
                    last_seen = CASE WHEN ?7 IS NULL THEN last_seen ELSE ?3 END
@@ -744,7 +758,7 @@ impl Cache {
                     v.max_players,
                     v.ping_ms.map(i64::from),
                     v.keywords,
-                    v.player_rtt_ms.map(i64::from),
+                    v.player_rtt_ms.filter(|_| !is_lan_id(&v.id)).map(i64::from),
                 ])?;
             }
         }
@@ -1534,5 +1548,85 @@ mod tests {
             (None, None, Some("synthetic"))
         );
         assert!(c.synthetic_ids().unwrap().contains(&farm.id));
+    }
+
+    /// D-268: the first fresh INFO on a row listed empty decides R0, whether or not
+    /// that check could count; and a LAN row's ping stays its own.
+    #[test]
+    fn a_first_check_that_could_not_count_does_not_leave_r0_behind() {
+        let mut c = Cache::open_in_memory().unwrap();
+        let v = |id: &str, verdict, reported, verified, ping_ms, rtt| Verification {
+            id: id.to_string(),
+            verdict,
+            reported,
+            verified,
+            max_players: 50,
+            ping_ms,
+            player_rtt_ms: rtt,
+            keywords: None,
+            tags: None,
+            verified_at: 1_000,
+            reason: "test".into(),
+        };
+        let mut filling = row(27017, 0);
+        filling.steam_empty = Some(true);
+        let mut farm = row(27018, 60);
+        farm.steam_empty = Some(true);
+        c.upsert(&[filling.clone(), farm.clone()]).unwrap();
+        // INFO 1 while the first player is still loading: PLAYER lists nobody yet.
+        c.apply_verifications(&[
+            v(&filling.id, Verdict::Verified, 1, Some(0), Some(30), None),
+            v(&farm.id, Verdict::Verified, 60, Some(60), Some(30), None),
+        ])
+        .unwrap();
+        let f = c.get(&filling.id).unwrap().unwrap();
+        assert_eq!(
+            (f.players, f.steam_empty),
+            (1, None),
+            "no R0 on a server that filled"
+        );
+        // The next checks count normally.
+        c.apply_verifications(&[v(
+            &filling.id,
+            Verdict::Verified,
+            6,
+            Some(6),
+            Some(30),
+            None,
+        )])
+        .unwrap();
+        let f = c.get(&filling.id).unwrap().unwrap();
+        assert_eq!(
+            (f.players, f.verified_players, f.steam_empty),
+            (6, Some(6), None)
+        );
+        // A farm's listing claimed its number, and still keeps R0.
+        let farm = c.get(&farm.id).unwrap().unwrap();
+        assert_eq!(farm.steam_empty, Some(true));
+        // Without a fresh INFO nothing about R0 changes.
+        let mut quiet = row(27019, 0);
+        quiet.steam_empty = Some(true);
+        c.upsert(std::slice::from_ref(&quiet)).unwrap();
+        c.apply_verifications(&[v(&quiet.id, Verdict::Unverifiable, 0, None, None, None)])
+            .unwrap();
+        assert_eq!(c.get(&quiet.id).unwrap().unwrap().steam_empty, Some(true));
+
+        // A never-measured ping takes PLAYER's round trip, except on a LAN row.
+        let mut wan = row(27020, 5);
+        wan.ping_ms = 0;
+        let mut lan = row(27021, 5);
+        lan.ip = "192.168.1.20".into();
+        lan.id = ServerRow::id_for(&lan.ip, 27021);
+        lan.ping_ms = 0;
+        c.upsert(&[wan.clone(), lan.clone()]).unwrap();
+        c.apply_verifications(&[
+            v(&wan.id, Verdict::Verified, 5, Some(5), None, Some(41)),
+            v(&lan.id, Verdict::Verified, 5, Some(5), None, Some(1)),
+        ])
+        .unwrap();
+        assert_eq!(c.get(&wan.id).unwrap().unwrap().ping_ms, 41);
+        assert_eq!(c.get(&lan.id).unwrap().unwrap().ping_ms, 0);
+        assert!(is_lan_id("10.0.0.5:2303") && is_lan_id("169.254.3.1:27016"));
+        assert!(!is_lan_id("172.111.51.131:27016") && !is_lan_id("51.81.8.81:2402"));
     }
 }

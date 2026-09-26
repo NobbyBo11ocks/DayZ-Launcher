@@ -52,24 +52,34 @@ function shape(d, max) {
   };
 }
 
-/** R11's test: the most of `prev` that one shift within ±120 s of `gap` carries into `now`, to 3 s. */
+/**
+ * R11's test: the most of `prev` that one shift within ±120 s of `gap` carries into `now`, to 3 s.
+ * Every old/new pair votes for its shift in 1-s bins and the five best-supported bins are scored,
+ * as `best_carried_over` does since D-268 (shifts drawn from the three oldest sessions missed the
+ * real one whenever those three had left).
+ */
 function carriedOver(prev, now, gap) {
-  let best = 0;
-  for (const p of prev.slice(0, 3)) {
+  const votes = new Map();
+  for (const p of prev) {
     for (const n of now) {
-      const shift = n - p;
-      if (Math.abs(shift - gap) > 120) continue;
-      const pool = [...now];
-      let matched = 0;
-      for (const d of prev) {
-        const i = pool.findIndex((x) => Math.abs(x - (d + shift)) <= 3);
-        if (i >= 0) {
-          pool.splice(i, 1);
-          matched++;
-        }
-      }
-      best = Math.max(best, matched);
+      const off = n - p - gap;
+      if (Math.abs(off) <= 120) votes.set(Math.round(off), (votes.get(Math.round(off)) ?? 0) + 1);
     }
+  }
+  const bins = [...votes].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  let best = 0;
+  for (const [off] of bins) {
+    const shift = gap + off;
+    const pool = [...now];
+    let matched = 0;
+    for (const d of prev) {
+      const i = pool.findIndex((x) => Math.abs(x - (d + shift)) <= 3);
+      if (i >= 0) {
+        pool.splice(i, 1);
+        matched++;
+      }
+    }
+    best = Math.max(best, matched);
   }
   return best;
 }
