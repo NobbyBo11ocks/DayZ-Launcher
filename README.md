@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/art/banner.png" width="880" alt="DZSA CrayZ Launcher — a fast, honest server browser for DayZ Standalone. Player counts verified against the servers themselves; Workshop mods synced and the game started in one click; no accounts, no API keys, no telemetry.">
+<img src="docs/art/banner.png" width="880" alt="DZSA CrayZ Launcher — a fast, honest server browser for DayZ Standalone">
 
 <br><br>
 
@@ -8,118 +8,66 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/NobbyBo11ocks/DayZ-Launcher/ci.yml?branch=main&label=CI&labelColor=1d2530)](https://github.com/NobbyBo11ocks/DayZ-Launcher/actions/workflows/ci.yml)
 [![Downloads](https://img.shields.io/github/downloads/NobbyBo11ocks/DayZ-Launcher/total?color=2ea44f&labelColor=1d2530)](https://github.com/NobbyBo11ocks/DayZ-Launcher/releases)
 [![Platform](https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-0078d4?labelColor=1d2530)](#install)
-[![Installer](https://img.shields.io/badge/installer-7.5%20MB-8957e5?labelColor=1d2530)](#install)
+[![Installer](https://img.shields.io/badge/installer-7.7%20MB-8957e5?labelColor=1d2530)](#install)
 [![Telemetry](https://img.shields.io/badge/telemetry-none-2ea44f?labelColor=1d2530)](#what-it-talks-to)
 
-### [⬇ Download for Windows](https://github.com/NobbyBo11ocks/DayZ-Launcher/releases/latest)
+<br>
+
+<a href="https://github.com/NobbyBo11ocks/DayZ-Launcher/releases/latest"><img src="https://img.shields.io/badge/%E2%AC%87%20%20Download%20for%20Windows-free%2C%20no%20account-a3e635?style=for-the-badge&labelColor=1d2530" height="42" alt="Download for Windows — free, no account"></a>
+
+<br><br>
+
+**The DayZ server browser that counts the players itself.**<br>
+Fake populations flagged and hidden. Mods synced and the game started in one click. No accounts, no ads, no sponsored servers.
 
 <sub>
 
-[Screens](#a-look-around) · [What it does](#what-it-does) · [How it works](#how-it-works) · [Install](#install) · [Privacy](#what-it-talks-to) · [Build](#build-from-source) · [Docs](docs/00-README.md)
+[Why](#why-it-exists) · [Compared](#how-it-compares) · [Tour](#a-tour) · [Everything it does](#everything-it-does) · [How it works](#how-it-works) · [Install](#install) · [FAQ](#faq) · [Build](#build-from-source)
 
 </sub>
 
 <br>
 
-<img src="docs/screenshots/servers.png" width="900" alt="The server browser: every filter in a column beside the list, country flags, verified player counts, and a details pane with the server's mods and population history">
+<img src="docs/screenshots/servers.png" width="920" alt="The server browser: filters in the left rail, country flags and verified player counts in the list, and the details pane with the server's trust verdict, mods and population history">
 
 </div>
 
 ---
 
-## The problem it solves
+## Why it exists
 
-DayZ's server list is full of servers that say they have forty players and have none. They do it because the list sorts by population, and an empty server nobody can see stays empty. Every launcher shows you that number.
+DayZ's server list sorts by population, so a server that says it has forty players gets seen and one that says it has none does not. Plenty of servers take the shortcut and report players who are not there. **The in-game list, the official launcher and DZSA all show you the number the server reports.**
 
-This one asks the server directly, counts the players itself, and compares the answer with Steam's authenticated session count. A full sweep of this machine's list flagged **6 309 of 13 380 servers** — 47 % — and hid them by default.
-
-That number is also why the automatic refresh asks Steam only for servers that have players: it arrives in about forty seconds and it skips the partitions where almost all of the fakes live. Of the 3 446 populated servers in the current cache, 25 did not verify and 20 of those are flagged and hidden — the difference is the five that refuse player queries while Steam vouches that someone is there. That vouch keeps a row visible only once a real head-count has been taken; until then the details pane says "Player count unconfirmed". Press **Refresh** when you want the empty ones too — a server you can be first on, or your own at an off-hour — and the list will say so when they are missing.
-
-<table>
-<tr><td width="33%" align="center">
-
-### ✓ Verified
-
-Every populated server queried directly with A2S and cross-checked against Steam — and against the previous check. Inflated, fabricated and re-drawn counts are flagged and hidden.
-
-</td><td width="33%" align="center">
-
-### ⚡ Quick
-
-Rust host, plain Svelte 5, a virtualised table and a SQLite cache. First screen under half a second, installer 7.5 MB, a third of it the setup's own artwork.
-
-</td><td width="33%" align="center">
-
-### ⊘ Quiet
-
-No accounts, no API keys, no telemetry. Every destination it contacts is listed below, and the news page can be switched off entirely.
-
-</td></tr>
-</table>
-
-| Installer | Cold start to first frame | Refresh, then verify | Idle CPU | Memory, whole app |
-|:-:|:-:|:-:|:-:|:-:|
-| **7.5 MB** | **0.43 s** | **≈ 35 s + ≈ 25 s** | **0.2 %** of one core | **≈ 306 MB** |
-
-<sub>Installer measured at v0.1.49, 2.71 MB of it the themed setup's artwork (D-258); memory and idle CPU at v0.1.23; cold start at v0.1.19 (D-136). The refresh figure is the list arriving, with verified counts following it: five real passes on 2026-09-23 ran 31.9–36.3 s for 2 273–2 619 servers, then 19.6–41.4 s to verify them. Budgets, method and history in [docs/05 §6](docs/05-architecture-and-optimisation.md).</sub>
-
----
-
-## A look around
+This one opens each populated server's own player list, counts who is actually connected, and checks the answer against Steam and against the previous look. On 25 September 2026 a full refresh listed **36 100 servers, and 30 011 of them — 83 % — claimed players Steam itself said were not there.** They are hidden by default. Untick one box and they are back, each with the reason it failed.
 
 <table>
 <tr>
-<td width="33%" valign="top">
+<td width="25%" align="center" valign="top">
 
-<img src="docs/screenshots/news.jpg" alt="News: the latest DayZ updates with pictures and video previews, shown as updates only, all news, or with the press included">
+### ✅ Real counts
 
-**News** — the latest DayZ posts with pictures and video previews: the updates alone, everything, or the press as well. An unread badge on the rail, and a notification when an update lands. Switch the page off in Settings and nothing is ever fetched.
-
-</td>
-<td width="33%" valign="top">
-
-<img src="docs/screenshots/favourites.png" alt="Favourites: the starred servers with their verified counts, and an import from the official launcher">
-
-**Favourites** — the servers you starred, with the same verified counts, ping and time of day as the browser, and a one-click import of the official launcher's favourites.
+Players counted on the server's own list, cross-checked with Steam, and compared with the last check. Fakes are flagged and hidden.
 
 </td>
-<td width="33%" valign="top">
+<td width="25%" align="center" valign="top">
 
-<img src="docs/screenshots/friends.png" alt="Friends: Steam friends with their status and the server each one is on, with a Join button">
+### ⚡ One click in
 
-**Friends** — who is online, who is in DayZ and on which server, straight from Steam, with Join beside anyone you can follow in.
-
-</td>
-</tr>
-<tr>
-<td width="33%" valign="top">
-
-<img src="docs/screenshots/lan.png" alt="LAN: DayZ servers on your own network, found through Steam">
-
-**LAN** — servers on your own network, found through Steam: one on this PC or behind the same router. For a known address elsewhere, Direct connect is on the Servers page.
+Missing mods subscribed, downloaded and linked, then DayZ starts with the server's own load order.
 
 </td>
-<td width="33%" valign="top">
+<td width="25%" align="center" valign="top">
 
-<img src="docs/screenshots/mods.png" alt="Mods: the installed Workshop mods with their size, update date, junction and the number of servers running each">
+### 🪶 Light
 
-**Mods** — every Workshop mod you have, its size, when it last changed, its `!Workshop` junction and how many servers run it, with Folder and Unsubscribe beside each. Junctions are shared with the official launcher and never deleted on their own; the dangling ones go with one confirmed click.
-
-</td>
-<td width="33%" valign="top">
-
-<img src="docs/screenshots/settings.png" alt="Settings: appearance, server browser, news, Steam, launch options, launch profiles and updates">
-
-**Settings** — a dark and a light theme, twelve accents, what the browser hides, how DayZ is started, saved launch profiles, and the Steam session with its idle release.
+A 7.7 MB installer, the first screen in under half a second, and a list that handles 70 000 cached servers.
 
 </td>
-</tr>
-<tr>
-<td width="33%" valign="top">
+<td width="25%" align="center" valign="top">
 
-<img src="docs/screenshots/logs.png" alt="Logs: what the launcher has been doing, with per-area mute chips and a recording switch">
+### 🔒 Yours
 
-**Logs** — what the launcher has been doing, both halves of it, with the file one click away, a chip per area to mute and a switch to stop recording altogether. Nothing leaves the machine.
+No account, no API key, no ads, no sponsored placements and no telemetry. Every address it talks to is listed below.
 
 </td>
 </tr>
@@ -127,52 +75,182 @@ No accounts, no API keys, no telemetry. Every destination it contacts is listed 
 
 ---
 
-## What it does
+## How it compares
 
 <table>
-<tr><th align="left" width="50%">Browse</th><th align="left" width="50%">Join</th></tr>
+<tr><th align="left" width="24%"></th><th align="left" width="40%">DZSA CrayZ Launcher</th><th align="left" width="36%">DZSA Launcher</th></tr>
+<tr><td><b>Where the list comes from</b></td><td>✅ Steam's own server list: every DayZ server that reports to Steam, nothing to register</td><td>DZSA's own backend: servers registered with it</td></tr>
+<tr><td><b>The player count you see</b></td><td>✅ Players counted on the server's own list, cross-checked with Steam</td><td>The number the server advertises</td></tr>
+<tr><td><b>Fake populations</b></td><td>✅ Flagged, explained in plain words, hidden by default</td><td>—</td></tr>
+<tr><td><b>Sponsored listings</b></td><td>✅ None: the order is players who are really there</td><td>Sponsored listings, a month at a time</td></tr>
+<tr><td><b>Mods for a server</b></td><td>✅ Subscribed, downloaded and linked in one click, with the rate and the time left</td><td>✅ Subscribed through the Workshop, missing ones shown</td></tr>
+<tr><td><b>Mod load order</b></td><td>✅ The server's own order</td><td>—</td></tr>
+<tr><td><b>Country flags</b></td><td>✅ From an offline table, no lookups</td><td>❌</td></tr>
+<tr><td><b>Population history</b></td><td>✅ 72 hours per server</td><td>❌</td></tr>
+<tr><td><b>Friends</b></td><td>✅ Who is on which server, with Join beside them</td><td>—</td></tr>
+<tr><td><b>Full server</b></td><td>✅ Waits for a free slot and joins the moment one opens</td><td>—</td></tr>
+<tr><td><b>Performance options</b></td><td>✅ <code>-cpuCount</code>, <code>-maxMem</code> and <code>-maxVRAM</code> sized to your PC</td><td>—</td></tr>
+<tr><td><b>Look</b></td><td>✅ Dark and light themes, twelve accent colours</td><td>❌ One dark table</td></tr>
+<tr><td><b>Updates</b></td><td>✅ Automatic, and signed so a tampered installer is refused</td><td>—</td></tr>
+</table>
+
+<sub>DZSA Launcher as checked on its portable build 0.0.6.3 and on dayzsalauncher.com (2026-09-21 and 2026-09-26); — means we found no such feature there, and corrections are welcome. Both launchers use the same <code>!Workshop</code> folder, so they can live side by side. So can Bohemia's official launcher: this one follows its mod order and imports its favourites in one click.</sub>
+
+---
+
+## A tour
+
+<table>
+<tr>
+<td width="60%" valign="top"><img src="docs/screenshots/fakes.png" alt="Searching XOMA: the same server name dozens of times, every copy claiming 100 to 127 players and flagged, and the details pane explaining that Steam reports no authenticated players and listing 199 other servers at the same address"></td>
+<td width="40%" valign="top">
+
+### 🕵️ Spot the farms
+
+Untick **Hide inflated**, search for a name, and the list tells on it: the same server dozens of times, every copy claiming 100–127 players, every one marked ⚠. Open one and the pane says why in plain words: **Steam reports 0 authenticated players; the server claims 116**, next to **199 other servers at the same address**.
+
+Every verdict explains itself:
+**Verified head-count** · **Inflated player count** · **Fabricated player list** · **Refuses player queries** · **Not answering** · **Name taken from another server** · **Implausible player count** · **Empty server**
+
+</td>
+</tr>
+<tr>
+<td width="40%" valign="top">
+
+### 🎯 From the list to the game in one click
+
+Join shows the plan first: which of the server's mods you have, what is missing and how big it is. One button subscribes, downloads and links them all, with the rate and the time left, then starts DayZ with the server's own load order.
+
+- **Server full?** Wait here and join the moment a slot opens.
+- **A password** when the server has one, and **your saved launch profiles**, in the same dialog.
+- **Performance sized to your PC:** `-cpuCount`, `-maxMem` and `-maxVRAM` from your own threads, memory and graphics card, unless you set them yourself.
+
+</td>
+<td width="60%" valign="top"><img src="docs/screenshots/join.png" alt="The join dialog: 19 of 20 mods to download, 3.77 GB, each with its size, the wait-for-a-free-slot option, and Download and join"></td>
+</tr>
+<tr>
+<td width="60%" valign="top"><img src="docs/screenshots/servers-light.png" alt="The server browser in the light theme"></td>
+<td width="40%" valign="top">
+
+### 🎨 Dark or light, your colour
+
+A dark and a light theme and twelve accent colours. Every filter lives in the left rail, all in view at once: perspective, playstyle, hive, map, country, ping, mods, queue, password, daytime, version and friends. The lower half — hide inflated, hive, map, country, ping and mods — sits at the bottom of the rail.
+
+Maps go by the names people use: *Livonia* finds `enoch`, *Frostline* finds `sakhal`.
+
+</td>
+</tr>
+<tr>
+<td width="40%" valign="top">
+
+### 👥 Friends and favourites
+
+Who is online, who is in DayZ and on which server, straight from Steam, with **Join** beside anyone you can follow in. Friend markers show on the server rows too, with a Friends filter.
+
+Star any server and it lands in **Favourites** with the same verified counts. Your official-launcher favourites import in one click.
+
+</td>
+<td width="60%" valign="top"><img src="docs/screenshots/favourites.png" alt="Favourites: six starred servers with their verified counts, ping and time of day"></td>
+</tr>
+</table>
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+<img src="docs/screenshots/friends.png" alt="Friends: Steam friends with their status and server (names blurred)">
+
+**Friends** — status and server for everyone online, straight from Steam.
+
+</td>
+<td width="50%" valign="top">
+
+<img src="docs/screenshots/mods.png" alt="Mods: installed Workshop mods with size, update date, junction and how many servers run each">
+
+**Mods** — size, last update, `!Workshop` junction and how many servers run each one, with Folder and Unsubscribe beside it.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+<img src="docs/screenshots/news.jpg" alt="News: the latest DayZ updates with pictures and video previews">
+
+**News** — the latest DayZ posts with pictures and video previews, an unread badge, and a notification when an update lands. Off with one switch, and then nothing is fetched.
+
+</td>
+<td width="50%" valign="top">
+
+<img src="docs/screenshots/settings.png" alt="Settings: appearance, what the launcher shows, Steam, how DayZ starts, saved profiles and updates">
+
+**Settings** — themes and accents, what the browser hides, how DayZ starts, saved launch profiles, the Steam session with its idle release, and updates.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+<img src="docs/screenshots/logs.png" alt="Logs: what the launcher has been doing, with per-area chips and a recording switch">
+
+**Logs** — what the launcher has been doing, with the file one click away, a chip per area to mute and a switch to stop recording. Nothing leaves your PC.
+
+</td>
+<td width="50%" valign="top">
+
+<img src="docs/screenshots/details.png" alt="Close-up: verified counts in the list and the details pane with its verdict, queue, time of day and hive">
+
+**Details** — the verdict, players and queue, ping, perspective, time of day and its speed, hive, description, population history, every mod with an installed tick, and the other servers at the same address.
+
+</td>
+</tr>
+</table>
+
+---
+
+## Everything it does
+
+<table>
+<tr><th align="left" width="50%">🔎 Browse</th><th align="left" width="50%">🎮 Join</th></tr>
 <tr valign="top"><td>
 
-- Steam's own matchmaking list — no API key, the same list the in-game browser sees
-- **Official or community hive**, perspective, map, country, mod, queue, password, daytime, version, ping and friends — every filter in a column beside the list, all in view at once
-- **PVE, PVP or RP** — read out of what the server calls itself, and labelled as the claim it is (48 % of the list says PVE)
-- Search matches the description as well as the name, so "trader" finds servers whose name never says it
-- **Maps by the name people use** — "Livonia" finds `enoch`, "Frostline" finds `sakhal`
+- Steam's own server list: no API key, the same list the in-game browser sees
+- **Player counts checked** against each server's own list, Steam and the previous check; fakes hidden by default, each with its reason
+- Every filter in one rail: perspective, **PVE / PVP / RP**, official or community hive, map, country, ping, mods, a specific mod, queue, password, daytime, version, friends
+- Search matches descriptions too, so *trader* finds servers whose name never says it
+- **Maps by the names people use**
 - Country flags from an offline table, no lookups
-- A details pane with the server's mods and installed ticks, 72 h population history, and the other servers at the same address
-- Find every server running a given mod
-- **Other servers at this address** in the details pane — half the list has a sibling, and 478 of those groups span more than one map
+- A details pane with mods and installed ticks, population history, and **the other servers at the same address**
 - Favourites, a clearable Recent list, and import of the official launcher's favourites
-- LAN discovery
+- LAN discovery, and direct connect by address
 
 </td><td>
 
-- Missing mods subscribed, downloaded and linked automatically, with **the rate and how long is left** — the median server needs 26 mods and the worst in this cache needs 139
+- Missing mods subscribed, downloaded and linked, with **the rate and how long is left**
+- **The server's own mod load order**
 - **Wait for a free slot** on a full server, then start the moment one opens
-- Launch profiles: saved sets of launch options, picked in the join dialog
-- **DayZ's performance limits sized to your PC** — `-cpuCount`, `-maxMem` and `-maxVRAM` from its own threads, memory and graphics card, unless you set them yourself
-- Direct connect by address; the game port is resolved to the query port
-- Workshop updates read from the **running Steam client**, not from a file it refreshes when it feels like it
+- Launch profiles: saved sets of options, picked in the join dialog
+- **DayZ's performance limits sized to your PC**, unless you set your own
+- Workshop updates read from the running Steam client
 - Joins that would be rejected are stopped before the game starts
 
 </td></tr>
-<tr><th align="left">Stay in touch</th><th align="left">Stay in control</th></tr>
+<tr><th align="left">👥 Stay in touch</th><th align="left">🛡️ Stay in control</th></tr>
 <tr valign="top"><td>
 
-- Home page with the latest DayZ updates, pictures and video previews
+- The latest DayZ updates with pictures and video previews
 - An unread badge, and a notification when an update lands
-- Friends' servers from Steam's game info and rich presence
+- Friends' servers from Steam, with Join beside them
 - Friend markers on server rows, and a Friends filter
 
 </td><td>
 
 - Signed automatic updates
-- Per-user installer; the launcher runs at the same elevation as Steam
-- **Steam idle release**, so it does not count as playtime while it sits open
+- A per-user installer; the launcher runs at the same elevation as Steam
+- **Steam idle release**, so an open launcher does not count as playtime
 - A Logs page with per-area mutes and an off switch
-- Confirmed clean-up of dangling `!Workshop` junctions
-- A slim frameless window that remembers where it was, a dark and a light theme, twelve accent colours
-- DZSA list fallback when Steam is unavailable
+- Confirmed clean-up of dangling `!Workshop` junctions, and never one you did not confirm
+- A slim window that remembers where it was
+- DZSA's public list as a fallback when Steam is unavailable
 
 </td></tr>
 </table>
@@ -183,8 +261,8 @@ No accounts, no API keys, no telemetry. Every destination it contacts is listed 
 
 ```mermaid
 flowchart LR
-  Steam[("Steam client")] -- matchmaking list --> Cache[("SQLite cache")]
-  Servers["Game servers"] -- "A2S info · rules · players" --> Verify{"Trust rules<br/>R0–R12"}
+  Steam[("Steam client")] -- server list --> Cache[("Local cache")]
+  Servers["Game servers"] -- "info · rules · players" --> Verify{"Trust rules"}
   Verify -- verified --> Cache
   Verify -- inflated / fake --> Hidden["Hidden by default"]
   Cache --> UI["Server browser"]
@@ -195,13 +273,21 @@ flowchart LR
   style BE fill:#1d2530,stroke:#a3e635,color:#e6e9ee
 ```
 
-1. **List.** The Steamworks matchmaking API supplies the server list with pings, the same list the in-game browser sees. It is cached in SQLite so the previous list appears instantly and is refreshed in the background.
-2. **Verify.** Populated servers are queried directly with A2S (INFO, RULES, PLAYER). The advertised count is checked against the player list, against Steam, and against the previous check: real sessions carry over between checks advanced by the gap, while a fabricated list is re-drawn on every query. A claim above the engine's 127-slot ceiling and an exact copy of a verified server's name on another address count against a row as well. Servers that fail the trust rules are marked inflated or fake. The rules, and what each one caught, are in [docs/11](docs/11-fake-population-detection.md).
-3. **Join.** The join plan compares the server's mod list with your Workshop items, subscribes and downloads what is missing, creates `!Workshop\@<mod>` junctions matched by Workshop ID, and starts `DayZ_BE.exe` with the official argument form, plus the three performance limits DayZ still reads, sized to the PC.
-4. **Friends and news.** Friends' servers come from Steam's game info and rich presence. News comes from Steam's news feed for DayZ; pictures are shrunk on the host — 360 px for the cards, 640 for the featured one — so the window stays light.
+1. **List.** Steam supplies the server list with pings, the same list the in-game browser sees. It is cached locally, so the last list appears instantly while the new one comes in.
+2. **Check.** Every populated server is asked directly for its info, rules and player list. The advertised count is checked against the players actually listed, against Steam's own count, and against the previous check: real sessions carry over between checks advanced by the time that passed, while a fabricated list is drawn afresh every time. A claim above 127 players — more than any DayZ server has been counted holding — and an exact copy of a verified server's name on another address count against a row too. The rules, and what each one caught, are in [docs/11](docs/11-fake-population-detection.md).
+3. **Join.** The join plan compares the server's mods with yours, subscribes to and downloads what is missing, links each one into `!Workshop` by its Workshop ID, and starts `DayZ_BE.exe` the way the official launcher does, in the server's own load order, with the performance limits sized to your PC.
+4. **Friends and news.** Friends' servers come from Steam. News comes from Steam's feed for DayZ, with pictures shrunk on your PC so the window stays light.
 
 > [!NOTE]
-> Every protocol and launch fact is tied to a primary source in [docs/08](docs/08-sources.md), and every design decision to [docs/09](docs/09-decisions-log.md) — including the ones that turned out to be wrong and what replaced them.
+> Every protocol and launch fact is tied to a primary source in [docs/08](docs/08-sources.md), and every design decision to [docs/09](docs/09-decisions-log.md), including the ones that turned out to be wrong and what replaced them.
+
+### The numbers
+
+| Installer | Cold start to first frame | Refresh, then verify | Idle CPU | Memory, whole app |
+|:-:|:-:|:-:|:-:|:-:|
+| **7.7 MB** | **0.43 s** | **≈ 30 s + ≈ 26 s** | **0.2 %** of one core | **≈ 306 MB** |
+
+<sub>Installer measured at v0.1.59. Refresh and verify from the app's own log on 2026-09-26: 2 366 servers listed in 30.0 s, then 2 193 checked in 26.2 s. Memory and idle CPU at v0.1.23; cold start at v0.1.19. Budgets, method and history in [docs/05 §6](docs/05-architecture-and-optimisation.md).</sub>
 
 ---
 
@@ -233,6 +319,52 @@ No accounts, no telemetry, no third-party analytics. In full:
 | **Microsoft** | The WebView2 runtime, if the installer finds none | Installing, once |
 
 Your cache, favourites, history and settings stay in your own app-data folder. The Logs page shows exactly what the launcher has been doing, and you can copy it, mute it by area, or switch it off. One thing to know before pasting a report somewhere public: the join dialog's command line names your Steam profile and your library paths (the password is masked).
+
+---
+
+## FAQ
+
+<details>
+<summary><b>Is it safe with BattlEye?</b></summary>
+
+It starts DayZ the way Bohemia's own launcher does, through `DayZ_BE.exe` with the same argument form, and never modifies the game's own files or its memory. The mods it links are the Workshop items Steam downloaded, in the `!Workshop` folder the official launcher uses.
+
+</details>
+
+<details>
+<summary><b>Can I keep DZSA Launcher or the official launcher installed?</b></summary>
+
+Yes. All three use the same `!Workshop` junctions. This one never deletes a junction on its own; the one clean-up it offers removes only junctions whose mod folder is gone, and only after you confirm it.
+
+</details>
+
+<details>
+<summary><b>Why are so many servers hidden?</b></summary>
+
+Their player count cannot be trusted: Steam sees nobody on them, their player list does not match what they advertise, or the list is fabricated. Untick **Hide inflated** to see them all; the details pane says what each one failed.
+
+</details>
+
+<details>
+<summary><b>Why does Windows warn me when I install it?</b></summary>
+
+The installer is not code-signed yet, so SmartScreen shows "Windows protected your PC". Click **More info**, then **Run anyway**. Updates are signed with the launcher's own key and checked before they install, so an altered installer is refused.
+
+</details>
+
+<details>
+<summary><b>Does it cost anything?</b></summary>
+
+No. There are no ads, no accounts, no paid or sponsored placements in the list, and nothing is uploaded about you.
+
+</details>
+
+<details>
+<summary><b>Does it need Steam running?</b></summary>
+
+Yes: the server list, the Workshop downloads and your friends come from the Steam client. When Steam is not available, DZSA's public list can be loaded instead, on request.
+
+</details>
 
 ---
 
