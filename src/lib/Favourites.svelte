@@ -12,6 +12,10 @@
   const box = searchBox();
   let typed = $state(servers.filters.search);
   $effect(() => box.dispose);
+  // The Mods column reads the stored mod lists, which start-up no longer loads (D-284).
+  $effect(() => {
+    if (!servers.modsIndexLoaded) void servers.loadModsIndex();
+  });
   // A reset from elsewhere has to show up in the field and cancel a pending write
   // (D-159). Only the store is tracked: with `typed` tracked too, every keystroke
   // blanked the field while the write still went through (D-230).

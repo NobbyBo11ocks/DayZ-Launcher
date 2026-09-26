@@ -29,7 +29,7 @@ One window, no tray icon by default, no background service. Minimising does not 
 
 ## 3. Data flow
 
-1. Startup: the browser calls `servers_cached` → UI renders in < 100 ms. (There is no `servers:snapshot` event; the emitted names are `servers:batch`, `servers:done`, `servers:pruned`, `servers:verified`, `servers:verify-done`, `servers:mods-start`, `servers:mods`, `servers:mods-done`, `mods:progress`, `mods:done`, `steam:status` and `launch:*`.)
+1. Startup: the browser calls `servers_cached` → UI renders in < 100 ms. The rows come in columns since D-284: the field names once (`keys`, `tagKeys`) and one array per row, which `decodeCachedRows` turns back into the objects every event carries. (There is no `servers:snapshot` event; the emitted names are `servers:batch`, `servers:dzsa-batch`, `servers:done`, `servers:pruned`, `servers:verified`, `servers:verify-done`, `servers:mods-start`, `servers:mods`, `servers:mods-done`, `mods:progress`, `mods:done`, `steam:status` and `launch:*`.)
 2. Steam thread: `internet_server_list(221100)` streams `GameServerItem`s → batch every 100 ms → `servers:batch` event.
 3. A2S worker: INFO for every listed server (ping + live players/keywords) with concurrency 128, 1 s timeout, one retry, 400 datagrams/s; the automatic pass sends PLAYER only, 1 retry; results coalesced to the UI every 100 ms.
 4. RULES on demand: selected row, favourites, filters that need mods, join.

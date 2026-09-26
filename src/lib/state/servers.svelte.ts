@@ -10,7 +10,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { uiPrefs } from "./uiprefs.svelte";
 import { describe, logWarn } from "../log";
-import { type CachedServers, type Favourite, type FriendInfo, type HistoryEntry, type ImportResult, isInflated, isUntrusted, type ModScanSummary, type ModsIndex, queueOf, type RefreshDone, type ServerMods, type ServerRow, type SteamStatus, trustedPlayers, type Verification, type VerifySummary } from "../types";
+import { type CachedServers, decodeCachedRows, type Favourite, type FriendInfo, type HistoryEntry, type ImportResult, isInflated, isUntrusted, type ModScanSummary, type ModsIndex, queueOf, type RefreshDone, type ServerMods, type ServerRow, type SteamStatus, trustedPlayers, type Verification, type VerifySummary } from "../types";
 
 export type SortKey = "name" | "map" | "mods" | "players" | "ping" | "time" | "version";
 export type Perspective = "any" | "1pp" | "3pp";
@@ -84,7 +84,15 @@ const RE_PVP = /\bpvp\b/;
 const RE_RP = /\b(?:rp|roleplay|role-play)\b/;
 
 /** Exact-name identity for the clone rule: case and whitespace folded, nothing else. */
-const cloneKey = (name: string): string => name.trim().toLowerCase().replace(/\s+/g, " ");
+const EMPTY_IDS: ReadonlySet<string> = new Set();
+
+const cloneKey = (name: string): string => {
+  const t = name.trim().toLowerCase();
+  // The replace only when it can change something (a run of whitespace, or any that is
+  // not a plain space): it was half the key's cost, and most names have neither. Same
+  // keys either way (D-284).
+  return /\s{2}|[^\S ]/.test(t) ? t.replace(/\s+/g, " ") : t;
+};
 
 function styleOf(text: string): number {
   return (RE_PVE.test(text) ? STYLE_PVE : 0) | (RE_PVP.test(text) ? STYLE_PVP : 0) | (RE_RP.test(text) ? STYLE_RP : 0);
@@ -206,14 +214,64 @@ class ServersStore {
    * into the ranks (D-181).
    */
   #nameRank = new Map<string, number>();
+  /** Every row in that order, as the two things the order reads. */
+  #nameOrder: { id: string; name: string }[] = [];
+  /** A rename or a removal: the whole order is rebuilt. */
   #namesDirty = true;
+  /** New rows since the last ranking: placed into the order, not re-sorted with it. A
+   *  full collator sort on every flush that brought one new id cost 90 ms at 40 000 rows
+   *  and 176 ms at 71 000, and during a refresh nearly every flush brings one; a binary
+   *  search per new row and a rank between its neighbours give the same order in well
+   *  under a millisecond (D-284). */
+  #namesAdded = new Set<string>();
   #rankByName(): Map<string, number> {
+    const cmp = (a: { id: string; name: string }, b: { id: string; name: string }) =>
+      COLLATOR.compare(a.name, b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    if (!this.#namesDirty && this.#namesAdded.size > 0) {
+      const order = this.#nameOrder;
+      const rank = this.#nameRank;
+      for (const id of this.#namesAdded) {
+        const r = this.rows.get(id);
+        if (!r || rank.has(id)) continue;
+        const e = { id, name: r.name };
+        let lo = 0;
+        let hi = order.length;
+        while (lo < hi) {
+          const mid = (lo + hi) >>> 1;
+          if (cmp(order[mid]!, e) < 0) lo = mid + 1;
+          else hi = mid;
+        }
+        // A whole step past either end, halfway between neighbours inside: halving
+        // toward a fixed end would run out of precision after ~50 inserts there.
+        const at =
+          order.length === 0
+            ? 0
+            : lo === 0
+              ? rank.get(order[0]!.id)! - 1
+              : lo === order.length
+                ? rank.get(order[lo - 1]!.id)! + 1
+                : (rank.get(order[lo - 1]!.id)! + rank.get(order[lo]!.id)!) / 2;
+        const before = lo > 0 ? rank.get(order[lo - 1]!.id)! : -Infinity;
+        const after = lo < order.length ? rank.get(order[lo]!.id)! : Infinity;
+        // Halved often enough in one spot, the gap runs out of float precision: the
+        // whole order is rebuilt instead.
+        if (!(at > before && at < after)) {
+          this.#namesDirty = true;
+          break;
+        }
+        order.splice(lo, 0, e);
+        rank.set(id, at);
+      }
+      this.#namesAdded.clear();
+    }
     if (!this.#namesDirty) return this.#nameRank;
-    const sorted = [...this.rows.values()].sort((a, b) => COLLATOR.compare(a.name, b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const order = [...this.rows.values()].map((r) => ({ id: r.id, name: r.name })).sort(cmp);
     const rank = new Map<string, number>();
-    for (let i = 0; i < sorted.length; i++) rank.set(sorted[i]!.id, i);
+    for (let i = 0; i < order.length; i++) rank.set(order[i]!.id, i);
+    this.#nameOrder = order;
     this.#nameRank = rank;
     this.#namesDirty = false;
+    this.#namesAdded.clear();
     return rank;
   }
   /** Call after any batch of writes to `rows`. */
@@ -272,19 +330,44 @@ class ServersStore {
     this.#cloneKeys.set(r.id, { n: r.name, k });
     return k;
   }
+  /** The owners the last pass used, and the rows written since it. A row's flag reads
+   *  only its own name, address and verdict against the owners, so when the owners are
+   *  the same only the rows a flush wrote can change: every row re-read on every flush
+   *  was 5–6 ms at 40 000 rows and 12–13 ms at 71 000, on the News page too (D-284). */
+  #cloneOwners = new Map<string, string>();
+  #cloneTouched = new Set<string>();
   #recomputeClones() {
     const owners = new Map<string, string>();
     for (const r of this.rows.values()) {
       if (r.verdict === "verified" && (r.verifiedPlayers ?? 0) >= 5) owners.set(this.#cloneKeyOf(r), r.ip);
     }
-    for (const r of this.rows.values()) {
+    let same = owners.size === this.#cloneOwners.size;
+    if (same) {
+      for (const [k, ip] of owners) {
+        if (this.#cloneOwners.get(k) !== ip) {
+          same = false;
+          break;
+        }
+      }
+    }
+    this.#cloneOwners = owners;
+    const check = (r: ServerRow) => {
       const owner = owners.size ? owners.get(this.#cloneKeyOf(r)) : undefined;
       const clone = owner !== undefined && owner !== r.ip && r.verdict !== "verified";
       // A new object when the flag flips, never a write into the old one: the grid's
       // keyed rows and the details pane compare by identity, so an in-place flag kept
       // the trusted look until something else replaced the row (D-236).
       if (clone !== (r.clone === true)) this.rows.set(r.id, { ...r, clone });
+    };
+    if (same) {
+      for (const id of this.#cloneTouched) {
+        const r = this.rows.get(id);
+        if (r) check(r);
+      }
+    } else {
+      for (const r of this.rows.values()) check(r);
     }
+    this.#cloneTouched.clear();
   }
   /** Reads the version so a derived or template re-runs when the map changes. */
   get rowsTick(): number {
@@ -352,6 +435,11 @@ class ServersStore {
   joiningId = $state<string | null>(null);
   /** Mod ids per scanned server and the mod catalogue with server counts (D-080). */
   modsByServer = new SvelteMap<string, number[]>();
+  /** Each scanned server's mod count, in a plain map beside the reactive one, for the
+   *  Mods sort: a signal read per row was a third of that sort, 7–21 ms (D-284). The
+   *  version is what makes the list re-sort when a count changes. */
+  #modCounts = new Map<string, number>();
+  #modsVersion = $state(0);
   modCatalog = new SvelteMap<number, { name: string; servers: number }>();
   /** Servers with no mod list whose last read failed; a scan waits before asking them
    *  again (D-244), so they are not "not scanned yet" (D-276). */
@@ -422,8 +510,20 @@ class ServersStore {
   #put(r: ServerRow) {
     const prev = this.rows.get(r.id);
     if (prev) this.#count(prev, -1);
+    else {
+      let ids = this.#byIp.get(r.ip);
+      if (!ids) this.#byIp.set(r.ip, (ids = new Set()));
+      ids.add(r.id);
+    }
     this.#count(r, 1);
     this.rows.set(r.id, r);
+    this.#cloneTouched.add(r.id);
+  }
+  /** Ids by address, for the details pane's "Other servers at this address", which
+   *  walked every row on every flush while a row was selected (D-284). */
+  #byIp = new Map<string, Set<string>>();
+  idsAt(ip: string): ReadonlySet<string> {
+    return this.#byIp.get(ip) ?? EMPTY_IDS;
   }
 
   /**
@@ -556,23 +656,36 @@ class ServersStore {
    *  and `setSort` into the table while keeping a hard-coded busiest-first order, so
    *  clicking a header moved the arrow, reordered nothing, and silently changed the
    *  Servers page behind your back (D-209). */
+  /** A map's display label, lower-cased, once per distinct raw map name (D-284). */
+  #mapLabelLower = new Map<string, string>();
+  #labelOf(map: string): string {
+    let v = this.#mapLabelLower.get(map);
+    if (v === undefined) {
+      v = mapLabel(map).toLowerCase();
+      this.#mapLabelLower.set(map, v);
+    }
+    return v;
+  }
+
   #sortInPlace(out: ServerRow[]) {
     const { key, dir } = this.sort;
     const n = out.length;
     if (n < 2) return;
-    // Ping is quantised to 20 ms steps and ties break on the id so that the
-    // jitter from re-verification never reorders rows (D-060: reorders exposed
-    // fresh rows to verification in a loop that grew CPU and memory).
+    // Ping is quantised to 20 ms steps and ties break on the row's stable position
+    // (the id until D-284) so that the jitter from re-verification never reorders rows
+    // (D-060: reorders exposed fresh rows to verification in a loop that grew CPU and
+    // memory).
     const pingBucket = (r: ServerRow) => Math.round(r.pingMs / 20);
-    // Mod counts once per sort rather than once per comparison (D-152): the map is
-    // reactive, so a lookup inside the comparator was ~n log n signal reads.
-    const modCounts =
-      key === "mods" ? new Map(out.map((r) => [r.id, this.modsByServer.get(r.id)?.length ?? -1])) : null;
+    // Mod counts from the plain copy, not the reactive map (D-152, D-284); the version
+    // read is what re-sorts the list when a count changes.
+    if (key === "mods") void this.#modsVersion;
+    const modCounts = key === "mods" ? this.#modCounts : null;
     const nameRank = key === "name" ? this.#rankByName() : null;
     // Same argument as D-181’s name ranks, and cheaper still because there are only
     // ~100 distinct map names across the whole list: one collator pass over the
-    // distinct values turns every comparison into integer subtraction (D-193).
-    const mapRank = key === "map" ? rankDistinct(out, (r) => mapLabel(r.map).toLowerCase()) : null;
+    // distinct values turns every comparison into integer subtraction (D-193). The
+    // label is looked up once per distinct map, not twice per row (D-284).
+    const mapRank = key === "map" ? rankDistinct(out, (r) => this.#labelOf(r.map)) : null;
 
     // Decorate, sort indices, permute. D-181 and D-193 precomputed the ranks but left
     // the *lookup* inside the comparator, so every one of ~346 000 comparisons at
@@ -594,7 +707,7 @@ class ServersStore {
           k1[i] = nameRank!.get(r.id) ?? 0;
           break;
         case "map":
-          k1[i] = mapRank!.get(mapLabel(r.map).toLowerCase()) ?? 0;
+          k1[i] = mapRank!.get(this.#labelOf(r.map)) ?? 0;
           k2[i] = -trustedPlayers(r);
           break;
         case "mods":
@@ -620,22 +733,72 @@ class ServersStore {
           break;
       }
     }
-    const idx = new Uint32Array(n);
-    for (let i = 0; i < n; i++) idx[i] = i;
     // Unscanned servers (-1) go below every scanned one whichever way the column
     // sorts, as D-146 says, and so do unmeasured pings (D-242); multiplied by `dir` like the rest, an ascending sort put
     // every one of them first (D-240).
     const unscannedLast = key === "mods" || key === "ping";
+
+    // One number per row and the engine's own numeric sort (D-284): the comparator
+    // below cost 12 ms at 40 000 rows with the default filters and 47 ms at 71 000 with
+    // every row listed, on every flush of a refresh; packed, 4 and 9 ms. Each level
+    // becomes an integer field of a mixed-radix key — the unscanned flag on top, then
+    // `k1`, `k2`, and the row's position in `out` — flipped for a descending sort just
+    // as `dir * cmp` flipped the comparator. The position replaces the id as the last
+    // tie-break: `out` follows the store's insertion order, which a verification never
+    // changes, so D-060's promise holds, and nothing has to keep ids ranked. Name ranks
+    // are fractional since D-284 and never tie, so that key keeps the comparator, as
+    // does any key whose values are not integers or would not fit in 2^53.
+    if (key !== "name") {
+      let min1 = Infinity;
+      let max1 = -Infinity;
+      let min2 = Infinity;
+      let max2 = -Infinity;
+      let ints = true;
+      for (let i = 0; i < n; i++) {
+        const a = k1[i]!;
+        const b = k2[i]!;
+        if (!Number.isInteger(a) || !Number.isInteger(b)) {
+          ints = false;
+          break;
+        }
+        if (a < min1) min1 = a;
+        if (a > max1) max1 = a;
+        if (b < min2) min2 = b;
+        if (b > max2) max2 = b;
+      }
+      const s1 = max1 - min1 + 1;
+      const s2 = max2 - min2 + 1;
+      if (ints && (unscannedLast ? 2 : 1) * s1 * s2 * n <= Number.MAX_SAFE_INTEGER) {
+        const keys = new Float64Array(n);
+        for (let i = 0; i < n; i++) {
+          const a = k1[i]!;
+          const b = k2[i]!;
+          const u = unscannedLast && a < 0 ? 1 : 0;
+          const f1 = dir > 0 ? a - min1 : max1 - a;
+          const f2 = dir > 0 ? b - min2 : max2 - b;
+          keys[i] = ((u * s1 + f1) * s2 + f2) * n + (dir > 0 ? i : n - 1 - i);
+        }
+        keys.sort();
+        const sorted = new Array<ServerRow>(n);
+        for (let j = 0; j < n; j++) {
+          const t = keys[j]! % n;
+          sorted[j] = out[dir > 0 ? t : n - 1 - t]!;
+        }
+        for (let i = 0; i < n; i++) out[i] = sorted[i]!;
+        return;
+      }
+    }
+
+    const idx = new Uint32Array(n);
+    for (let i = 0; i < n; i++) idx[i] = i;
     idx.sort((x, y) => {
       if (unscannedLast) {
         const u = +(k1[x]! < 0) - +(k1[y]! < 0);
         if (u !== 0) return u;
       }
       const d = k1[x]! - k1[y]! || k2[x]! - k2[y]!;
-      if (d !== 0) return dir * d;
-      const a = out[x]!.id;
-      const b = out[y]!.id;
-      return dir * (a < b ? -1 : a > b ? 1 : 0);
+      // The same last tie-break as the packed path: the position in `out` (D-284).
+      return dir * (d !== 0 ? d : x - y);
     });
     const permuted = new Array<ServerRow>(n);
     for (let i = 0; i < n; i++) permuted[i] = out[idx[i]!]!;
@@ -686,7 +849,12 @@ class ServersStore {
       this.modCatalog.clear();
       for (const c of idx.catalog) this.modCatalog.set(c.id, { name: c.name, servers: c.servers });
       this.modsByServer.clear();
-      for (const s of idx.index) this.modsByServer.set(s.id, s.mods);
+      this.#modCounts.clear();
+      for (const s of idx.index) {
+        this.modsByServer.set(s.id, s.mods);
+        this.#modCounts.set(s.id, s.mods.length);
+      }
+      this.#modsVersion++;
       this.modsUnreadable.clear();
       for (const id of idx.unreadable) this.modsUnreadable.add(id);
       this.modsIndexLoaded = true;
@@ -731,7 +899,9 @@ class ServersStore {
       for (const m of this.modsByServer.get(s.id) ?? []) delta.set(m, (delta.get(m) ?? 0) - 1);
       for (const m of s.mods) delta.set(m, (delta.get(m) ?? 0) + 1);
       this.modsByServer.set(s.id, s.mods);
+      this.#modCounts.set(s.id, s.mods.length);
     }
+    if (list.length) this.#modsVersion++;
     for (const [m, d] of delta) this.#countMod(m, d);
   }
 
@@ -798,7 +968,7 @@ class ServersStore {
     try {
       const cached = await invoke<CachedServers>("servers_cached");
       this.lastRefresh = cached.lastRefresh;
-      for (const r of cached.rows) {
+      for (const r of decodeCachedRows(cached)) {
         this.#put(r);
         if (r.steamEmpty === true) this.hasEmptyServers = true;
       }
@@ -820,7 +990,10 @@ class ServersStore {
     } catch (e) {
       logWarn("cache", `favourites unavailable at start: ${describe(e)}`);
     }
-    void this.loadModsIndex();
+    // No mod index here: the pages that read it load it when they open (the filter
+    // panel, the Mods page, Favourites and LAN). Read at start it held the cache lock
+    // for 85–99 ms and the main thread for 56–75 ms behind the News page, which reads
+    // none of it (D-284).
     this.#unlisten.push(
       await listen<ServerRow[]>("servers:batch", (ev) => this.#enqueue(ev.payload, false)),
       await listen<ServerRow[]>("servers:dzsa-batch", (ev) => this.#enqueue(ev.payload, true)),
@@ -970,18 +1143,21 @@ class ServersStore {
       // Servers with friends (D-128): by ip:queryPort when Steam reports the query
       // port, else by ip + game port against the known rows.
       const on = new Map<string, string[]>();
-      // One pass over the rows for the whole list, not one per friend whose query
-      // port Steam did not report (D-160).
-      let byGamePort: Map<string, string> | null = null;
-      const needsLookup = list.some((f) => f.server && !(f.server.queryPort > 0 && this.rows.has(`${f.server.ip}:${f.server.queryPort}`)));
-      if (needsLookup) {
-        byGamePort = new Map();
-        for (const r of this.rows.values()) byGamePort.set(`${r.ip}:${r.gamePort}`, r.id);
-      }
       for (const f of list) {
         if (!f.server) continue;
         const direct = f.server.queryPort > 0 ? `${f.server.ip}:${f.server.queryPort}` : null;
-        const id = direct && this.rows.has(direct) ? direct : (byGamePort?.get(`${f.server.ip}:${f.server.gamePort}`) ?? null);
+        let id = direct && this.rows.has(direct) ? direct : null;
+        // Without a query port, the servers at that address are few: the one on this
+        // game port is it. A map of every row by game port was rebuilt each minute for
+        // this, 11 ms at 40 000 rows and 19 ms at 71 000 (D-160, D-284).
+        if (!id) {
+          for (const sid of this.idsAt(f.server.ip)) {
+            if (this.rows.get(sid)?.gamePort === f.server.gamePort) {
+              id = sid;
+              break;
+            }
+          }
+        }
         if (id) on.set(id, [...(on.get(id) ?? []), f.name]);
       }
       for (const key of [...this.friendsOn.keys()]) if (!on.has(key)) this.friendsOn.delete(key);
@@ -1137,9 +1313,10 @@ class ServersStore {
     this.#inbox = [];
     for (const [r, dzsa] of batch) {
       const prev = this.rows.get(r.id);
-      // A new row, or one that renamed itself, invalidates the name ranks; a changed
-      // player count does not (D-181).
-      if (!prev || prev.name !== r.name) this.#namesDirty = true;
+      // A new row is placed into the name order; one that renamed itself rebuilds it;
+      // a changed player count does neither (D-181, D-284).
+      if (!prev) this.#namesAdded.add(r.id);
+      else if (prev.name !== r.name) this.#namesDirty = true;
       // The host keeps a DZSA row's measured values over the list's placeholders, and
       // so does this; every other batch is a measurement and lands as it is.
       this.#put(prev ? this.#merge(prev, r, dzsa) : r);
@@ -1195,10 +1372,17 @@ class ServersStore {
       this.#cloneKeys.delete(id);
       this.#pending.delete(id);
       this.#checkedAt.delete(id);
+      const at = this.#byIp.get(gone.ip);
+      if (at) {
+        at.delete(id);
+        if (at.size === 0) this.#byIp.delete(gone.ip);
+      }
       const mods = this.modsByServer.get(id);
       if (mods) {
         for (const m of mods) delta.set(m, (delta.get(m) ?? 0) - 1);
         this.modsByServer.delete(id);
+        this.#modCounts.delete(id);
+        this.#modsVersion++;
       }
       this.modsUnreadable.delete(id);
     }
@@ -1239,6 +1423,7 @@ class ServersStore {
       if (!r) continue;
       this.#pending.delete(v.id);
       this.#checkedAt.set(v.id, v.verifiedAt);
+      this.#cloneTouched.add(v.id);
       // Mirrors `apply_verifications` (cache.rs), rule for rule (D-236).
       const infoAnswered = v.pingMs != null;
       const synthetic = v.verdict === "synthetic";
@@ -1346,7 +1531,8 @@ class ServersStore {
       // count vanished until the re-check landed (D-256).
       const prev = this.rows.get(row.id);
       this.#put(prev ? this.#merge(prev, row, false) : row);
-      this.#namesDirty = true;
+      if (!prev) this.#namesAdded.add(row.id);
+      else if (prev.name !== row.name) this.#namesDirty = true;
       this.rowsChanged();
       if (select) this.selectedId = row.id;
       return row;

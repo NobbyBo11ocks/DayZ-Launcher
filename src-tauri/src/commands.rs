@@ -165,7 +165,10 @@ pub fn ui_prefs_set(state: State<'_, AppState>, patch: serde_json::Value) -> App
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CachedServers {
-    pub rows: Vec<ServerRow>,
+    /// The field names of `rows`, once (D-284).
+    pub keys: &'static [&'static str],
+    pub tag_keys: &'static [&'static str],
+    pub rows: crate::browser::model::CompactRows,
     /// Unix seconds of the last completed refresh, if any.
     pub last_refresh: Option<i64>,
 }
@@ -186,14 +189,19 @@ pub async fn servers_cached(state: State<'_, AppState>) -> AppResult<CachedServe
             .ok()
             .flatten()
             .and_then(|v| v.parse().ok());
-        Ok::<_, AppError>(CachedServers { rows, last_refresh })
+        Ok::<_, AppError>(CachedServers {
+            keys: crate::browser::model::ROW_KEYS,
+            tag_keys: crate::browser::model::TAG_KEYS,
+            rows: crate::browser::model::CompactRows(rows),
+            last_refresh,
+        })
     })
     .await
     .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))??;
     #[cfg(debug_assertions)]
     eprintln!(
         "[ipc] servers_cached: {} rows, last refresh {:?}, {} ms after start",
-        out.rows.len(),
+        out.rows.0.len(),
         out.last_refresh,
         crate::uptime_ms()
     );
@@ -242,7 +250,9 @@ pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResu
     let cache = Arc::clone(&state.cache);
     let mut targets: Vec<Target> = Vec::new();
     let mut with_mods = 0usize;
-    for chunk in rows.chunks(500) {
+    // Steam's own batch size: 500 DZSA rows came to ~229 KB an event, over docs/05 §4's
+    // ~200 KB, where Steam's 358 are 207 KB (D-284).
+    for chunk in rows.chunks(358) {
         let batch: Vec<ServerRow> = chunk.iter().map(|r| r.row.clone()).collect();
         for r in &batch {
             if r.players > 0 {

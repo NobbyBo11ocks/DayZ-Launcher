@@ -16,7 +16,9 @@ pub struct DayzTags {
     pub dlc: bool,
     /// Server permits `-filePatching` clients (`allowedFilePatching`, seen live D-033).
     pub allowed_file_patching: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Parsed for diagnosis; nothing on screen reads it, and it was on 27 539 of
+    /// 40 000 rows of every start-up list (D-284).
+    #[serde(skip_serializing)]
     pub shard: Option<String>,
     /// Players waiting in the login queue (`lqs<N>`).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -53,9 +55,9 @@ impl DayzTags {
                         t.shard = Some(s.to_string());
                     } else if let Some(n) = tag.strip_prefix("lqs").and_then(|s| s.parse().ok()) {
                         t.queue = Some(n);
-                    } else if let Some(f) = tag.strip_prefix("entm").and_then(|s| s.parse().ok()) {
+                    } else if let Some(f) = tag.strip_prefix("entm").and_then(finite) {
                         t.night_multiplier = Some(f);
-                    } else if let Some(f) = tag.strip_prefix("etm").and_then(|s| s.parse().ok()) {
+                    } else if let Some(f) = tag.strip_prefix("etm").and_then(finite) {
                         t.time_multiplier = Some(f);
                     } else if let Some(m) = parse_clock(tag) {
                         t.time_minutes = Some(m);
@@ -74,6 +76,12 @@ impl DayzTags {
         self.time_minutes
             .map(|m| format!("{:02}:{:02}", m / 60, m % 60))
     }
+}
+
+/// A multiplier the server wrote: `nan` and `inf` parse as floats too, and a non-finite
+/// one serialises as `null` where the field is otherwise absent (D-284).
+fn finite(s: &str) -> Option<f32> {
+    s.parse::<f32>().ok().filter(|f| f.is_finite())
 }
 
 fn parse_clock(s: &str) -> Option<u16> {
@@ -112,5 +120,13 @@ mod tests {
         assert!(t.dlc && !t.first_person_only);
         assert_eq!(t.time_string().as_deref(), Some("03:07"));
         assert_eq!(t.unknown, vec!["weird".to_string()]);
+    }
+
+    /// D-284: one live server wrote a night multiplier that parses as NaN.
+    #[test]
+    fn non_finite_multipliers_are_dropped() {
+        let t = DayzTags::parse("etminf,entmNaN");
+        assert_eq!((t.time_multiplier, t.night_multiplier), (None, None));
+        assert_eq!(t.unknown, vec!["etminf".to_string(), "entmNaN".to_string()]);
     }
 }

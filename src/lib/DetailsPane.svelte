@@ -174,7 +174,11 @@
     const self = row?.id;
     if (!ip) return [];
     const out: ServerRow[] = [];
-    for (const r of servers.rows.values()) if (r.ip === ip && r.id !== self) out.push(r);
+    // The store's address index, not a walk over every row on every flush (D-284).
+    for (const sid of servers.idsAt(ip)) {
+      const r = servers.rows.get(sid);
+      if (r && sid !== self) out.push(r);
+    }
     out.sort((a, b) => trustedPlayers(b) - trustedPlayers(a) || a.pingMs - b.pingMs);
     return out;
   });

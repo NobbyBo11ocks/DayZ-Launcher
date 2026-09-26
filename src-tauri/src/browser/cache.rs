@@ -567,12 +567,20 @@ impl Cache {
         now: i64,
         max_age_secs: i64,
     ) -> rusqlite::Result<(Vec<(String, std::net::SocketAddr)>, usize)> {
+        // The population rules in SQL, so only rows that pass them are read out: every
+        // row materialised with its keyword string to keep a quarter of them was 36–40 ms
+        // at 40 000 rows and 65–72 ms at 71 000, all under the cache lock (D-284). Rule
+        // R0 (Steam says empty, INFO claims players) first; then a verified head-count
+        // above zero, or, unverified, Steam's own "populated". `IS` keeps a NULL
+        // `steam_empty` from turning either test into NULL.
         let mut stmt = self.conn.prepare_cached(
-            "SELECT s.id, s.ip, s.query_port, s.keywords, s.players, s.verified_players,
-                    s.steam_empty, a.scanned_at, f.failed_at, f.failures
+            "SELECT s.id, s.ip, s.query_port, s.keywords, a.scanned_at, f.failed_at, f.failures
              FROM servers s
              LEFT JOIN server_mods_at a ON a.server_id = s.id
-             LEFT JOIN server_mods_failed f ON f.server_id = s.id",
+             LEFT JOIN server_mods_failed f ON f.server_id = s.id
+             WHERE NOT (s.steam_empty IS 1 AND s.players > 0)
+               AND (s.verified_players > 0
+                    OR (s.verified_players IS NULL AND s.steam_empty IS 0 AND s.players > 0))",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok((
@@ -580,36 +588,16 @@ impl Cache {
                 r.get::<_, String>(1)?,
                 r.get::<_, u16>(2)?,
                 r.get::<_, String>(3)?,
-                r.get::<_, i32>(4)?,
-                r.get::<_, Option<i32>>(5)?,
-                r.get::<_, Option<bool>>(6)?,
-                r.get::<_, Option<i64>>(7)?,
-                r.get::<_, Option<i64>>(8)?,
-                r.get::<_, Option<i64>>(9)?,
+                r.get::<_, Option<i64>>(4)?,
+                r.get::<_, Option<i64>>(5)?,
+                r.get::<_, Option<i64>>(6)?,
             ))
         })?;
         let mut out = Vec::new();
         let mut held_back = 0;
         for row in rows {
-            let (
-                id,
-                ip,
-                port,
-                keywords,
-                players,
-                verified,
-                steam_empty,
-                scanned_at,
-                failed_at,
-                failures,
-            ) = row?;
+            let (id, ip, port, keywords, scanned_at, failed_at, failures) = row?;
             if !keywords.split(',').any(|t| t.trim() == "mod") {
-                continue;
-            }
-            if steam_empty == Some(true) && players > 0 {
-                continue; // rule R0: Steam says empty, INFO claims players
-            }
-            if !verified.map_or(steam_empty == Some(false) && players > 0, |v| v > 0) {
                 continue;
             }
             // A stamp in the future — the clock was set back — reads as stale, as
@@ -890,6 +878,16 @@ impl Cache {
             // one over the failure rows, which a server that never answered RULES has
             // without any `server_mods_at` row: those were never swept, and a server
             // coming back at the same id inherited the old back-off (D-271).
+            // A small prune deletes its own servers' rows by id first: the sweep below
+            // reads all ~375 000 mod rows, 82–93 ms for 20 pruned servers against 5 ms by
+            // id, and only past about a thousand ids is it the cheaper of the two. The
+            // probe (4–5 ms) still runs after it, so rows an earlier failed sweep left
+            // are still found (D-284).
+            if n <= 1_000 {
+                if let Err(e) = self.delete_mod_rows_of(&ids) {
+                    crate::log_warn!("cache", "mod lists of pruned servers not deleted: {e}");
+                }
+            }
             let orphaned = self
                 .conn
                 .query_row(
@@ -911,6 +909,23 @@ impl Cache {
             }
         }
         Ok(ids)
+    }
+
+    /// The mod rows of these servers, by id, in one transaction (D-284).
+    fn delete_mod_rows_of(&self, ids: &[String]) -> rusqlite::Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        {
+            let mut mods = tx.prepare_cached("DELETE FROM server_mods WHERE server_id = ?1")?;
+            let mut at = tx.prepare_cached("DELETE FROM server_mods_at WHERE server_id = ?1")?;
+            let mut failed =
+                tx.prepare_cached("DELETE FROM server_mods_failed WHERE server_id = ?1")?;
+            for id in ids {
+                mods.execute(params![id])?;
+                at.execute(params![id])?;
+                failed.execute(params![id])?;
+            }
+        }
+        tx.commit()
     }
 
     // ----- mod lists (D-080) ---------------------------------------------------
@@ -1165,6 +1180,42 @@ mod tests {
             "everything is older than 'now + 1 s'"
         );
         assert_eq!(c.row_counts().unwrap().servers, 0);
+    }
+
+    /// D-284: the population rules moved into the scan's SQL pick the same targets the
+    /// Rust checks did, NULL `steam_empty` included.
+    #[test]
+    fn scan_targets_apply_the_population_rules_in_sql() {
+        let mut c = Cache::open_in_memory().unwrap();
+        let mk = |port: u16,
+                  players: i32,
+                  verified: Option<i32>,
+                  steam_empty: Option<bool>,
+                  modded: bool| {
+            let mut r = row(port, players);
+            r.keywords = if modded {
+                "battleye,mod,lqs0".into()
+            } else {
+                "battleye,lqs0".into()
+            };
+            r.verified_players = verified;
+            r.steam_empty = steam_empty;
+            r
+        };
+        let rows = [
+            mk(1, 10, Some(10), None, true),      // verified head-count: a target
+            mk(2, 5, None, Some(false), true),    // unverified, Steam says populated: a target
+            mk(3, 5, None, None, true),           // unverified, Steam silent: not
+            mk(4, 5, Some(10), Some(true), true), // R0 wins over the head-count: not
+            mk(5, 0, Some(0), Some(false), true), // verified empty: not
+            mk(6, 10, Some(10), None, false),     // vanilla: not
+            mk(7, 0, None, Some(false), true),    // Steam says populated, INFO 0: not
+        ];
+        c.upsert(&rows).unwrap();
+        let (targets, held) = c.scan_targets(1_000_000, 24 * 3600).unwrap();
+        let mut ports: Vec<u16> = targets.iter().map(|(_, a)| a.port()).collect();
+        ports.sort_unstable();
+        assert_eq!((ports, held), (vec![1, 2], 0));
     }
 
     /// D-283: the file cache zeroes deleted rows where that costs no I/O (FAST is 2).

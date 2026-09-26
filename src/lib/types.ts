@@ -79,7 +79,6 @@ export type DayzTags = {
   modded: boolean;
   dlc: boolean;
   allowedFilePatching: boolean;
-  shard?: string | null;
   queue?: number | null;
   timeMultiplier?: number | null;
   nightMultiplier?: number | null;
@@ -218,10 +217,38 @@ export type PartitionResult = {
   capped: boolean;
 };
 
+/** The start-up list in columns (D-284): the field names once, each row an array in
+ *  `keys` order with its tags an array in `tagKeys` order. */
 export type CachedServers = {
-  rows: ServerRow[];
+  keys: string[];
+  tagKeys: string[];
+  rows: unknown[][];
   lastRefresh: number | null;
 };
+
+/** The rows of `servers_cached`, each the same object every other event sends: a
+ *  `null` is a value that form leaves out, so it is skipped (D-284). */
+export function decodeCachedRows(c: CachedServers): ServerRow[] {
+  const { keys, tagKeys, rows } = c;
+  const tagsAt = keys.indexOf("tags");
+  const out = new Array<ServerRow>(rows.length);
+  for (let i = 0; i < rows.length; i++) {
+    const a = rows[i]!;
+    const o: Record<string, unknown> = {};
+    for (let j = 0; j < keys.length; j++) {
+      const v = a[j];
+      if (v === null || v === undefined) continue;
+      if (j === tagsAt) {
+        const tv = v as unknown[];
+        const t: Record<string, unknown> = {};
+        for (let k = 0; k < tagKeys.length; k++) if (tv[k] !== null && tv[k] !== undefined) t[tagKeys[k]!] = tv[k];
+        o.tags = t;
+      } else o[keys[j]!] = v;
+    }
+    out[i] = o as ServerRow;
+  }
+  return out;
+}
 
 export type RefreshDone = {
   /** "steam" for the master server, "lan" for LAN discovery (D-087), "dzsa" for the fallback list (D-089). */

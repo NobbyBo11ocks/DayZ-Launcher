@@ -155,9 +155,190 @@ impl ServerRow {
     }
 }
 
+/// The start-up list in columns (D-284). As objects every row repeats its field names:
+/// 535 bytes a row, two thirds of them names and punctuation, 20 MB at 40 000 rows and
+/// 36 MB at 71 000, parsed in one WebView task and held twice over by the host while
+/// it was written. Here the names go once, each row is an array in `ROW_KEYS` order and
+/// its tags an array in `TAG_KEYS` order. A value the object form leaves out is `null`,
+/// which the reader skips, so both forms decode to the same row
+/// (`compact_rows_decode_to_the_object_form`).
+pub const ROW_KEYS: &[&str] = &[
+    "id",
+    "ip",
+    "gamePort",
+    "queryPort",
+    "name",
+    "map",
+    "description",
+    "players",
+    "maxPlayers",
+    "bots",
+    "password",
+    "serverVersion",
+    "version",
+    "pingMs",
+    "tags",
+    "verifiedPlayers",
+    "steamEmpty",
+    "verifiedAt",
+    "verdict",
+    "country",
+];
+pub const TAG_KEYS: &[&str] = &[
+    "battleye",
+    "firstPersonOnly",
+    "privateHive",
+    "modded",
+    "dlc",
+    "allowedFilePatching",
+    "queue",
+    "timeMultiplier",
+    "nightMultiplier",
+    "timeMinutes",
+];
+
+/// Rows written as `ROW_KEYS` arrays.
+pub struct CompactRows(pub Vec<ServerRow>);
+
+impl Serialize for CompactRows {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeSeq;
+        let mut seq = s.serialize_seq(Some(self.0.len()))?;
+        for r in &self.0 {
+            seq.serialize_element(&CompactRow(r))?;
+        }
+        seq.end()
+    }
+}
+
+struct CompactRow<'a>(&'a ServerRow);
+
+impl Serialize for CompactRow<'_> {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeTuple;
+        let r = self.0;
+        let mut t = s.serialize_tuple(ROW_KEYS.len())?;
+        t.serialize_element(&r.id)?;
+        t.serialize_element(&r.ip)?;
+        t.serialize_element(&r.game_port)?;
+        t.serialize_element(&r.query_port)?;
+        t.serialize_element(&r.name)?;
+        t.serialize_element(&r.map)?;
+        t.serialize_element(&r.description)?;
+        t.serialize_element(&r.players)?;
+        t.serialize_element(&r.max_players)?;
+        t.serialize_element(&r.bots)?;
+        t.serialize_element(&r.password)?;
+        t.serialize_element(&r.server_version)?;
+        t.serialize_element(&r.version)?;
+        t.serialize_element(&r.ping_ms)?;
+        t.serialize_element(&CompactTags(&r.tags))?;
+        t.serialize_element(&r.verified_players)?;
+        t.serialize_element(&r.steam_empty)?;
+        t.serialize_element(&r.verified_at)?;
+        t.serialize_element(&r.verdict)?;
+        t.serialize_element(&r.country)?;
+        t.end()
+    }
+}
+
+struct CompactTags<'a>(&'a DayzTags);
+
+impl Serialize for CompactTags<'_> {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeTuple;
+        let g = self.0;
+        let mut t = s.serialize_tuple(TAG_KEYS.len())?;
+        t.serialize_element(&g.battleye)?;
+        t.serialize_element(&g.first_person_only)?;
+        t.serialize_element(&g.private_hive)?;
+        t.serialize_element(&g.modded)?;
+        t.serialize_element(&g.dlc)?;
+        t.serialize_element(&g.allowed_file_patching)?;
+        t.serialize_element(&g.queue)?;
+        t.serialize_element(&g.time_multiplier)?;
+        t.serialize_element(&g.night_multiplier)?;
+        t.serialize_element(&g.time_minutes)?;
+        t.end()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// D-284: the compact start-up form decodes, the way the store reads it, to exactly
+    /// the object every other event sends, for rows with every optional value absent and
+    /// every one present.
+    #[test]
+    fn compact_rows_decode_to_the_object_form() {
+        let bare = ServerRow {
+            id: "1.2.3.4:2303".into(),
+            ip: "1.2.3.4".into(),
+            game_port: 2302,
+            query_port: 2303,
+            name: "Bare".into(),
+            map: "chernarusplus".into(),
+            description: String::new(),
+            players: 0,
+            max_players: 60,
+            bots: 0,
+            password: false,
+            secure: true,
+            server_version: 0,
+            version: String::new(),
+            ping_ms: 0,
+            keywords: String::new(),
+            tags: DayzTags::default(),
+            steam_id: 0,
+            last_seen: 0,
+            verified_players: None,
+            steam_empty: None,
+            verified_at: None,
+            verdict: None,
+            country: None,
+        };
+        let mut full = bare.clone();
+        full.id = "5.6.7.8:27016".into();
+        full.name = "Full \"quoted\" name".into();
+        full.tags = DayzTags::parse(
+            "battleye,no3rd,external,privHive,shardABC,lqs3,etm4.000000,entm6.500000,mod,isDLC,allowedFilePatching,15:12",
+        );
+        full.verified_players = Some(42);
+        full.steam_empty = Some(false);
+        full.verified_at = Some(1_790_000_000);
+        full.verdict = Some("verified".into());
+        full.country = Some("DE".into());
+        let rows = vec![bare, full];
+        let compact = serde_json::to_value(CompactRows(rows.clone())).unwrap();
+        let tag_at = ROW_KEYS.iter().position(|k| *k == "tags").unwrap();
+        for (i, row) in rows.iter().enumerate() {
+            let a = compact[i].as_array().unwrap();
+            assert_eq!(a.len(), ROW_KEYS.len());
+            let mut o = serde_json::Map::new();
+            for (j, k) in ROW_KEYS.iter().enumerate() {
+                if a[j].is_null() {
+                    continue;
+                }
+                if j == tag_at {
+                    let mut t = serde_json::Map::new();
+                    for (m, tk) in TAG_KEYS.iter().enumerate() {
+                        if !a[j][m].is_null() {
+                            t.insert((*tk).into(), a[j][m].clone());
+                        }
+                    }
+                    o.insert((*k).into(), serde_json::Value::Object(t));
+                } else {
+                    o.insert((*k).into(), a[j].clone());
+                }
+            }
+            assert_eq!(
+                serde_json::Value::Object(o),
+                serde_json::to_value(row).unwrap(),
+                "row {i}"
+            );
+        }
+    }
 
     #[test]
     fn version_int_to_string() {
