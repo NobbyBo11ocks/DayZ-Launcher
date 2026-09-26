@@ -6,6 +6,7 @@
   // in DayZ; D-103, D-105, D-106). The update notice lives at the foot of the rail (D-216).
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import emblemUrl from "../assets/emblem.png";
+  import happyUrl from "../assets/happy.mp3";
 
   let {
     servers = null,
@@ -14,12 +15,29 @@
   }: { servers?: number | null; friends?: number | null; greeting?: string } = $props();
   const win = getCurrentWindow();
   const fmt = new Intl.NumberFormat();
+
+  // Five clicks on the mark inside two seconds play a sound (D-285). The element is
+  // created on the first use, so the file is only read by someone who finds it.
+  let markClicks: number[] = [];
+  let happy: HTMLAudioElement | null = null;
+  function onMark() {
+    const now = performance.now();
+    markClicks = markClicks.filter((t) => now - t < 2000);
+    markClicks.push(now);
+    if (markClicks.length < 5) return;
+    markClicks = [];
+    happy ??= new Audio(happyUrl);
+    happy.currentTime = 0;
+    void happy.play().catch(() => {});
+  }
 </script>
 
 <header class="titlebar" data-tauri-drag-region>
-  <!-- The app's mark, where a framed window shows its icon (D-258). Part of the drag
-       handle, like the rest of the bar. -->
-  <img class="mark" src={emblemUrl} alt="" width="18" height="20" draggable="false" data-tauri-drag-region />
+  <!-- The app's mark, where a framed window shows its icon (D-258). Not a drag handle
+       since D-285: Tauri starts moving the window on a mouse-down there and maximises it
+       on a double click, so quick clicks never reached it. The rest of the bar drags. -->
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+  <img class="mark" src={emblemUrl} alt="" width="18" height="20" draggable="false" onclick={onMark} />
   {#if servers != null}
     <span class="stat" data-tauri-drag-region title="Servers with a verified player count above zero">
       <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.4" /><path d="M1.6 8h12.8M8 1.6c2.6 2.6 2.6 10.2 0 12.8M8 1.6C5.4 4.2 5.4 11.8 8 14.4" /></svg>
