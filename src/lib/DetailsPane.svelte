@@ -261,6 +261,7 @@
     {@const vouched = row.steamEmpty === false && verdict === "unverifiable"}
     {@const counted = row.verifiedPlayers != null}
     {@const r0 = isInflated(row)}
+    {@const r8 = row.players > 127}
     <!-- What this pane's own check just counted: a fabricated list is no count, and a
          stored one can be hours old. -->
     {@const listed = v && v.verdict !== "synthetic" ? v.verified : null}
@@ -290,7 +291,7 @@
       </div>
     </header>
 
-    <section class="trust" class:bad={row.clone || r0 || (verdict && verdict !== "verified" && !(vouched && counted))} class:good={verdict === "verified" && !row.clone && !r0}>
+    <section class="trust" class:bad={row.clone || r0 || r8 || (verdict && verdict !== "verified" && !(vouched && counted))} class:good={verdict === "verified" && !row.clone && !r0 && !r8}>
       <!-- R10 hid the row with nothing here to say why (D-238). -->
       {#if row.clone}
         <strong>Name taken from another server</strong>
@@ -301,6 +302,12 @@
              beside a row the list still hid (D-268). -->
         <strong>Inflated player count</strong>
         <span class="muted">Steam reports 0 authenticated players; the server claims {row.players}{#if listed != null}, and its player list shows {listed}{/if}.</span>
+      {:else if r8}
+        <!-- R8 hid the row with nothing here to say why. The wording stays on what was
+             measured (the largest head-count ever verified here is 116), not on an engine
+             limit nobody has sourced (D-233, D-268). -->
+        <strong>Implausible player count</strong>
+        <span class="muted">The server claims {row.players} players, more than any DayZ server this launcher has counted.</span>
       {:else if v && vouched && counted}
         <strong>Last counted {row.verifiedPlayers}</strong>
         <span class="muted">The server has stopped answering player queries; Steam still sees players on it. Showing the last head-count, not the server's claim.</span>
