@@ -9,7 +9,7 @@ Mark a row `IN PROGRESS` before starting it, and leave notes there if work stops
 
 | # | Area | Status | Result |
 |---|---|---|---|
-| 1 | **Join path**: Join button → mod plan (RULES, cached fallback) → Steam downloads (sync, stall, failures) → `!Workshop` junctions → launch arguments → `DayZ_BE.exe` start and exit watch | IN PROGRESS since 2026-09-25T16:10Z | |
+| 1 | **Join path**: Join button → mod plan (RULES, cached fallback) → Steam downloads (sync, stall, failures) → `!Workshop` junctions → launch arguments → `DayZ_BE.exe` start and exit watch | done 2026-09-26 | D-265, released as v0.1.55: `-mod=` was in the reverse of the server's load order; a missing-folder mod waited 15 min; a closed dialog could still launch; 9 more |
 | 2 | **Trust and verification**: R0–R12 (`browser/verify.rs`, `src/lib/types.ts` `isUntrusted`/`trustedPlayers`/`queueOf`, `cache.rs` `apply_verifications`), R11 continuity, the stale re-read after a pass, the details pane's verdict text | todo | |
 | 3 | **Refresh and cache lifecycle**: Steam partitions and the `collapse_addr_hash` follow-up, upsert variants, the three prune lanes, vouch withdrawal, `servers:pruned`, WAL checkpoints, start-up load | todo | |
 | 4 | **Steam session lifecycle**: `steam/sdk.rs` worker — init retry, idle release, Steam closing/restarting, friends and rich presence, the Workshop update poll | todo | |
@@ -28,4 +28,4 @@ Mark a row `IN PROGRESS` before starting it, and leave notes there if work stops
 
 ## Waiting for a check on the reference PC
 
-- v0.1.54 (D-264): after the in-app update, the desktop shortcut, the Start menu entry and the taskbar button show the slightly bigger mask, and the taskbar icon is sharp. The fresh install of 0.1.52 was seen correct on screen (D-263).
+- ~~v0.1.54 (D-264)~~ Seen 2026-09-25: the in-app updater took 0.1.52 to 0.1.54 by itself, and afterwards the desktop shortcut showed the bigger mask and the taskbar button was bigger and crisp (host-side captures before and after, compared side by side). Nothing waiting here now.

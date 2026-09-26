@@ -729,8 +729,12 @@ pub async fn run_mod_scan(
             set.spawn(async move {
                 let mods = c.rules(addr).await.ok().map(|r| {
                     r.value.dayz.map_or_else(Vec::new, |d| {
+                        // Each published id once, where it first appears (D-265); the
+                        // server-side ones (id 0) all stay, the count shows them.
+                        let mut seen = HashSet::new();
                         d.mods
                             .into_iter()
+                            .filter(|m| m.workshop_id == 0 || seen.insert(m.workshop_id))
                             .map(|m| (m.workshop_id, m.name))
                             .collect::<Vec<(u64, String)>>()
                     })
@@ -1307,32 +1311,46 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
     let addr: SocketAddr = id
         .parse()
         .map_err(|_| AppError::Internal(format!("bad server id {id}")))?;
-    let rules = state.a2s.rules(addr).await;
+    // INFO beside RULES: the cached row's game port, password flag and version are
+    // only as fresh as the last listing, and verification never updates them, so a
+    // server that moved its game port or added a password was planned — and joined —
+    // from stale facts (D-265).
+    let (rules, info) = tokio::join!(state.a2s.rules(addr), state.a2s.info(addr));
+    let info = info.ok().map(|r| r.value);
     let diag = tauri::async_runtime::spawn_blocking(diagnostics::collect)
         .await
         .map_err(|e| AppError::Internal(format!("diagnostics task failed: {e}")))??;
+    // The list this plan read becomes the cached one: a launch whose own RULES read
+    // drops falls back to the cache, which could be a day-old scan rather than the
+    // list the player was shown seconds earlier (D-265).
+    if let Ok(r) = &rules {
+        if r.value.dayz.is_some() {
+            let list = vec![(id.clone(), r.value.required_mods())];
+            let c = Arc::clone(&state.cache);
+            let now = ServerRow::now_unix();
+            let _ = tauri::async_runtime::spawn_blocking(move || {
+                if let Ok(mut c) = c.lock() {
+                    if let Err(e) = c.replace_server_mods_many(&list, now) {
+                        crate::log_warn!("cache", "the plan's mod list was not stored: {e}");
+                    }
+                }
+            })
+            .await;
+        }
+    }
+    let server_version = info
+        .as_ref()
+        .map_or_else(|| row.version.clone(), |i| i.version.clone());
+    let password_required = info.as_ref().map_or(row.password, |i| i.password);
+    let game_port = info
+        .as_ref()
+        .and_then(|i| i.game_port)
+        .unwrap_or(row.game_port);
 
     let mut warnings = Vec::new();
     let required: Vec<(u64, String)> = match &rules {
-        Ok(r) => r
-            .value
-            .dayz
-            .as_ref()
-            .map(|d| {
-                d.mods
-                    .iter()
-                    // Workshop id 0 is a mod that was never published - server-side
-                    // only. It can never appear in the local inventory, so it stayed in
-                    // `toSync` for ever: `canLaunch` was permanently false, the Join
-                    // button was never rendered, and the only offered action downloaded
-                    // id 0 and could not succeed. 97 of 3 446 cached servers (2.8 %) are
-                    // affected. `dzsa.rs` has filtered these since the fallback was
-                    // built; the live RULES path never did (D-221).
-                    .filter(|m| m.workshop_id > 0)
-                    .map(|m| (m.workshop_id, m.name.clone()))
-                    .collect()
-            })
-            .unwrap_or_default(),
+        // Published mods only, each once (D-221, D-265).
+        Ok(r) => r.value.required_mods(),
         // A server that will not answer RULES is not a vanilla server. Launching
         // without its mods is a kick on arrival, so fall back to the list the mod scan
         // recorded and say how old it is rather than inventing an empty one (D-209).
@@ -1354,7 +1372,7 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
             }
         },
     };
-    let inventory: HashMap<u64, (Option<String>, bool)> = diag
+    let mut inventory: HashMap<u64, (Option<String>, bool)> = diag
         .workshop
         .as_ref()
         .map(|w| {
@@ -1364,6 +1382,26 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
                 .collect()
         })
         .unwrap_or_default();
+    // When Steam's Workshop list is missing or unreadable the launch looks for the
+    // content folders itself (D-256), but the plan read the same state as "nothing
+    // installed", offered to download every mod, and at the two-minute re-plan blamed
+    // the server for changing its mods. Same condition, same fallback (D-265).
+    if let (Some(g), false) = (diag.dayz.as_ref(), required.is_empty()) {
+        let lib = PathBuf::from(&g.library);
+        let ids: Vec<u64> = required.iter().map(|(id, _)| *id).collect();
+        let fallback = tauri::async_runtime::spawn_blocking(move || match workshop::read(&lib) {
+            Ok(Some(_)) => None,
+            _ => Some(workshop::from_folders(&lib, &ids)),
+        })
+        .await
+        .ok()
+        .flatten();
+        for it in fallback.map(|w| w.items).unwrap_or_default() {
+            if let Some(f) = it.folder {
+                inventory.insert(it.id, (Some(f.display().to_string()), false));
+            }
+        }
+    }
 
     let mut mods: Vec<ModPlanItem> = required
         .iter()
@@ -1434,11 +1472,13 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
         .filter_map(|m| m.size)
         .sum();
     let local_version = diag.dayz.as_ref().and_then(|g| g.game_version.clone());
-    let version_mismatch = local_version.as_deref().is_some_and(|v| v != row.version);
+    let version_mismatch = local_version
+        .as_deref()
+        .is_some_and(|v| v != server_version);
     if version_mismatch {
         warnings.push(format!(
             "Server runs {} but your DayZ is {}; the server will reject the connection until Steam updates the game.",
-            row.version,
+            server_version,
             local_version.clone().unwrap_or_default()
         ));
     }
@@ -1504,7 +1544,7 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
         row.name,
         mods.len(),
         format!("{:.1} MB", download_bytes as f64 / (1024.0 * 1024.0)),
-        row.version,
+        server_version,
         if version_mismatch {
             format!(" against local {}", local_version.clone().unwrap_or_default())
         } else {
@@ -1520,9 +1560,9 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
         id,
         name: row.name,
         ip: row.ip,
-        game_port: row.game_port,
-        password_required: row.password,
-        server_version: row.version,
+        game_port,
+        password_required,
+        server_version,
         local_version,
         version_mismatch,
         steam_running: diag.steam.running,
@@ -1574,27 +1614,15 @@ pub async fn launch_game(
     let addr: SocketAddr = id
         .parse()
         .map_err(|_| AppError::Internal(format!("bad server id {id}")))?;
-    let rules = state.a2s.rules(addr).await;
+    // INFO beside RULES for the game port, as in the plan (D-265).
+    let (rules, info) = tokio::join!(state.a2s.rules(addr), state.a2s.info(addr));
+    let game_port = info
+        .ok()
+        .and_then(|r| r.value.game_port)
+        .unwrap_or(row.game_port);
     let required: Vec<(u64, String)> = match &rules {
-        Ok(r) => r
-            .value
-            .dayz
-            .as_ref()
-            .map(|d| {
-                d.mods
-                    .iter()
-                    // Workshop id 0 is a mod that was never published - server-side
-                    // only. It can never appear in the local inventory, so it stayed in
-                    // `toSync` for ever: `canLaunch` was permanently false, the Join
-                    // button was never rendered, and the only offered action downloaded
-                    // id 0 and could not succeed. 97 of 3 446 cached servers (2.8 %) are
-                    // affected. `dzsa.rs` has filtered these since the fallback was
-                    // built; the live RULES path never did (D-221).
-                    .filter(|m| m.workshop_id > 0)
-                    .map(|m| (m.workshop_id, m.name.clone()))
-                    .collect()
-            })
-            .unwrap_or_default(),
+        // Published mods only, each once (D-221, D-265).
+        Ok(r) => r.value.required_mods(),
         Err(e) => {
             // This used to fall back to an empty list, which does not mean "no mods" —
             // it means "we could not ask". DayZ then started vanilla and connected to a
@@ -1707,9 +1735,16 @@ pub async fn launch_game(
         }
         let links = launch::ensure_junctions(&game.folder, &items)?;
         let spec = LaunchSpec {
-            mod_paths: links.iter().map(|l| l.junction.clone()).collect(),
+            // RULES lists a server's mods in the reverse of its own `-mod=`, and DayZ
+            // reads `-mod=` back to front: the official launcher started `@CF;@Dabs
+            // Framework;@DayZ-Editor` and the engine then loaded Dabs before CF, and our
+            // own launches passed CF last. Passing RULES as it came ran every modded
+            // server's load order backwards on the client; reversed, it matches what the
+            // server's admin wrote and what the official launcher does (RPT logs,
+            // S-41; D-008 corrected by D-265).
+            mod_paths: links.iter().rev().map(|l| l.junction.clone()).collect(),
             ip: row.ip.clone(),
-            game_port: row.game_port,
+            game_port,
             password,
             profile_name: Some(if settings.profile_name.trim().is_empty() {
                 persona.unwrap_or_default()

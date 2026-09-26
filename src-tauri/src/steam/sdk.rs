@@ -425,6 +425,9 @@ const DETAILS_PAGE: usize = 50;
 const SYNC_EMIT_INTERVAL: Duration = Duration::from_millis(250);
 /// Re-issue `DownloadItem` when Steam has not started within this time.
 const SYNC_KICK_INTERVAL: Duration = Duration::from_secs(5);
+/// How long an item Steam calls installed may go without a folder after its kick
+/// before the sync gives up on it with the remedy (Q30, D-265).
+const MISSING_FOLDER_GRACE: Duration = Duration::from_secs(60);
 /// A download is given up when Steam has moved nothing for this long. It used to be 45
 /// minutes from the start whatever was happening, and a first join to a big modded
 /// server — the project's own twelve-mod set is 5.91 GB (D-120) — needs 17.5 Mbit/s to
@@ -799,10 +802,9 @@ fn item_progress(ugc: &UGC, id: u64, failed: Option<&String>) -> ItemProgress {
         // Steam's back stays INSTALLED in its books, the join plan (which looks at
         // the disk) sends it here, and "installed" finished the sync at once, so the
         // launch failed with "sync mods first" and the next Join did it again. It
-        // stays pending, and if Steam never re-fetches it the stall reports the remedy
-        // (S-79, D-245). It gets only the start's kick: `tick_sync` re-kicks
-        // "subscribed" and "needs_update", and whether more kicks would make Steam
-        // fetch an item it counts as installed is open (Q30, D-256).
+        // stays pending; a minute after its kick with still no folder, `tick_sync` fails
+        // it with the remedy rather than letting it wait out the 15-minute stall (S-79,
+        // Q30, D-265).
         if info
             .as_ref()
             .is_some_and(|i| std::path::Path::new(&i.folder).is_dir())
@@ -857,6 +859,35 @@ fn tick_sync(
             }
         }
     }
+    // An item Steam lists as installed whose folder is gone (D-245) had only the
+    // start's kick and no second error report to fail on, so it sat on "Queued" for the
+    // whole 15-minute stall and then failed without saying what fixes it (Q30). A
+    // minute after its last kick, if Steam still calls it installed and there is still
+    // no folder, Steam is not going to fetch it: it fails now, with the remedy (S-79,
+    // D-265).
+    for &id in &sync.ids {
+        if sync.failed.contains_key(&id) {
+            continue;
+        }
+        let st = ugc.item_state(PublishedFileId(id));
+        let installed_in_steam = st.contains(ItemState::INSTALLED)
+            && !st.intersects(ItemState::DOWNLOADING | ItemState::DOWNLOAD_PENDING);
+        if !installed_in_steam {
+            continue;
+        }
+        let folder_there = ugc
+            .item_install_info(PublishedFileId(id))
+            .is_some_and(|i| std::path::Path::new(&i.folder).is_dir());
+        let since = sync.kicked.get(&id).copied().unwrap_or(sync.started);
+        if !folder_there && since.elapsed() >= MISSING_FOLDER_GRACE {
+            sync.failed.insert(
+                id,
+                "Steam lists it as installed but its folder is gone. Unsubscribe it on the \
+                 Mods page (or in Steam), then join again to download it afresh"
+                    .into(),
+            );
+        }
+    }
     let items: Vec<ItemProgress> = sync
         .ids
         .iter()
@@ -891,8 +922,9 @@ fn tick_sync(
             } else if failed {
                 sync.failed.values().next().cloned()
             } else if stalled {
+                // What to do next, not only what happened (D-265).
                 Some(format!(
-                    "Steam made no progress on the download for {} minutes",
+                    "Steam made no progress on the download for {} minutes. Check Steam's Downloads page; if a mod stays stuck, unsubscribe it on the Mods page and join again",
                     SYNC_STALL.as_secs() / 60
                 ))
             } else {

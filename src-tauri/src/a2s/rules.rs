@@ -73,6 +73,24 @@ impl Rules {
     pub fn plain_u32(&self, key: &str) -> Option<u32> {
         self.plain.get(key)?.parse().ok()
     }
+
+    /// The Workshop mods a client needs, in the order RULES reports them: published
+    /// ones only (id 0 is a server-side mod nobody can download, D-221), each id once —
+    /// 47 of 22 794 scanned servers list one twice, which put it into `-mod=` twice
+    /// (D-265). Not the load order: that is the reverse (`launch_game`, D-265).
+    pub fn required_mods(&self) -> Vec<(u64, String)> {
+        let mut seen = std::collections::HashSet::new();
+        self.dayz
+            .as_ref()
+            .map(|d| {
+                d.mods
+                    .iter()
+                    .filter(|m| m.workshop_id > 0 && seen.insert(m.workshop_id))
+                    .map(|m| (m.workshop_id, m.name.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
 }
 
 pub fn parse(payload: &[u8]) -> A2sResult<Rules> {
@@ -353,6 +371,47 @@ mod tests {
             .unwrap()
             .starts_with("Survival at its Finest"));
         assert_eq!(d.trailing, 0);
+    }
+
+    #[test]
+    fn required_mods_are_published_and_listed_once() {
+        let mk = |id: u64, name: &str| Mod {
+            hash: 0,
+            workshop_id: id,
+            id_len: 4,
+            name: name.into(),
+        };
+        let rules = Rules {
+            rule_count: 0,
+            fragment_count: 0,
+            plain: BTreeMap::new(),
+            dayz: Some(DayzRules {
+                protocol_version: 0,
+                overflow: 0,
+                dlc_flags: 0,
+                dlc: Vec::new(),
+                mods: vec![
+                    mk(1, "Map"),
+                    mk(0, "ServerOnly"),
+                    mk(3604049451, "X"),
+                    mk(2, "Dabs"),
+                    mk(3604049451, "X again"),
+                    mk(1559212036, "CF"),
+                ],
+                signatures: Vec::new(),
+                description: None,
+                trailing: 0,
+            }),
+        };
+        assert_eq!(
+            rules.required_mods(),
+            vec![
+                (1, "Map".into()),
+                (3604049451, "X".into()),
+                (2, "Dabs".into()),
+                (1559212036, "CF".into())
+            ]
+        );
     }
 
     #[test]

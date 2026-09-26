@@ -80,6 +80,7 @@ Junctions need no admin rights (unlike symlinks), which is why the official laun
 ```
 
 - `-mod=` takes **absolute paths** to the junctions, `;`-separated, the whole `-mod=…` as **one quoted argument** (spaces inside are fine because of the quotes).
+- **Order: the reverse of RULES.** The official launcher put `@CF` first, and the engine then processed the list back to front (Dabs Framework before CF in the same RPT). A server's RULES lists its mods frameworks last — the reverse of the `-mod=` its admin wrote — so a client that passes RULES as it comes runs the server's load order backwards. The launcher reverses RULES (D-265, S-89); the engine still sorts declared dependencies, so the difference shows only among mods that do not declare each other: `modded class` chains, file overrides.
 - Load order matters: dependencies (CF, Dabs Framework) first. Use the order the server reports in A2S_RULES.
 
 ### 5.2 BattlEye wrapper

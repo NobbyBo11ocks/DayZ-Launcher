@@ -162,6 +162,7 @@
       }
     })();
     return () => {
+      closed = true;
       pending.forEach((p) => void p.then((u) => u()));
       stopWaiting();
     };
@@ -197,7 +198,10 @@
     const poll = async () => {
       const s = await refreshSlots();
       checks += 1;
-      if (phase !== "waiting" || !s) return;
+      // `closed` as well as the phase: closing never changed the phase, so a poll
+      // already in flight when the player closed the dialog still found "waiting",
+      // and a slot freeing up then started DayZ from a dialog that was gone (D-265).
+      if (closed || phase !== "waiting" || !s) return;
       if (s.players < s.maxPlayers) {
         stopWaiting();
         try {
@@ -205,6 +209,7 @@
         } catch {
           /* attention request not permitted; the launch is the signal */
         }
+        if (closed) return;
         await launch();
       }
     };
@@ -236,6 +241,9 @@
       return;
     }
     try {
+      // Exits recorded for an earlier launch from this dialog: Windows reuses process
+      // ids, and an old entry under the new pid read as "DayZ exited" (D-265).
+      exited.clear();
       launched = await invoke<Launched>("launch_game", { id: serverId, password: password || null, profile: profile || null });
       const early = exited.get(launched.pid);
       if (early) {
@@ -269,7 +277,11 @@
    *  keyboard user back to `<body>` and lose the row they came from (D-198). */
   const opener = typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null;
 
+  /** Set once the dialog is closed or destroyed; a wait already in flight checks it (D-265). */
+  let closed = false;
+
   function close() {
+    closed = true;
     stopWaiting();
     onClose();
     // After the dialog is gone: focusing an element that is about to be hidden does

@@ -890,8 +890,11 @@ impl Cache {
         let tx = self.conn.transaction()?;
         {
             let mut del = tx.prepare_cached("DELETE FROM server_mods WHERE server_id = ?1")?;
+            // IGNORE, not REPLACE: a list that names an id twice kept it at its last
+            // position, which moved it in the load order the cached fallback launches
+            // with; the first mention is where the server put it (D-265).
             let mut ins = tx.prepare_cached(
-                "INSERT OR REPLACE INTO server_mods (server_id, mod_id, name) VALUES (?1, ?2, ?3)",
+                "INSERT OR IGNORE INTO server_mods (server_id, mod_id, name) VALUES (?1, ?2, ?3)",
             )?;
             let mut at = tx.prepare_cached(
                 "INSERT INTO server_mods_at (server_id, scanned_at, mod_count) VALUES (?1, ?2, ?3)

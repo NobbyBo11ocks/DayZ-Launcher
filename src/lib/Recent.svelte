@@ -27,8 +27,15 @@
       // made the host guess the query port, and the guess misses 14 % of populated
       // servers; Friends stopped guessing in D-245, this page in D-256. A typed port is
       // tried as the query port first, so the id needs no conversion.
-      const row = await servers.directConnect(h.id);
-      if (row) servers.joiningId = row.id;
+      let row = await servers.directConnect(h.id);
+      // The query port may belong to another server by now (hosts hand ports on): the
+      // game port it reports has to be the one this entry joined. And a server that
+      // moved its query port but kept its game port is found from the game port, which
+      // the host probes with the reply's game port checked (D-265).
+      if (row && row.gamePort !== h.gamePort) row = null;
+      if (!row) row = await servers.directConnect(`${h.ip}:${h.gamePort}`);
+      // Not over a dialog opened while the probe ran (D-265).
+      if (row && servers.joiningId === null) servers.joiningId = row.id;
       else servers.error = `${h.name} did not answer on ${h.ip}:${h.gamePort}; it may be offline or have moved.`;
     } finally {
       joining = null;

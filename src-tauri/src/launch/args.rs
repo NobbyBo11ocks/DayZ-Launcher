@@ -60,8 +60,29 @@ pub fn build_args(spec: &LaunchSpec) -> Vec<String> {
     if spec.no_pause {
         v.push("-noPause".into());
     }
-    v.extend(split_extra(&spec.extra_args));
+    // The join's own keys come from the join: `-connect`, `-port`, `-mod`, `-password`
+    // or `-name` in the extra arguments or a launch profile came after ours, and DayZ
+    // could take the later one and land the player somewhere else (D-265).
+    v.extend(
+        split_extra(&spec.extra_args)
+            .into_iter()
+            .filter(|a| !overrides_join(a)),
+    );
     v
+}
+
+/// An extra argument that would override something the join itself sets.
+fn overrides_join(arg: &str) -> bool {
+    let key = arg
+        .split('=')
+        .next()
+        .unwrap_or("")
+        .trim_start_matches('-')
+        .to_ascii_lowercase();
+    matches!(
+        key.as_str(),
+        "connect" | "port" | "mod" | "password" | "name"
+    )
 }
 
 /// Splits `a "b c" d` into `[a, b c, d]`; a quote nothing closes is ignored. It used to
@@ -203,6 +224,28 @@ mod tests {
                 r"-profiles=D:\My Profiles"
             ]
         );
+    }
+
+    #[test]
+    fn extras_cannot_override_the_join() {
+        // A profile's extras naming another server, port, mod set, password or name
+        // are dropped; everything else passes through (D-265).
+        let spec = LaunchSpec {
+            ip: "1.2.3.4".into(),
+            game_port: 2302,
+            extra_args: r#"-connect=9.9.9.9 -PORT=2402 -mod=@X -password=x -name=y -cpuCount=8 -profiles="D:\P""#.into(),
+            ..Default::default()
+        };
+        let args = build_args(&spec);
+        assert!(args.contains(&"-connect=1.2.3.4".to_string()));
+        assert!(args.contains(&"-port=2302".to_string()));
+        assert!(!args
+            .iter()
+            .any(|a| a.contains("9.9.9.9") || a.contains("2402") || a == "-mod=@X"));
+        assert!(!args
+            .iter()
+            .any(|a| a.starts_with("-password=") || a.starts_with("-name=")));
+        assert!(args.ends_with(&["-cpuCount=8".to_string(), r"-profiles=D:\P".to_string()]));
     }
 
     #[test]

@@ -9,7 +9,7 @@
   import { SvelteMap } from "svelte/reactivity";
   import { avatarDataUrl } from "./avatar";
   import { servers } from "./state/servers.svelte";
-  import { trustedPlayers, type FriendInfo, type FriendState } from "./types";
+  import { trustedPlayers, type FriendInfo, type FriendState, type ServerRow } from "./types";
 
   // Avatars (D-115): 32 px, requested once per friend when the row renders; Steam
   // answers from its cache, so a miss is retried once a few seconds later.
@@ -117,9 +117,21 @@
   /** The friend's server when it is already in our list (by ip:queryPort). */
   const serverOf = (f: FriendInfo) => (f.server && servers.rowsTick >= 0 ? (servers.rows.get(`${f.server.ip}:${f.server.queryPort}`) ?? null) : null);
 
+  /**
+   * The listed row for a friend known only by a game address (rich presence carries no
+   * query port): looked up by ip and game port, so a server already in the list is
+   * not probed for, and the probe's port guess — which misses 14 % of populated
+   * servers (D-245) — is not needed (D-265). Only on Join: it scans every row.
+   */
+  function byGameAddress(ip: string, gamePort: number): ServerRow | null {
+    for (const r of servers.rows.values()) if (r.ip === ip && r.gamePort === gamePort) return r;
+    return null;
+  }
+
   async function join(f: FriendInfo) {
     if (!f.server) return;
-    const known = serverOf(f);
+    if (joining) return;
+    const known = serverOf(f) ?? byGameAddress(f.server.ip, f.server.gamePort);
     if (known) {
       servers.select(known.id);
       servers.joiningId = known.id;
@@ -134,7 +146,9 @@
     const port = f.server.queryPort > 0 ? f.server.queryPort : f.server.gamePort;
     const row = await servers.directConnect(`${f.server.ip}:${port}`);
     joining = null;
-    if (row) servers.joiningId = row.id;
+    // A probe that answers late must not replace a dialog opened meanwhile, which could
+    // be mid-download or mid-launch (D-265).
+    if (row && servers.joiningId === null) servers.joiningId = row.id;
     // The store records the reason, but this page shows its own error line, so a
     // friend on an unreachable server looked like a button that does nothing (D-160).
     else error = servers.error ?? `${f.name}'s server did not answer; it may block queries or be behind a firewall.`;
@@ -199,7 +213,7 @@
               </td>
               <td class="act">
                 {#if f.server}
-                  <button class="btn" onclick={() => join(f)} disabled={joining === f.steamId} title="Join the same server">{joining === f.steamId ? "…" : "Join"}</button>
+                  <button class="btn" onclick={() => join(f)} disabled={joining !== null} title="Join the same server">{joining === f.steamId ? "…" : "Join"}</button>
                 {/if}
               </td>
             </tr>
