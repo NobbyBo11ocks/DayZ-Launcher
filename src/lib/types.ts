@@ -513,6 +513,8 @@ export type UiPrefs = {
   newsSeen: number;
   /** Show the News page, and fetch the feed behind it, at all (D-174). */
   news: boolean;
+  /** The version whose "What's new" notes were last shown; empty before 0.1.78 (D-301). */
+  lastSeenVersion: string;
 };
 
 /** One DayZ news post from Steam's feed (D-099). */

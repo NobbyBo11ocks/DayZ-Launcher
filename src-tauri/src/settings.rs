@@ -1,6 +1,7 @@
 //! Settings persisted as JSON in the app config directory (docs/05 §2): launch
 //! options plus the UI preferences (theme, accent, filters, onboarding, last update
-//! check, the News page's switch and its last-seen post). The UI ones used to live
+//! check, the News page's switch and its last-seen post, the version whose notes were
+//! last shown). The UI ones used to live
 //! only in the WebView's localStorage, which can be
 //! reset or detached from the app; the file is the source of truth and localStorage
 //! is an instant-start cache (D-070).
@@ -44,6 +45,9 @@ pub struct UiPrefs {
     /// Show the News page at all (D-174). Off removes it from the sidebar and stops
     /// the launcher fetching Steam's news feed, its pictures and YouTube previews.
     pub news: bool,
+    /// The launcher version whose "What's new" notes were last shown (D-301). Empty in
+    /// a file written before 0.1.78, which the front end reads as an update to this one.
+    pub last_seen_version: String,
 }
 
 impl Default for UiPrefs {
@@ -58,6 +62,7 @@ impl Default for UiPrefs {
             news_seen: 0,
             accent_default_v2: false,
             news: true,
+            last_seen_version: String::new(),
         }
     }
 }
@@ -662,6 +667,25 @@ mod tests {
         assert!(store.patch_ui(json!("nope")).is_err());
         let again = SettingsStore::load(&path).get().ui;
         assert_eq!(again, ui);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A file from before 0.1.78 has no version in it and reads as empty, which the
+    /// front end takes as an update to this one; the version it saves is kept (D-301).
+    #[test]
+    fn the_last_seen_version_starts_empty_and_is_kept() {
+        let old: Settings = parse_settings(br#"{"ui":{"onboarded":true}}"#).unwrap();
+        assert_eq!(old.ui.last_seen_version, "");
+        let path = temp_path("seen");
+        let store = SettingsStore::load(&path);
+        let ui = store
+            .patch_ui(json!({ "lastSeenVersion": "0.1.78" }))
+            .unwrap();
+        assert_eq!(ui.last_seen_version, "0.1.78");
+        assert_eq!(
+            SettingsStore::load(&path).get().ui.last_seen_version,
+            "0.1.78"
+        );
         let _ = std::fs::remove_file(&path);
     }
 }

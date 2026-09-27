@@ -295,7 +295,7 @@ flowchart LR
 
 1. Download `DZSA.CrayZ.Launcher_<version>_x64-setup.exe` from the [latest release](https://github.com/NobbyBo11ocks/DayZ-Launcher/releases/latest).
 2. Run it. It installs per user to `%LOCALAPPDATA%\Programs\DZSA CrayZ Launcher` and adds a Start menu entry. WebView2 is installed silently if Windows does not have it.
-3. Start Steam, then the launcher. Updates are one click: the launcher checks for a new release every time it starts, and again when you come back to its window an hour or more later, and offers it in Settings and the side rail; each release is signed with a minisign key and the app verifies the signature before installing.
+3. Start Steam, then the launcher. Updates are one click: the launcher checks for a new release every time it starts, and again when you come back to its window an hour or more later, and offers it in Settings and the side rail; after an update a short "What's new" window lists what changed. Each release is signed with a minisign key and the app verifies the signature before installing.
 
 > [!WARNING]
 > **SmartScreen.** The installer is not code-signed yet, so Windows shows "Windows protected your PC" on first run. Click **More info**, then **Run anyway**. Code signing is tracked in [docs/12](docs/12-code-signing.md).
@@ -382,10 +382,14 @@ npm install
 npm run tauri dev
 ```
 
-The seven checks CI runs, in order — `cargo fmt --check` is the one that catches people out:
+The eight checks CI runs, in order — `cargo fmt --check` is the one that catches people out:
 
 ```bash
 npm run check
+```
+
+```bash
+node tools/check_changes.js
 ```
 
 ```bash

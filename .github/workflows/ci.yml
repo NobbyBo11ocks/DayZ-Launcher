@@ -44,6 +44,11 @@ jobs:
       - name: Type-check the frontend
         run: npm run check
 
+      # Every release says what changed in the window after the update, in a player's
+      # words; the version being built must have its notes (D-301).
+      - name: Change notes
+        run: node tools/check_changes.js
+
       - name: Build the frontend
         run: npm run build
 

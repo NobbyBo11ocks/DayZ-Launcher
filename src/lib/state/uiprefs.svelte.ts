@@ -1,5 +1,5 @@
 // UI preferences (theme, accent, filters, onboarding, last update check, the News
-// page's switch and last-seen post) live in the
+// page's switch and last-seen post, the version whose notes were last shown) live in the
 // launcher's settings.json on the Rust side (D-070). localStorage is only an
 // instant-start cache kept by the individual stores; this module is the single
 // writer to the file. Patches are coalesced so a burst of filter toggles is one write.
@@ -18,6 +18,7 @@ export const defaultUiPrefs = (): UiPrefs => ({
   lastUpdateCheckMs: 0,
   newsSeen: 0,
   news: true,
+  lastSeenVersion: "",
 });
 
 /** Attempts to read the settings before giving up on the backend (D-112). */

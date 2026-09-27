@@ -77,6 +77,7 @@ A column in the left rail, under the sections, while the Servers page is open (D
 | Download in progress | progress per mod and a status line with the rate and the time left, in the join dialog |
 | Version mismatch | the version cell in amber with the tooltip "Server runs X; your DayZ is Y", the details pane's version chip in amber, and a warning in the join dialog |
 | Query failed | a ⚠ with "Server is not answering…" in the row; the details pane says "Not answering" after its own retry (D-272) |
+| After an update | the "What's new" window (D-301): every release since the one last seen, one short line per change under Added, Fixed, Changed or Removed in the News pill, and "Got it"; once per version, never on a first run (the welcome shows then) |
 
 The banner with "Open Steam", the "Locate DayZ_x64.exe" card, the bar inside the Join button and the grey retry row specified here were never built.
 

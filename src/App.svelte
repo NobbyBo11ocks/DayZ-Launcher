@@ -1,7 +1,8 @@
 <script lang="ts">
   import { listen } from "@tauri-apps/api/event";
   import { tick, untrack } from "svelte";
-  import { describe, installErrorHooks, logError } from "./lib/log";
+  import { compareVersions, unseenChanges, type Release } from "./lib/changes";
+  import { describe, installErrorHooks, invokeLogged, logError } from "./lib/log";
   import Favourites from "./lib/Favourites.svelte";
   import FilterPanel from "./lib/FilterPanel.svelte";
   import Friends from "./lib/Friends.svelte";
@@ -17,6 +18,7 @@
   import TitleBar from "./lib/TitleBar.svelte";
   import Toasts from "./lib/Toasts.svelte";
   import Welcome from "./lib/Welcome.svelte";
+  import WhatsNew from "./lib/WhatsNew.svelte";
   import { modUpdates } from "./lib/state/mods.svelte";
   import { news } from "./lib/state/news.svelte";
   import { prefs } from "./lib/state/prefs.svelte";
@@ -74,15 +76,20 @@
     void uiPrefs.ready.then((u) => {
       // Only a settings file that was actually read and says "not onboarded" opens
       // the overlay; an unreadable backend must not look like a first run (D-112).
-      if (u.onboarded || !uiPrefs.readOk) return;
-      let legacy = false;
-      try {
-        legacy = localStorage.getItem(ONBOARDED_KEY) != null;
-      } catch {
-        /* storage unavailable */
+      if (!uiPrefs.readOk) return;
+      let onboarded = u.onboarded;
+      if (!onboarded) {
+        let legacy = false;
+        try {
+          legacy = localStorage.getItem(ONBOARDED_KEY) != null;
+        } catch {
+          /* storage unavailable */
+        }
+        if (legacy) uiPrefs.patch({ onboarded: true });
+        else showWelcome = true;
+        onboarded = legacy;
       }
-      if (legacy) uiPrefs.patch({ onboarded: true });
-      else showWelcome = true;
+      void checkWhatsNew(u.lastSeenVersion ?? "", onboarded);
     });
   });
   function finishWelcome() {
@@ -95,6 +102,49 @@
     }
     // The overlay took the focused button with it, and the next Tab started at the
     // title bar's window buttons: the open section takes the focus instead (D-291).
+    void tick().then(() => document.querySelector<HTMLElement>('.rail-item[aria-current="page"]')?.focus());
+  }
+
+  // What changed, once after each update (user request, D-301). A first run has the
+  // welcome instead and only records the version; a settings file from before 0.1.78
+  // has none, which is an update to this one and gets its notes. The version counts as
+  // seen when the window is closed, not when it opens.
+  const SEEN_KEY = "dayz-launcher.whats-new-seen";
+  let whatsNew = $state<{ version: string; releases: Release[] } | null>(null);
+  async function checkWhatsNew(fileSeen: string, onboarded: boolean) {
+    let version: string;
+    try {
+      version = (await invokeLogged<{ version: string }>("app_info")).version;
+    } catch {
+      return;
+    }
+    // The newer of the file's mark and the copy in storage, as for the update check
+    // (D-281): a settings file that came back as the defaults must not show the same
+    // notes again (row 14, H4).
+    let seen = fileSeen;
+    try {
+      const kept = localStorage.getItem(SEEN_KEY) ?? "";
+      if (kept && (!seen || compareVersions(kept, seen) > 0)) seen = kept;
+    } catch {
+      /* storage unavailable */
+    }
+    if (seen === version) return;
+    const releases = onboarded ? unseenChanges(seen, version) : [];
+    if (releases.length > 0) whatsNew = { version, releases };
+    else markSeen(version);
+  }
+  function markSeen(version: string) {
+    uiPrefs.patch({ lastSeenVersion: version });
+    try {
+      localStorage.setItem(SEEN_KEY, version);
+    } catch {
+      /* the file has it */
+    }
+  }
+  function finishWhatsNew() {
+    if (whatsNew) markSeen(whatsNew.version);
+    whatsNew = null;
+    // As after the welcome: focus to the open section, not the window buttons (D-291).
     void tick().then(() => document.querySelector<HTMLElement>('.rail-item[aria-current="page"]')?.focus());
   }
 
@@ -260,4 +310,6 @@
 <Toasts />
 {#if showWelcome}
   <Welcome onDone={finishWelcome} />
+{:else if whatsNew}
+  <WhatsNew version={whatsNew.version} releases={whatsNew.releases} onDone={finishWhatsNew} />
 {/if}
