@@ -18,7 +18,7 @@ Mark a row `IN PROGRESS` before starting it, and leave notes there if work stops
 | 7 | **Front-end state and flows**: the servers store, filters, sort and counts, dialogs, event listeners — non-visual bugs only | done 2026-09-26 | D-281, released as v0.1.65: the details pane kept a server's first verdict; its missing marks disagreed with the join plan; uncountable rows were checked again on every scroll; 8 more |
 | 8 | **Security and privacy** (the `junction` crate's `unstable_admin` carry-over from row 5 is fixed already, D-282) | done 2026-09-26 | D-283, released as v0.1.67: a Workshop mod's name could add game arguments through Windows' best-fit conversion; the News player's popups escaped its sandbox; a cleared history stayed readable in free pages |
 | 9 | **Performance** at the current row counts (~40 000 cached servers) | done 2026-09-26 | D-284, released as v0.1.68: the name sort re-ranked every row on each new id (176 ms at 71 000); every flush re-read every row; start-up sent 36 MB of JSON; 5 more |
-| 10 | **Docs against code** | todo | |
+| 10 | **Docs against code** | IN PROGRESS since 2026-09-27 06:12 UTC | |
 | 11 | **Accessibility** — report only: every item needs approval first | todo | |
 
 
