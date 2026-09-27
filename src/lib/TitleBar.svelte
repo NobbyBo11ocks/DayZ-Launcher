@@ -21,7 +21,7 @@
        handle, like the rest of the bar. -->
   <img class="mark" src={emblemUrl} alt="" width="18" height="20" draggable="false" data-tauri-drag-region />
   {#if servers != null}
-    <span class="stat" data-tauri-drag-region title="Servers with a verified player count above zero">
+    <span class="stat" data-tauri-drag-region title="Servers with players; flagged ones are not counted">
       <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.4" /><path d="M1.6 8h12.8M8 1.6c2.6 2.6 2.6 10.2 0 12.8M8 1.6C5.4 4.2 5.4 11.8 8 14.4" /></svg>
       {fmt.format(servers)} servers with players
     </span>

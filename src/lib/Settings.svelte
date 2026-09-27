@@ -265,7 +265,7 @@
           <p class="note credits">
             IP geolocation by <a href="https://db-ip.com" onclick={external}>DB-IP</a> (IP to Country Lite, CC BY 4.0).
             Flags by <a href="https://github.com/lipis/flag-icons" onclick={external}>flag-icons</a> (MIT).
-            Server data comes from Steam and the servers themselves; nothing is sent anywhere else.
+            Server data comes from Steam, the servers themselves and, when Steam will not start, DZSA's public list. Nothing about you is sent anywhere.
           </p>
         </div>
       </section>

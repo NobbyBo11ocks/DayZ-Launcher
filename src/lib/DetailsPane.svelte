@@ -330,7 +330,7 @@
       <!-- R10 hid the row with nothing here to say why (D-238). -->
       {#if row.clone}
         <strong>Name taken from another server</strong>
-        <span class="muted">A server with exactly this name has verified players at another address; this copy has never been counted.</span>
+        <span class="muted">A server with this name has verified players at another address; this copy's own check has not verified it.</span>
       {:else if r0}
         <!-- R0 hides the row whatever a later check counts. This branch used to give way
              to the pane's own check, which then showed a green "Verified head-count"

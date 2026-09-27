@@ -1465,6 +1465,14 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
                 mods
             }
             Some(_) => Vec::new(),
+            // What `launch_game` will do with it: a modded server with nothing stored is
+            // refused there, so the plan must not promise a launch without mods (D-289).
+            None if row.tags.modded => {
+                warnings.push(format!(
+                    "Could not read the server's mod list ({e}) and it has never been scanned; Join will not start the game until the list can be read. Try again in a moment."
+                ));
+                Vec::new()
+            }
             None => {
                 warnings.push(format!(
                     "Could not read the server's mod list ({e}) and it has never been scanned; launching without mods."

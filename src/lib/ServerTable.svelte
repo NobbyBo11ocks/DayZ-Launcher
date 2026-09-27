@@ -309,11 +309,11 @@
               role="gridcell"
               class="cell c-num players"
               title={r.clone
-                ? "Same name as a server that verified on another address; this copy never has"
+                ? "Same name as a server verified on another address; this copy's own check has not verified it"
                 : isInflated(r)
                   ? `Steam reports 0 authenticated players; the server claims ${r.players}`
                 : r.players > 127
-                  ? "Claims more players than the 127 a DayZ server can hold"
+                  ? "Claims more players than any DayZ server this launcher has counted"
                 : r.verifiedPlayers == null && (r.bots ?? 0) > 0 && r.bots === r.players
                   ? "Reports as many bots as players, the mark of a patched player count, and has never been counted"
                 : r.verdict === "inflated"

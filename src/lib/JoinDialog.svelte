@@ -512,7 +512,7 @@
   .msize { grid-area: size; font-size: 11.5px; }
   .mstate { grid-area: state; font-size: 11.5px; text-align: right; }
   .pbar { grid-area: bar; height: 3px; background: var(--bg-row); border-radius: 2px; overflow: hidden; }
-  .pfill { display: block; height: 100%; background: var(--accent); transition: width 200ms; }
+  .pfill { display: block; height: 100%; background: var(--accent); transition: width 150ms; }
   .field { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--fg-muted); }
   .field input { padding: 6px 10px; border-radius: var(--radius); border: 1px solid var(--border-control); background: var(--bg-row); color: var(--fg); }
   .wait { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: var(--radius); border: 1px solid color-mix(in srgb, var(--warn) 50%, var(--border)); font-size: 12.5px; color: var(--fg-muted); cursor: pointer; }
