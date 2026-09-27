@@ -44,8 +44,9 @@
       if (!row) row = await servers.directConnect(`${h.ip}:${h.gamePort}`, false);
       // Not over a dialog opened while the probe ran (D-265), and not reported as
       // silent when it did answer: that dialog is simply left alone (D-281).
-      if (!row) servers.error = `${h.name} did not answer on ${h.ip}:${h.gamePort}; it may be offline or have moved.`;
-      else if (servers.joiningId === null) {
+      if (!row) servers.fail("recent", `${h.name} did not answer on ${h.ip}:${h.gamePort}; it may be offline or have moved.`);
+      else servers.succeeded("recent");
+      if (row && servers.joiningId === null) {
         servers.selectedId = row.id;
         servers.requestJoin(row.id);
       }

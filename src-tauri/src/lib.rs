@@ -88,6 +88,167 @@ fn in_memory_cache(why: &str) -> browser::Cache {
     }
 }
 
+/// Opens `cache.db` for writing, or decides what its failure means (D-302).
+///
+/// D-162 moved a database aside when it would not open, so a corrupt file could not
+/// stop the app starting with no window and no message, and D-187 made the database
+/// and its -wal and -shm move together or not at all: a write-ahead log is part of the
+/// database, never rubbish to sweep up. That still moved the database on *any* error,
+/// and a lock on the -wal or -shm alone — an antivirus scan, a backup, a sync client —
+/// fails the open with SQLITE_CANTOPEN. The intact database moved, its held -wal could
+/// not follow and was renamed where SQLite never looks for it, and the next start made
+/// a new database beside a -wal that SQLite then reset: favourites and joins that lived
+/// only there were gone (row 14, H2; reproduced with 50 of each). Only SQLite's own
+/// verdict that the file is damaged moves it now; anything else runs in memory for the
+/// session and leaves every byte where it was.
+///
+/// A file SQLite *can* open is not necessarily one it can write: a handle that denies
+/// writers on cache.db opens it read-only, and one on the -wal or -shm lets it open and
+/// then fails every write, and either way the session looked normal and kept nothing
+/// (row 14, H3). A write in a transaction that is rolled back finds out; the file is
+/// opened again for two seconds in case the lock clears, then the session runs in
+/// memory.
+fn open_cache(db_path: &std::path::Path) -> Cache {
+    const REOPENS: u32 = 8;
+    let mut tries = 0;
+    let err = loop {
+        match Cache::open(db_path) {
+            Ok(c) => match c.probe_write() {
+                Ok(()) => return c,
+                // Another writer: SQLite has already waited its five seconds, and a
+                // busy database is a writable one once it is done.
+                Err(e) if cache_busy(&e) => {
+                    log_warn!(
+                        "cache",
+                        "{} is busy at start ({e}); carrying on",
+                        db_path.display()
+                    );
+                    return c;
+                }
+                Err(e) if tries < REOPENS => {
+                    if tries == 0 {
+                        log_warn!(
+                            "cache",
+                            "{} cannot be written ({e}); opening it again",
+                            db_path.display()
+                        );
+                    }
+                    tries += 1;
+                    drop(c);
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                }
+                Err(e) => {
+                    log_error!(
+                        "cache",
+                        "{} still cannot be written ({e}); it is most likely held by another program, such as antivirus or a backup. Nothing was changed",
+                        db_path.display()
+                    );
+                    return in_memory_cache(&format!("{e}"));
+                }
+            },
+            Err(e) => break e,
+        }
+    };
+    log_error!("cache", "open failed at {}: {err}", db_path.display());
+    let damaged = matches!(
+        err.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase)
+    );
+    if !damaged {
+        // Almost always a lock, and a locked database is intact: the right answer is
+        // to leave every byte alone and say so.
+        log_error!(
+            "cache",
+            "{} is not damaged, most likely held by another program, such as antivirus or a backup. Nothing was changed",
+            db_path.display()
+        );
+        return in_memory_cache(&format!("{err}"));
+    }
+    match move_aside(db_path) {
+        Ok(aside) => match Cache::open(db_path) {
+            Ok(c) => {
+                log_warn!(
+                    "cache",
+                    "damaged, moved to {} with its log; started on an empty cache. Favourites, history and population are in the moved file",
+                    aside.display()
+                );
+                c
+            }
+            Err(e2) => {
+                log_error!(
+                    "cache",
+                    "damaged, moved to {}; a new cache could not be opened either: {e2}",
+                    aside.display()
+                );
+                in_memory_cache(&format!("{e2}"))
+            }
+        },
+        Err(move_err) => {
+            log_error!(
+                "cache",
+                "damaged, but {} could not be moved with its log ({move_err}). Nothing was changed",
+                db_path.display()
+            );
+            in_memory_cache(&format!("{err}"))
+        }
+    }
+}
+
+fn cache_busy(e: &rusqlite::Error) -> bool {
+    matches!(
+        e.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)
+    )
+}
+
+/// `path` with `suffix` added to the whole name, the way SQLite names a database's
+/// -wal and -shm.
+fn with_suffix(path: &std::path::Path, suffix: &str) -> std::path::PathBuf {
+    let mut s = path.as_os_str().to_owned();
+    s.push(suffix);
+    s.into()
+}
+
+/// Moves a damaged `cache.db` aside with its -wal and -shm, under the names SQLite pairs
+/// them by (`cache.db.broken-<stamp>-wal`), side files first so a -wal is never left for
+/// the new database to adopt or reset. They were renamed `cache.db.db-wal-<stamp>`,
+/// which SQLite never pairs with anything (row 14, H2). A side file that exists and
+/// cannot move puts back whatever moved, and the error says why.
+fn move_aside(db_path: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+    let aside = with_suffix(
+        db_path,
+        &format!(".broken-{}", browser::ServerRow::now_unix()),
+    );
+    let mut moved: Vec<(std::path::PathBuf, std::path::PathBuf)> = Vec::new();
+    let undo = |moved: &[(std::path::PathBuf, std::path::PathBuf)]| {
+        for (from, to) in moved.iter().rev() {
+            let _ = std::fs::rename(to, from);
+        }
+    };
+    for suffix in ["-wal", "-shm"] {
+        let from = with_suffix(db_path, suffix);
+        match std::fs::symlink_metadata(&from) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                undo(&moved);
+                return Err(e);
+            }
+            Ok(_) => {}
+        }
+        let to = with_suffix(&aside, suffix);
+        if let Err(e) = std::fs::rename(&from, &to) {
+            undo(&moved);
+            return Err(e);
+        }
+        moved.push((from, to));
+    }
+    if let Err(e) = std::fs::rename(db_path, &aside) {
+        undo(&moved);
+        return Err(e);
+    }
+    Ok(aside)
+}
+
 /// A dialog for the failures that happen before there is a window to put a message in.
 ///
 /// `panic = "abort"` and `windows_subsystem = "windows"` between them mean a panic in
@@ -268,61 +429,7 @@ pub fn run() {
                 .name("temp-sweep".into())
                 .spawn(move || sweep_updater_leftovers(&product));
             let db_path = data_dir.join("cache.db");
-            let cache = Arc::new(Mutex::new(match Cache::open(&db_path) {
-                Ok(c) => c,
-                Err(e) => {
-                    // D-162 moved a database aside when it would not open, so a corrupt
-                    // file could not stop the app starting with no window and no message.
-                    // It then deleted the -wal and -shm unconditionally, and that is a way
-                    // to destroy data rather than recover it (D-187): when the file is
-                    // *locked* rather than corrupt — an antivirus scan, a backup, a sync
-                    // client — the rename fails while deleting the unlocked -wal succeeds,
-                    // so the retry reopens the original database with every uncheckpointed
-                    // commit gone. Favourites, join history and population live only here,
-                    // and that is exactly the Q22 symptom.
-                    //
-                    // So: the three files move together or nothing moves. A write-ahead log
-                    // is part of the database, never rubbish to sweep up.
-                    log_error!("cache", "open failed at {}: {e}", db_path.display());
-                    let stamp = browser::ServerRow::now_unix();
-                    let aside = db_path.with_extension(format!("db.broken-{stamp}"));
-                    match std::fs::rename(&db_path, &aside) {
-                        Ok(()) => {
-                            // The database moved, so its log and shared-memory file belong
-                            // with it; a leftover -wal would be adopted by the new file.
-                            for ext in ["db-wal", "db-shm"] {
-                                let from = db_path.with_extension(ext);
-                                let to = aside.with_extension(format!("{ext}-{stamp}"));
-                                let _ = std::fs::rename(&from, &to);
-                            }
-                            match Cache::open(&db_path) {
-                                Ok(c) => {
-                                    log_warn!(
-                                        "cache",
-                                        "unreadable, moved to {} with its log; started on an empty cache. Favourites, history and population are in the moved file",
-                                        aside.display()
-                                    );
-                                    c
-                                }
-                                Err(e2) => {
-                                    log_error!("cache", "second open failed as well: {e2}");
-                                    in_memory_cache(&format!("{e2}"))
-                                }
-                            }
-                        }
-                        Err(move_err) => {
-                            // Almost always a lock, and a locked database is intact: the
-                            // right answer is to leave every byte alone and say so.
-                            log_error!(
-                                "cache",
-                                "could not open or move {} ({move_err}); the file is most likely held by another program, such as antivirus or a backup. Nothing was changed",
-                                db_path.display()
-                            );
-                            in_memory_cache(&format!("{e}"))
-                        }
-                    }
-                }
-            }));
+            let cache = Arc::new(Mutex::new(open_cache(&db_path)));
             let settings = SettingsStore::load(&app.path().app_config_dir()?.join("settings.json"));
             // Start-up logs before this point are kept deliberately: they are the ones
             // that explain a failure to start. From here the user's choice applies (D-169).
@@ -422,9 +529,12 @@ pub fn run() {
                                     ))
                                     .collect::<Vec<_>>()
                             );
+                            // A rejection names its reason: "busy", "no-session" and
+                            // "no-answer" all logged as an empty refresh with early=true, and
+                            // the log could not tell them from one another (row 14, H12).
                             log_info!(
                                 "steam",
-                                "refresh done ({}): {} listed, {} answered, {} failed, {} inflated, capped={} early={} in {} ms across {} partition(s)",
+                                "refresh done ({}): {} listed, {} answered, {} failed, {} inflated, capped={} early={}{} in {} ms across {} partition(s)",
                                 d.source,
                                 d.total,
                                 d.responded,
@@ -432,6 +542,11 @@ pub fn run() {
                                 d.inflated,
                                 d.capped,
                                 d.stopped_early,
+                                if d.rejected {
+                                    format!(" rejected={}", d.reason.unwrap_or("?"))
+                                } else {
+                                    String::new()
+                                },
                                 d.elapsed_ms,
                                 d.partitions.len()
                             );
@@ -792,7 +907,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::sweep_updater_leftovers;
+    use super::{move_aside, sweep_updater_leftovers, with_suffix};
 
     /// D-279: the updater's own leftovers go; anything else in the temp folder stays.
     #[test]
@@ -826,5 +941,51 @@ mod tests {
         for d in [&busy, &alike] {
             let _ = std::fs::remove_dir_all(d);
         }
+    }
+
+    /// A damaged cache moves with its -wal and -shm, under the names SQLite pairs them
+    /// by; a side file held by another program keeps all three where they were (D-302).
+    #[test]
+    fn a_damaged_cache_moves_with_its_log_or_not_at_all() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = std::env::temp_dir().join(format!("dzl-aside-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("cache.db");
+        let put = || {
+            std::fs::write(&db, b"not a database").unwrap();
+            std::fs::write(with_suffix(&db, "-wal"), b"log").unwrap();
+            std::fs::write(with_suffix(&db, "-shm"), b"index").unwrap();
+        };
+
+        put();
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(with_suffix(&db, "-shm"))
+            .unwrap();
+        assert!(move_aside(&db).is_err(), "a held -shm refuses the move");
+        drop(held);
+        for suffix in ["", "-wal", "-shm"] {
+            assert!(
+                with_suffix(&db, suffix).exists(),
+                "cache.db{suffix} was put back"
+            );
+        }
+
+        let aside = move_aside(&db).unwrap();
+        assert!(!db.exists());
+        assert_eq!(std::fs::read(&aside).unwrap(), b"not a database");
+        assert_eq!(std::fs::read(with_suffix(&aside, "-wal")).unwrap(), b"log");
+        assert_eq!(
+            std::fs::read(with_suffix(&aside, "-shm")).unwrap(),
+            b"index"
+        );
+        assert!(aside
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("cache.db.broken-"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

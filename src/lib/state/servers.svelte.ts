@@ -10,7 +10,7 @@ import { Channel } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { uiPrefs } from "./uiprefs.svelte";
-import { describe, logWarn } from "../log";
+import { describe, logError, logWarn } from "../log";
 import { type CachedServers, compactRow, decodeCachedRows, type Favourite, type FriendInfo, type HistoryEntry, type ImportResult, isInflated, isUntrusted, type ModScanSummary, type ModsIndex, queueOf, type RefreshDone, type ServerMods, type ServerRow, type SteamStatus, trustedPlayers, type Verification, type VerifySummary } from "../types";
 
 export type SortKey = "name" | "map" | "mods" | "players" | "ping" | "time" | "version";
@@ -156,6 +156,8 @@ const STALE_SECS = 120;
  *  PLAYER, or a list judged synthetic): nothing new comes back sooner, and each offline
  *  probe costs the host a patient retry (D-272, D-281). */
 const UNCOUNTED_STALE_SECS = 600;
+/** How many failed refreshes a session re-arms the automatic refresh for (row 14, F3). */
+const MAX_AUTO_REARMS = 3;
 /** Title-bar friend count poll (D-103); Steam answers from its local cache. */
 const FRIENDS_POLL_MS = 60_000;
 /** One collator for the whole session: `localeCompare` builds one per call (D-152). */
@@ -442,6 +444,20 @@ class ServersStore {
   selectedId = $state<string | null>(null);
   localVersion = $state<string | null>(null);
   error = $state<string | null>(null);
+  /** Which action last put `error` up, so that action's next success takes it down again.
+   *  The line is shared by Servers, Favourites, LAN and Recent: a failed star stayed red
+   *  after the next one saved, and Recent's "did not answer" turned up later on the
+   *  Servers page (row 14, F10). */
+  #errorBy: { from: string; message: string } | null = null;
+  fail(from: string, message: string) {
+    this.error = message;
+    this.#errorBy = { from, message };
+  }
+  succeeded(from: string) {
+    if (this.#errorBy?.from !== from) return;
+    if (this.error === this.#errorBy.message) this.error = null;
+    this.#errorBy = null;
+  }
   lastRefresh = $state<number | null>(null);
   verifying = $state(false);
   #verifyingSince = 0;
@@ -486,6 +502,12 @@ class ServersStore {
   #unlisten: UnlistenFn[] = [];
   #started = false;
   #autoRefreshed = false;
+  /** Times a failed refresh has re-armed the automatic one this session (row 14, F3). */
+  #rearms = 0;
+  /** The Steam refresh runs again at the next usable status. Its own flag: clearing
+   *  `#autoRefreshed` would also re-open the DZSA fallback, which is for a Steam that
+   *  never started, not one that left mid-session. */
+  #retryArmed = false;
 
   /** The user changed a filter before the settings file was read (D-197). */
   #filtersTouched = false;
@@ -952,8 +974,9 @@ class ServersStore {
     if (!this.modsIndexLoaded) void this.loadModsIndex();
     try {
       await invoke("mods_scan");
+      this.succeeded("scan");
     } catch (e) {
-      this.error = String(e);
+      this.fail("scan", String(e));
     }
   }
 
@@ -1040,7 +1063,17 @@ class ServersStore {
     // compiled, about 0.5 MB a 358-row batch and some 50 MB for minutes after a full
     // Refresh. Subscribed before anything below can start a refresh.
     const stream = new Channel<RowsMsg>();
-    stream.onmessage = (m) => this.#onRows(m);
+    // The channel counts a message as delivered only once its handler returns: one
+    // throw parked every later message for good, and the list stopped updating for the
+    // session with a Refresh that could not help (row 14, F2). One bad message is now
+    // one message.
+    stream.onmessage = (m) => {
+      try {
+        this.#onRows(m);
+      } catch (e) {
+        logError("rows", `a ${m.kind} message failed: ${describe(e)}`);
+      }
+    };
     await invoke("rows_subscribe", { channel: stream });
     this.#unlisten.push(
       () => (stream.onmessage = () => {}),
@@ -1149,7 +1182,8 @@ class ServersStore {
     // this, and after a declined start-up refresh the next one was the idle release
     // itself — so the retry re-opened the session the release had just closed and put
     // the user back to "Playing DayZ" for another quarter of an hour (D-236).
-    if (this.steam?.initialized && !this.steam.idle && !this.steam.refreshing && !this.#autoRefreshed) {
+    if (this.steam?.initialized && !this.steam.idle && !this.steam.refreshing && (!this.#autoRefreshed || this.#retryArmed)) {
+      this.#retryArmed = false;
       // Armed by `refresh` itself, from what the worker actually answered. Set here,
       // it was spent even when the worker declined — and it declines for 60 s after
       // the last completed refresh, seeded across restarts from the cache. So a
@@ -1321,7 +1355,17 @@ class ServersStore {
       if (d.reason !== "busy") {
         this.verifying = false;
         this.#verifyingSince = 0;
-        this.error = "Steam did not answer the refresh, so the list was not updated.";
+        this.fail("refresh", "Steam did not answer the refresh, so the list was not updated.");
+        // Steam closed, restarted or answered nothing: the automatic refresh was spent,
+        // so nothing followed when Steam was back, and the cached list and this line
+        // stayed until someone pressed the multi-minute Refresh (row 14, F3/H7). It runs
+        // again the next time Steam is usable, by the idle rule of D-236; a few times a
+        // session at most, so a Steam whose list service keeps answering nothing is
+        // not asked for ever and can still be released.
+        if (this.#rearms < MAX_AUTO_REARMS) {
+          this.#rearms++;
+          this.#retryArmed = true;
+        }
       }
       return;
     }
@@ -1536,6 +1580,9 @@ class ServersStore {
 
   /** Called by the table with the ids currently on screen (debounced there). */
   async verifyVisible(ids: string[]) {
+    // Windows says so when there is no network at all: nothing to ask, and nothing a
+    // check could learn (row 14, F1/H1; the host keeps silence from the rows too).
+    if (!navigator.onLine) return;
     const now = Math.floor(Date.now() / 1000);
     const stale = ids.filter((id) => {
       const r = this.rows.get(id);
@@ -1549,8 +1596,9 @@ class ServersStore {
     for (const id of stale) this.#pending.add(id);
     try {
       await invoke<VerifySummary>("servers_verify", { ids: stale.slice(0, 120) });
+      this.succeeded("verify");
     } catch (e) {
-      this.error = String(e);
+      this.fail("verify", String(e));
     } finally {
       for (const id of stale) this.#pending.delete(id);
     }
@@ -1572,8 +1620,9 @@ class ServersStore {
     else this.favourites.delete(id);
     try {
       await invoke("favourite_set", { id, on });
+      this.succeeded("favourite");
     } catch (e) {
-      this.error = String(e);
+      this.fail("favourite", String(e));
       if (on) this.favourites.delete(id);
       else this.favourites.add(id);
     }
@@ -1582,8 +1631,9 @@ class ServersStore {
   async loadHistory() {
     try {
       this.history = await invoke<HistoryEntry[]>("history_list", { limit: 100 });
+      this.succeeded("history");
     } catch (e) {
-      this.error = String(e);
+      this.fail("history", String(e));
     }
   }
 
@@ -1592,8 +1642,9 @@ class ServersStore {
     try {
       await invoke("history_clear");
       this.history = [];
+      this.succeeded("history");
     } catch (e) {
-      this.error = String(e);
+      this.fail("history", String(e));
     }
   }
 

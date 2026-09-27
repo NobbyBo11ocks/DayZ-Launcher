@@ -12,6 +12,8 @@ import { uiPrefs } from "./uiprefs.svelte";
 import type { NewsCached, NewsItem } from "../types";
 
 const REFRESH_MS = 30 * 60_000;
+/** The least time between two retries of a failed fetch (row 14, F6). */
+const RETRY_GAP_MS = 60_000;
 /** On the very first run, only this many of the newest official posts count as unread. */
 const FIRST_RUN_UNREAD = 5;
 
@@ -86,11 +88,25 @@ class NewsStore {
     // interval nothing can clear (D-197), and so would a newer `start()`.
     if (!this.#started || run !== this.#run) return;
     this.#timer = setInterval(() => void this.refresh(), REFRESH_MS);
+    window.addEventListener("online", this.#retryIfFailed);
+    window.addEventListener("focus", this.#retryIfFailed);
   }
+
+  /** A failed fetch is tried again when the connection or the window comes back, at most
+   *  once a minute: started offline, the page showed its error for up to half an hour
+   *  after the connection returned, with no Refresh to press (D-122; row 14, F6). */
+  #lastRetry = 0;
+  #retryIfFailed = () => {
+    if (!this.error || !this.#started || Date.now() - this.#lastRetry < RETRY_GAP_MS) return;
+    this.#lastRetry = Date.now();
+    void this.refresh();
+  };
 
   /** Stops fetching for the rest of the session; `start()` arms it again. */
   stop() {
     this.#started = false;
+    window.removeEventListener("online", this.#retryIfFailed);
+    window.removeEventListener("focus", this.#retryIfFailed);
     if (this.#timer !== undefined) {
       clearInterval(this.#timer);
       this.#timer = undefined;
@@ -113,6 +129,9 @@ class NewsStore {
       if (!this.#started) return;
       this.#setItems(c.items);
       this.error = null;
+      // Pictures that failed are asked for again: one that failed while offline, or on
+      // a slow line, stayed missing for the whole session (row 14, H10).
+      this.#thumbFailed.clear();
       if (before === 0) {
         // First run: the newest few are "new", not the whole archive.
         const official = c.items.filter((n) => n.official);

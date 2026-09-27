@@ -195,6 +195,20 @@ pub struct SettingsStore {
     /// permission. The defaults in memory are not the user's settings, so nothing may
     /// be written over the file until a read succeeds (D-239).
     unread: AtomicBool,
+    /// The file could not be parsed and was kept aside (`set_aside`): the settings in
+    /// memory are the defaults standing in for it (row 14, H4).
+    reset: AtomicBool,
+}
+
+/// Whether the settings handed out are the player's own (row 14, H4).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SettingsHealth {
+    /// The file exists but still cannot be read.
+    pub unreadable: bool,
+    /// The file was damaged and set aside this session.
+    pub reset: bool,
+    /// The file became readable just now and its settings replaced the defaults.
+    pub adopted: bool,
 }
 
 /// A settings file is a JSON object. Anything else is corruption, whatever serde is
@@ -236,11 +250,13 @@ impl SettingsStore {
         // unreadable file meant the next preference change wrote them over the user's
         // launch profiles for good (D-162). Keep a copy and say so.
         let mut unread = false;
+        let mut reset = false;
         let mut current = match std::fs::read(path) {
             Ok(bytes) => match parse_settings(&bytes) {
                 Ok(s) => s,
                 Err(e) => {
                     set_aside(path, &bytes, &e);
+                    reset = true;
                     Settings::default()
                 }
             },
@@ -264,6 +280,7 @@ impl SettingsStore {
             path: path.to_path_buf(),
             current: Mutex::new(current),
             unread: AtomicBool::new(unread),
+            reset: AtomicBool::new(reset),
         };
         store.apply_install_choices();
         store
@@ -334,6 +351,7 @@ impl SettingsStore {
                 // Corrupt after all: what `load` would have done with it.
                 Err(e) => {
                     set_aside(&self.path, &bytes, &e);
+                    self.reset.store(true, Ordering::Release);
                     false
                 }
             },
@@ -350,6 +368,22 @@ impl SettingsStore {
         self.unread.store(false, Ordering::Release);
         crate::log_info!("settings", "{} readable again", self.path.display());
         Ok(adopted)
+    }
+
+    /// The settings for the page, and whether they are the player's own. A file that
+    /// could not be read is tried again first, as every write does: `get` alone never
+    /// re-read it, so the page went on showing the defaults as the player's settings —
+    /// the News page back on, logging back on, no launch profiles — with nothing on
+    /// screen to say so (row 14, H4).
+    pub fn get_checked(&self) -> (Settings, SettingsHealth) {
+        let mut cur = self.current.lock().unwrap_or_else(|e| e.into_inner());
+        let adopted = self.settle(&mut cur).unwrap_or(false);
+        let health = SettingsHealth {
+            unreadable: self.unread.load(Ordering::Acquire),
+            reset: self.reset.load(Ordering::Acquire),
+            adopted,
+        };
+        (cur.clone(), health)
     }
 
     pub fn get(&self) -> Settings {
@@ -423,12 +457,22 @@ impl SettingsStore {
             f.write_all(&json)?;
             f.sync_all()?;
         }
-        match std::fs::rename(&tmp, &self.path) {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                let _ = std::fs::remove_file(&tmp);
-                crate::log_error!("settings", "could not replace {}: {e}", self.path.display());
-                Err(e)
+        // A scanner, a backup or a sync client with the file open for a moment makes the
+        // replace fail with "Access is denied" (row 14, H9, reproduced): a short retry
+        // rides that out instead of losing the change.
+        let mut tries = 0;
+        loop {
+            match std::fs::rename(&tmp, &self.path) {
+                Ok(()) => return Ok(()),
+                Err(_) if tries < 10 => {
+                    tries += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                Err(e) => {
+                    let _ = std::fs::remove_file(&tmp);
+                    crate::log_error!("settings", "could not replace {}: {e}", self.path.display());
+                    return Err(e);
+                }
             }
         }
     }
@@ -668,6 +712,56 @@ mod tests {
         let again = SettingsStore::load(&path).get().ui;
         assert_eq!(again, ui);
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// The page is told when the settings it gets are the defaults standing in for the
+    /// player's: a file that cannot be read, then reads (adopted), and a damaged one set
+    /// aside (row 14, H4).
+    #[test]
+    fn the_page_is_told_when_the_settings_are_not_the_players() {
+        let path = temp_path("health");
+        let _ = std::fs::remove_file(&path);
+        std::fs::create_dir_all(&path).unwrap();
+        let store = SettingsStore::load(&path);
+        let (_, h) = store.get_checked();
+        assert!(h.unreadable && !h.reset && !h.adopted);
+        std::fs::remove_dir(&path).unwrap();
+        std::fs::write(
+            &path,
+            br#"{"profileName":"Survivor","steamIdleMinutes":30}"#,
+        )
+        .unwrap();
+        let (s, h) = store.get_checked();
+        assert!(
+            !h.unreadable && !h.reset && h.adopted,
+            "read at last: {h:?}"
+        );
+        assert_eq!(
+            (s.profile_name.as_str(), s.steam_idle_minutes),
+            ("Survivor", 30)
+        );
+        let (_, h) = store.get_checked();
+        assert!(!h.adopted, "adopted once");
+        let _ = std::fs::remove_file(&path);
+
+        let damaged = temp_path("damaged");
+        std::fs::write(&damaged, b"{ not json").unwrap();
+        let store = SettingsStore::load(&damaged);
+        let (s, h) = store.get_checked();
+        assert!(h.reset && !h.unreadable);
+        assert_eq!(s.profile_name, "");
+        let _ = std::fs::remove_file(&damaged);
+        if let Some(dir) = damaged.parent() {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let name = e.file_name().to_string_lossy().into_owned();
+                if name.starts_with(&format!(
+                    "dzl-settings-damaged-{}.json.unreadable-",
+                    std::process::id()
+                )) {
+                    let _ = std::fs::remove_file(e.path());
+                }
+            }
+        }
     }
 
     /// A file from before 0.1.78 has no version in it and reads as empty, which the

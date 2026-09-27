@@ -229,6 +229,20 @@ impl Cache {
         Self::migrate(conn)
     }
 
+    /// Writes one row in a transaction and rolls it back: SQLite opens a database it
+    /// cannot write without complaint, read-only when cache.db is held against writers
+    /// and apparently writable when the -wal or -shm is (row 14, H3). `BEGIN IMMEDIATE`
+    /// alone passes the first of those, so the probe is a real write.
+    pub fn probe_write(&self) -> rusqlite::Result<()> {
+        self.conn.execute_batch("BEGIN IMMEDIATE;")?;
+        let wrote = self.conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('write_probe', '1')",
+            [],
+        );
+        let _ = self.conn.execute_batch("ROLLBACK;");
+        wrote.map(|_| ())
+    }
+
     /// A cache that exists only for this run. The tests use it, and so does start-up
     /// when the real file cannot be opened *or* moved aside: browsing still works
     /// because the list comes from Steam, and refusing to start instead loses the

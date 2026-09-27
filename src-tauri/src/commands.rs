@@ -169,8 +169,32 @@ pub fn steam_status(state: State<'_, AppState>) -> SteamStatus {
 }
 
 #[tauri::command]
-pub fn settings_get(state: State<'_, AppState>) -> Settings {
-    state.settings.get()
+pub fn settings_get(state: State<'_, AppState>) -> SettingsView {
+    let (settings, health) = state.settings.get_checked();
+    // Adopted late, the file's idle timeout never reached the Steam thread, which kept
+    // the default until a save from Settings (row 14, H4).
+    if health.adopted {
+        state.steam.set_idle_timeout(settings.steam_idle_timeout());
+    }
+    SettingsView {
+        settings,
+        unreadable: health.unreadable,
+        reset: health.reset,
+    }
+}
+
+/// The settings, and whether they are the player's own (row 14, H4): the page reads
+/// the defaults standing in for an unreadable or damaged file as "not read", and keeps
+/// its own copies of the choices it caches (the News switch among them).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsView {
+    #[serde(flatten)]
+    pub settings: Settings,
+    /// The file exists but cannot be read; nothing is written over it until it can be.
+    pub unreadable: bool,
+    /// The file was damaged and kept aside; these are the defaults.
+    pub reset: bool,
 }
 
 /// Replaces the launch options only; UI preferences are written through `ui_prefs_set`.
@@ -450,8 +474,9 @@ const VERIFY_FLUSH_ROWS: usize = 128;
 /// …and a partial batch goes out anyway once this long has passed, so the last few
 /// stragglers of a pass are not held back by the ones that will never answer.
 const VERIFY_FLUSH_EVERY: std::time::Duration = std::time::Duration::from_millis(250);
-/// How long after a pass the servers still offline at its end are read once more:
-/// long enough for a scheduled restart to come back (D-268).
+/// How long after a check the servers still offline at its end are read once more:
+/// long enough for a scheduled restart to come back (D-268; on-demand checks too since
+/// row 14).
 const OFFLINE_REREAD_AFTER: std::time::Duration = std::time::Duration::from_secs(240);
 /// The second look a server that answered nothing gets, before it is called offline:
 /// a longer wait than the first, INFO included (D-047).
@@ -525,10 +550,14 @@ pub async fn run_verification(
     // PLAYER read once the minimum gap has passed, below.
     let mut standing: Vec<Target> = Vec::new();
     while let Some(v) = pending.next().await {
+        // Held back until the second look below has had its say, and the connection
+        // with it: published at once, a network drop hid every row it touched (row 14,
+        // F1/H1).
         if v.verdict == Verdict::Offline {
             if let Some(t) = by_id.get(&v.id) {
                 offline.push(t.clone());
             }
+            continue;
         }
         if announce && v.reason == verify::CONTINUITY_STANDING {
             if let Some(t) = by_id.get(&v.id) {
@@ -550,7 +579,7 @@ pub async fn run_verification(
     if !offline.is_empty() {
         let patient = client.clone().with_timeout(PATIENT_TIMEOUT);
         let results = verify::verify_many(&patient, offline, true).await;
-        publish(&app, &cache, &mut latest, results).await;
+        publish_second_look(&app, &cache, &mut latest, results).await;
     }
     // A standing verdict is only ever overturned by a comparison inside R11's window,
     // and the automatic pass runs once a session — so a server judged synthetic
@@ -586,32 +615,35 @@ pub async fn run_verification(
     // 7 of the 2 210 rows Steam listed as populated on 2026-09-25, one of them counted
     // at 8 a minute before its pass. Those still offline are read once more, INFO
     // included, a few minutes on (D-268).
-    let still_offline: Vec<Target> = if announce {
-        latest
-            .iter()
-            .filter(|(_, v)| **v == Verdict::Offline)
-            .filter_map(|(id, _)| by_id.get(id).cloned())
-            .collect()
-    } else {
-        Vec::new()
-    };
+    // On-demand checks too (row 14, F1/H1): a server that restarted while its row was
+    // on screen went offline, hidden, and stayed hidden until the next Refresh. One
+    // re-read per server at a time, whichever check asked first.
+    let still_offline: Vec<Target> = latest
+        .iter()
+        .filter(|(_, v)| **v == Verdict::Offline)
+        .filter_map(|(id, _)| by_id.get(id).cloned())
+        .filter(|t| claim_reread(&t.id))
+        .collect();
     if !still_offline.is_empty() {
         let n = still_offline.len();
         let app = app.clone();
         let cache = Arc::clone(&cache);
         let patient = client.clone().with_timeout(PATIENT_TIMEOUT);
+        let at = if announce { "the pass" } else { "a check" };
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(OFFLINE_REREAD_AFTER).await;
+            let ids: Vec<String> = still_offline.iter().map(|t| t.id.clone()).collect();
             let results = verify::verify_many(&patient, still_offline, true).await;
             let back = results
                 .iter()
                 .filter(|v| v.verdict != Verdict::Offline)
                 .count();
             let mut latest = HashMap::with_capacity(n);
-            publish(&app, &cache, &mut latest, results).await;
+            publish_second_look(&app, &cache, &mut latest, results).await;
+            release_reread(&ids);
             crate::log_info!(
                 "verify",
-                "{n} server(s) offline at the pass read again: {back} answered"
+                "{n} server(s) offline at {at} read again: {back} answered"
             );
         });
     }
@@ -659,6 +691,89 @@ pub async fn run_verification(
         send_rows(&app, "verify-done", &summary);
     }
     summary
+}
+
+/// Publishes the results of a second look: the servers that answered at once, the
+/// silent ones only while this PC can reach the internet. "Offline" counts as untrusted
+/// and hides the row, and a hidden row is checked again only when something else looks
+/// at it, so a Wi-Fi drop, a router restart or a wake from sleep emptied the list a
+/// screen at a time, and nothing but a full Refresh brought the rows back (row 14,
+/// F1/H1). With the connection down the rows keep what they had.
+async fn publish_second_look(
+    app: &AppHandle,
+    cache: &Arc<Mutex<Cache>>,
+    latest: &mut HashMap<String, Verdict>,
+    results: Vec<Verification>,
+) {
+    let (answered, silent): (Vec<_>, Vec<_>) = results
+        .into_iter()
+        .partition(|v| v.verdict != Verdict::Offline);
+    if !answered.is_empty() {
+        publish(app, cache, latest, answered).await;
+    }
+    if silent.is_empty() {
+        return;
+    }
+    if connection_up().await {
+        publish(app, cache, latest, silent).await;
+    } else {
+        crate::log_warn!(
+            "verify",
+            "{} server(s) did not answer and Steam's web API is out of reach too: the connection looks down, so none was recorded as offline",
+            silent.len()
+        );
+    }
+}
+
+/// Servers with a re-read waiting (`OFFLINE_REREAD_AFTER`), so the visible-row checks
+/// every minute do not queue a second one behind the first.
+static REREAD_PENDING: std::sync::LazyLock<Mutex<HashSet<String>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashSet::new()));
+
+/// True when this call gets to re-read `id`; false when one is already waiting.
+fn claim_reread(id: &str) -> bool {
+    REREAD_PENDING
+        .lock()
+        .map(|mut p| p.insert(id.to_string()))
+        .unwrap_or(false)
+}
+
+fn release_reread(ids: &[String]) {
+    if let Ok(mut p) = REREAD_PENDING.lock() {
+        for id in ids {
+            p.remove(id);
+        }
+    }
+}
+
+/// How long one answer from `connection_up` stands, so a burst of checks asks once.
+const CONNECTION_SEEN_FOR: std::time::Duration = std::time::Duration::from_secs(30);
+static CONNECTION_SEEN: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
+
+/// Whether this PC reaches the internet: a TCP connection to Steam's web API, which the
+/// launcher already talks to, and nothing sent over it. Asked only when servers stayed
+/// silent through a second look, to tell "they are down" from "we are" (row 14,
+/// F1/H1).
+async fn connection_up() -> bool {
+    if let Ok(seen) = CONNECTION_SEEN.lock() {
+        if let Some((at, up)) = *seen {
+            if at.elapsed() < CONNECTION_SEEN_FOR {
+                return up;
+            }
+        }
+    }
+    let up = matches!(
+        tokio::time::timeout(
+            std::time::Duration::from_secs(4),
+            tokio::net::TcpStream::connect(("api.steampowered.com", 443)),
+        )
+        .await,
+        Ok(Ok(_))
+    );
+    if let Ok(mut seen) = CONNECTION_SEEN.lock() {
+        *seen = Some((Instant::now(), up));
+    }
+    up
 }
 
 /// Emits and persists one batch of verification results, recording the latest
@@ -836,6 +951,18 @@ pub async fn run_mod_scan(
                 Some(m) => batch.push((id, m)),
                 None => failed.push(id),
             }
+        }
+        // A chunk in which no server answered is likelier this PC's connection than 200
+        // servers at once. Recorded, each of them waited six hours (twelve after a
+        // second blip) before it was asked again, and the Mods page and the mod filter
+        // went without them (row 14, H6). The scan stops instead, and the next asks again.
+        if batch.is_empty() && !failed.is_empty() && !connection_up().await {
+            crate::log_warn!(
+                "mods",
+                "scan stopped: none of {} server(s) answered and Steam's web API is out of reach too, so none was recorded as failed",
+                failed.len()
+            );
+            break;
         }
         summary.scanned += batch.len();
         summary.failed += failed.len();
@@ -1337,14 +1464,23 @@ pub async fn server_details(
         verified_at: ServerRow::now_unix(),
         reason,
     };
-    let persist = vec![verification.clone()];
-    send_rows(&app, "verified", &persist);
-    let _ = tauri::async_runtime::spawn_blocking(move || {
-        if let Ok(mut c) = cache.lock() {
-            let _ = c.apply_verifications(&persist);
-        }
-    })
-    .await;
+    // The pane still says what it saw; the row keeps its verdict while this PC cannot
+    // reach the internet, as for every other check (row 14, F1/H1).
+    if verdict != Verdict::Offline || connection_up().await {
+        let persist = vec![verification.clone()];
+        send_rows(&app, "verified", &persist);
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            if let Ok(mut c) = cache.lock() {
+                let _ = c.apply_verifications(&persist);
+            }
+        })
+        .await;
+    } else {
+        crate::log_warn!(
+            "verify",
+            "{id} did not answer and Steam's web API is out of reach too: the connection looks down, so it was not recorded as offline"
+        );
+    }
 
     Ok(ServerDetails {
         id,

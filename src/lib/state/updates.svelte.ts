@@ -16,6 +16,8 @@ const FOCUS_CHECK_INTERVAL_MS = 3600 * 1000;
 /** The whole download, not a gap between chunks (reqwest's `timeout`): 7.5 MB in
  *  30 minutes is 4 KB/s, slower than any connection that can play DayZ. */
 const DOWNLOAD_TIMEOUT_MS = 30 * 60_000;
+/** A download with no data for this long is given up on (row 14, F5). */
+const DOWNLOAD_STALL_MS = 60_000;
 
 class Updates {
   state = $state<"idle" | "checking" | "none" | "available" | "downloading" | "ready" | "error">("idle");
@@ -23,8 +25,19 @@ class Updates {
   error = $state<string | null>(null);
   progress = $state(0);
   #update: Update | null = null;
+  /** The error on screen came from a check, not from an install: a failed "Check for
+   *  updates" held every later automatic check off for the session, and its message
+   *  never cleared by itself (row 14, F13). */
+  #checkFailed = false;
+  /** Bumped when a download is given up on, so its late progress is not shown. */
+  #downloadGen = 0;
 
   #autoRun: Promise<void> | null = null;
+
+  /** Nothing in hand to lose: no offer, no download, no install error on screen. */
+  #settled() {
+    return this.state === "idle" || this.state === "none" || (this.state === "error" && this.#checkFailed);
+  }
 
   /** Silent check, at every start (D-300), and on coming back to the window once
    *  `FOCUS_CHECK_INTERVAL_MS` has passed. One at a time and only from a settled state:
@@ -36,7 +49,7 @@ class Updates {
   }
 
   async #autoCheck(minGapMs: number) {
-    const settled = () => this.state === "idle" || this.state === "none";
+    const settled = () => this.#settled();
     if (!settled()) return;
     await uiPrefs.ready;
     // The file's current value, not the snapshot taken at start-up, which never saw
@@ -56,12 +69,15 @@ class Updates {
    *  settled state, never over an offer, a download or an error on screen (D-280,
    *  D-300). */
   focusCheck() {
-    if (this.state === "idle" || this.state === "none") void this.autoCheck(FOCUS_CHECK_INTERVAL_MS);
+    if (this.#settled()) void this.autoCheck(FOCUS_CHECK_INTERVAL_MS);
   }
 
   async checkNow(silent = false) {
+    // A silent check over a failed one keeps its message until it has an answer.
+    const shown = this.state === "error" ? this.error : null;
     this.state = "checking";
     this.error = null;
+    this.#checkFailed = false;
     try {
       const u = await check({ timeout: 10_000 });
       const now = Date.now();
@@ -82,8 +98,10 @@ class Updates {
         this.state = "none";
       }
     } catch (e) {
-      this.error = silent ? null : String(e);
-      this.state = silent ? "idle" : "error";
+      const message = silent ? shown : String(e);
+      this.error = message;
+      this.state = message ? "error" : "idle";
+      this.#checkFailed = !!message;
       logWarn("update", `check failed: ${describe(e)}`);
     }
   }
@@ -115,22 +133,40 @@ class Updates {
     logInfo("update", `installing ${u.version}`);
     let total = 0;
     let got = 0;
+    // The 30-minute limit is on the whole request, and the plugin offers no limit on the
+    // gap between chunks: a download that stopped moving sat at "Downloading… N%" with
+    // Check disabled for up to half an hour (row 14, F5). A minute without data gives up
+    // here; the request runs on until its own limit, and what it brings back is never
+    // installed, nor its progress shown.
+    const gen = ++this.#downloadGen;
+    let lastData = Date.now();
+    // A plain string: `describe` prints an Error as "Error: …" inside the message.
+    let stalled: ((reason: string) => void) | undefined;
+    const watchdog = setInterval(() => {
+      if (Date.now() - lastData > DOWNLOAD_STALL_MS) stalled?.("nothing arrived for a minute");
+    }, 5_000);
     // Download, then install, as two steps: a failure in the first leaves the launcher as
     // it was, one in the second does not (below, D-280).
     try {
-      await u.download(
-        (ev) => {
-          if (ev.event === "Started") total = ev.data.contentLength ?? 0;
-          else if (ev.event === "Progress") {
-            got += ev.data.chunkLength;
-            this.progress = total ? Math.round((100 * got) / total) : 0;
-          } else if (ev.event === "Finished") this.progress = 100;
-        },
-        // The download had no limit: one that stalled without closing sat at
-        // "Downloading… N%" for good, with the Check button disabled (D-279).
-        { timeout: DOWNLOAD_TIMEOUT_MS },
-      );
+      await Promise.race([
+        u.download(
+          (ev) => {
+            if (gen !== this.#downloadGen) return;
+            lastData = Date.now();
+            if (ev.event === "Started") total = ev.data.contentLength ?? 0;
+            else if (ev.event === "Progress") {
+              got += ev.data.chunkLength;
+              this.progress = total ? Math.round((100 * got) / total) : 0;
+            } else if (ev.event === "Finished") this.progress = 100;
+          },
+          // The download had no limit: one that stalled without closing sat at
+          // "Downloading… N%" for good, with the Check button disabled (D-279).
+          { timeout: DOWNLOAD_TIMEOUT_MS },
+        ),
+        new Promise<never>((_, reject) => (stalled = reject)),
+      ]);
     } catch (e) {
+      this.#downloadGen++;
       // Back to "available", not "error" (D-184): the update is still there and still
       // installable, and the error card offered only "Check for updates", which is
       // not what failed. The message says which step it was.
@@ -139,6 +175,8 @@ class Updates {
       this.progress = 0;
       logWarn("update", `install of ${u.version} failed: ${describe(e)}`);
       return;
+    } finally {
+      clearInterval(watchdog);
     }
     try {
       // On Windows this starts the setup and ends the process: it returns only when

@@ -59,6 +59,18 @@
     });
   });
 
+  // The browser's reload keys are on in WebView2 unless something turns them off: F5,
+  // pressed out of habit to refresh the list, reloaded the whole page, back to News with
+  // an open join dialog — a slot wait, a typed password — gone, and the stores started
+  // over beside a host that had not (row 14, F9).
+  $effect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "F5" || ((e.ctrlKey || e.metaKey) && (e.key === "r" || e.key === "R"))) e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
+  });
+
   // Coming back to the window checks for a release again once an hour has passed, so
   // a launcher left open learns of one without a restart (D-280, D-300). A start always
   // checks.

@@ -9,6 +9,10 @@ import { invokeLogged as invoke } from "../log";
 import type { Settings, UiPrefs } from "../types";
 
 const FLUSH_MS = 150;
+/** A write that failed is tried again after this long (row 14, H9). */
+const RETRY_MS = 5_000;
+/** Timed retries after a failure; past them, the next change tries again. */
+const MAX_RETRIES = 6;
 
 export const defaultUiPrefs = (): UiPrefs => ({
   theme: "slate",
@@ -45,6 +49,7 @@ class UiPrefsStore {
   readonly ready: Promise<UiPrefs>;
   #pending: Partial<UiPrefs> = {};
   #timer: ReturnType<typeof setTimeout> | undefined;
+  #retries = 0;
 
   constructor() {
     this.ready = this.read();
@@ -60,7 +65,10 @@ class UiPrefsStore {
     for (let i = 0; i < READ_TRIES; i++) {
       try {
         const s = await invoke<Settings>("settings_get");
-        this.readOk = true;
+        // An answer is not a read: for a file that cannot be read, or was damaged and
+        // set aside, the host hands out the defaults, and taken as the file they turned
+        // the News page back on for someone who had switched it off (row 14, H4).
+        this.readOk = !s.unreadable && !s.reset;
         // A change made before the file arrived is still on its way to it; the copy
         // has to show it, or `patch` compares the next change against stale values.
         this.current = { ...(s.ui ?? defaultUiPrefs()), ...this.#pending };
@@ -103,9 +111,18 @@ class UiPrefsStore {
       // the other one, so the screen and the file disagreed (D-256).
       this.current = { ...saved, ...this.#pending };
     } catch {
-      /* the caches still hold the values; the next patch retries the file */
+      // The caches still hold the values. Tried again on a timer as well as with the
+      // next change: a lone change, "News off" say, was otherwise lost at exit (row 14,
+      // H9).
       this.#pending = { ...p, ...this.#pending };
+      if (this.#retries < MAX_RETRIES) {
+        this.#retries++;
+        clearTimeout(this.#timer);
+        this.#timer = setTimeout(() => void this.flush(), RETRY_MS);
+      }
+      return;
     }
+    this.#retries = 0;
   }
 }
 

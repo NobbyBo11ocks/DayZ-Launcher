@@ -10,6 +10,16 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.79",
+    notes: [
+      { kind: "fixed", text: "Servers no longer vanish from the list when your internet drops." },
+      { kind: "fixed", text: "Favourites and recent joins stay safe when antivirus locks a file." },
+      { kind: "fixed", text: "After Steam restarts, the server list refreshes and Join works again." },
+      { kind: "fixed", text: "Stalled mod downloads no longer show a frozen speed." },
+      { kind: "changed", text: "F5 no longer reloads the launcher and closes the join window." },
+    ],
+  },
+  {
     version: "0.1.78",
     notes: [{ kind: "added", text: "After every update, this window shows what changed." }],
   },

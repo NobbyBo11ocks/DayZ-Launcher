@@ -562,6 +562,11 @@ export type Settings = {
   logMuted: string[];
   /** Read-only for `settings_set`; written through `ui_prefs_set`. */
   ui: UiPrefs;
+  /** From `settings_get` only: the file exists but cannot be read, so these are the
+   *  defaults (row 14, H4). */
+  unreadable?: boolean;
+  /** From `settings_get` only: the file was damaged and kept aside; the defaults. */
+  reset?: boolean;
 };
 
 export type ModPlanItem = {

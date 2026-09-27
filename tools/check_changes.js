@@ -48,4 +48,4 @@ if (errors.length) {
   for (const e of errors) console.error(`  ${e}`);
   process.exit(1);
 }
-console.log(`change notes: ok (${CHANGES.length} releases, ${version} included)`);
+console.log(`change notes: ok (${CHANGES.length} release${CHANGES.length === 1 ? "" : "s"}, ${version} included)`);

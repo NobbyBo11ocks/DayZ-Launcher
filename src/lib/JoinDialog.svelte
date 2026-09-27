@@ -61,6 +61,19 @@
     }
   }
 
+  // "Steam is not running" is true of the moment the plan was made. Once the session is
+  // back the plan is made again, so Join and Download come back without Cancel and a
+  // second Join; once each time Steam comes back (row 14, F11).
+  let replannedForSteam = false;
+  $effect(() => {
+    const up = servers.steam?.initialized ?? false;
+    if (!up) replannedForSteam = false;
+    else if (phase === "ready" && plan && !plan.steamRunning && !replannedForSteam) {
+      replannedForSteam = true;
+      void replan();
+    }
+  });
+
   // Saved launch profiles (D-088): one can be picked for this launch only.
   let profiles = $state<LaunchProfile[]>([]);
   let profile = $state("");
@@ -110,12 +123,22 @@
   const RATE_WINDOW_MS = 10_000;
   let rateSamples: { t: number; bytes: number }[] = [];
   let rate = $state(0);
+  /** A sample a second whether or not the bytes moved: the effect below re-ran only on
+   *  a change, so a download Steam had stopped kept its last speed and time left on
+   *  screen for up to 15 minutes (row 14, F4). */
+  let rateTick = $state(0);
+  $effect(() => {
+    if (phase !== "syncing") return;
+    const t = setInterval(() => rateTick++, 1000);
+    return () => clearInterval(t);
+  });
   $effect(() => {
     if (phase !== "syncing") {
       rateSamples = [];
       rate = 0;
       return;
     }
+    void rateTick;
     const bytes = downloadedBytes;
     const now = Date.now();
     rateSamples.push({ t: now, bytes });
@@ -567,7 +590,9 @@
         <!-- Read with the primary button, which names them as its description: a
              warning that disables Join was never said when focus landed there (D-291). -->
         <ul class="warnings" id="join-warnings">
-          {#each plan.warnings as w (w)}<li>{w}</li>{/each}
+          <!-- By position: two warnings with the same text threw on a duplicate key and
+               left the backdrop with no dialog on it (row 14, F18). -->
+          {#each plan.warnings as w, i (i)}<li>{w}</li>{/each}
         </ul>
       {/if}
 

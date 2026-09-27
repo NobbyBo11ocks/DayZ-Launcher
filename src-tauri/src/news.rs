@@ -315,6 +315,19 @@ pub fn shrink(data: &[u8], max: u32) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
+/// A cached thumbnail, when it is a whole JPEG: one cut short by a crash or a full
+/// disk is dropped and made again (row 14, H10). Every file here was written by
+/// `shrink`, whose encoder ends each one with the end-of-image marker.
+fn read_whole_jpeg(path: &std::path::Path) -> Option<Vec<u8>> {
+    let bytes = std::fs::read(path).ok()?;
+    if bytes.starts_with(&[0xFF, 0xD8]) && bytes.ends_with(&[0xFF, 0xD9]) {
+        Some(bytes)
+    } else {
+        let _ = std::fs::remove_file(path);
+        None
+    }
+}
+
 /// A JPEG thumbnail of a post's picture, cached as `dir/<key>-<max>.jpg` (D-111). The
 /// source is typically 3840×2160 and 4.6 MB (S-72); the WebView would decode that
 /// to 33 MB per card, so it is shrunk once here and the small file is served after.
@@ -336,7 +349,7 @@ pub async fn thumbnail(
     // WebView, ~22 MB for a full page (D-164).
     let max = max.clamp(160, THUMB_MAX);
     let path = dir.join(format!("{safe}-{max}.jpg"));
-    if let Ok(bytes) = std::fs::read(&path) {
+    if let Some(bytes) = read_whole_jpeg(&path) {
         return Ok(bytes);
     }
     // Two at a time. An empty cache — a first run, or the wider "All news" view — asked
@@ -350,7 +363,7 @@ pub async fn thumbnail(
         .await
         .map_err(|_| "thumbnail queue closed".to_string())?;
     // Another request for the same picture may have written it while this one waited.
-    if let Ok(bytes) = std::fs::read(&path) {
+    if let Some(bytes) = read_whole_jpeg(&path) {
         return Ok(bytes);
     }
     let client = reqwest::Client::builder()
@@ -374,7 +387,13 @@ pub async fn thumbnail(
     tokio::task::spawn_blocking(move || {
         let bytes = shrink(&body, max)?;
         let _ = std::fs::create_dir_all(&dir);
-        let _ = std::fs::write(&path, &bytes);
+        // Beside the file, then renamed over it: a plain write truncates first, so a
+        // full disk or a crash left a short picture that was served at every start
+        // until its post left the list (row 14, H10).
+        let tmp = path.with_extension("jpg.tmp");
+        if std::fs::write(&tmp, &bytes).is_err() || std::fs::rename(&tmp, &path).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
         Ok(bytes)
     })
     .await

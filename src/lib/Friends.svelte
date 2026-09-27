@@ -104,7 +104,17 @@
   const steamIdle = $derived(servers.steam?.idle === true);
 
   $effect(() => {
-    if (!steamOk) return;
+    // Steam gone: the list and any error were Steam's, and a page left open across a
+    // restart went on showing them, counts and "updated" time included, while the
+    // session came back released and nothing asked again (row 14, F17).
+    if (!steamOk) {
+      untrack(() => {
+        friends = [];
+        error = null;
+        loadedAt = "";
+      });
+      return;
+    }
     // Same rule as the poll below (D-165): opening this page must not re-open an
     // idle-released session either, or simply looking at it restarts Steam's
     // playtime clock. Refresh does it deliberately when the user asks (D-165).

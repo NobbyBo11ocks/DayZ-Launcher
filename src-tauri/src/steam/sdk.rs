@@ -23,7 +23,7 @@ use serde::Serialize;
 use steamworks::{
     CallbackHandle, Client, DownloadItemResult, FriendFlags, FriendState, GameServerItem,
     ItemState, MatchmakingServers, PublishedFileId, ReleaseError, ServerListCallbacks,
-    ServerListRequest, ServerResponse, UGC,
+    ServerListRequest, ServerResponse, SteamAPIInitError, UGC,
 };
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -175,8 +175,28 @@ struct Session {
     _on_download: CallbackHandle,
 }
 
+/// Steam's own words for a failed start of the session, logged when they change: the
+/// crate's text for each kind is fixed ("Some other failure"), so the log could not tell
+/// a signed-out or refusing Steam from one that is not running (row 14, F12/H8).
+fn note_init_failure(e: &SteamAPIInitError) {
+    static LAST: Mutex<String> = Mutex::new(String::new());
+    let (SteamAPIInitError::FailedGeneric(why)
+    | SteamAPIInitError::NoSteamClient(why)
+    | SteamAPIInitError::VersionMismatch(why)) = e;
+    let line = format!("{e} ({})", why.trim());
+    if let Ok(mut last) = LAST.lock() {
+        if *last != line {
+            crate::log_warn!("steam", "session did not open: {line}");
+            *last = line;
+        }
+    }
+}
+
 fn open_session() -> Result<Session, String> {
-    let client = Client::init_app(DAYZ_APP_ID).map_err(|e| e.to_string())?;
+    let client = Client::init_app(DAYZ_APP_ID).map_err(|e| {
+        note_init_failure(&e);
+        e.to_string()
+    })?;
     let mms = client.matchmaking_servers();
     let ugc = client.ugc();
     // Nothing listened for a failed download: a Steam in offline mode, a full disk or
@@ -225,6 +245,22 @@ fn abandon_in_flight(
     events: &UnboundedSender<SteamEvent>,
     why: &str,
 ) {
+    // Said in the log: what was cut off, and why, was nowhere in it (row 14, H12).
+    let cut: Vec<&str> = [
+        active.is_some().then_some("a refresh"),
+        sync.is_some().then_some("a download"),
+        unsub.is_some().then_some("an unsubscribe"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if !cut.is_empty() {
+        crate::log_info!(
+            "steam",
+            "{why}: {} in flight answered as failed",
+            cut.join(", ")
+        );
+    }
     if let Some(r) = active.take() {
         let _ = events.send(SteamEvent::Done(RefreshDone {
             total: 0,
