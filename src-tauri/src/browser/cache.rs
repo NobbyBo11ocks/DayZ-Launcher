@@ -214,6 +214,38 @@ pub struct PopulationSample {
 
 /// A scanned mod list with the time it was scanned: `(scanned_at, [(workshop id, name)])`.
 pub type ScannedMods = (i64, Vec<(u64, String)>);
+
+/// Why the cache's writes are failing, until one succeeds again. A full disk turned every
+/// write into a log line and nothing on screen (row 14, H9); the list pages show this as
+/// one line while it lasts. Outside the cache's lock, so asking never waits on a write.
+static WRITE_FAILURE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Records the outcome of a write the player would miss: favourites, joins, the list,
+/// verdicts. Only failures of the file itself count — full, read-only, I/O — not a busy
+/// moment or a bad statement.
+pub fn note_write<T>(r: &rusqlite::Result<T>) {
+    use rusqlite::ErrorCode::{CannotOpen, DiskFull, ReadOnly, SystemIoFailure};
+    let Ok(mut failure) = WRITE_FAILURE.lock() else {
+        return;
+    };
+    match r {
+        Ok(_) => *failure = None,
+        Err(e)
+            if matches!(
+                e.sqlite_error_code(),
+                Some(DiskFull | ReadOnly | SystemIoFailure | CannotOpen)
+            ) =>
+        {
+            *failure = Some(e.to_string());
+        }
+        Err(_) => {}
+    }
+}
+
+/// The failure `note_write` last recorded, if the writes have not recovered since.
+pub fn write_failure() -> Option<String> {
+    WRITE_FAILURE.lock().ok().and_then(|f| f.clone())
+}
 impl Cache {
     pub fn open(path: &Path) -> rusqlite::Result<Self> {
         if let Some(dir) = path.parent() {
@@ -1140,6 +1172,26 @@ impl Cache {
 mod tests {
     use super::*;
     use crate::browser::verify::Verdict;
+
+    /// A full disk is noted until a write succeeds; a busy moment is not a failure of
+    /// the file (D-303).
+    #[test]
+    fn a_failing_write_is_noted_until_one_succeeds() {
+        let fail = |code| -> rusqlite::Result<()> {
+            Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(code),
+                None,
+            ))
+        };
+        note_write(&fail(rusqlite::ffi::SQLITE_FULL));
+        assert!(write_failure().is_some(), "a full disk is noted");
+        note_write(&fail(rusqlite::ffi::SQLITE_BUSY));
+        assert!(write_failure().is_some(), "a busy moment changes nothing");
+        note_write(&Ok::<(), rusqlite::Error>(()));
+        assert!(write_failure().is_none(), "a write that works clears it");
+        note_write(&fail(rusqlite::ffi::SQLITE_BUSY));
+        assert!(write_failure().is_none(), "and busy alone never sets it");
+    }
 
     fn row(id: u16, players: i32) -> ServerRow {
         ServerRow {

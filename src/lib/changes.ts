@@ -10,6 +10,16 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.80",
+    notes: [
+      { kind: "added", text: "The Servers page tells you when your connection seems to be down." },
+      { kind: "added", text: "The join window tells you when Steam stops downloading a mod." },
+      { kind: "changed", text: "Clearer messages when Steam is signed out or the internet is down." },
+      { kind: "fixed", text: "Importing favourites with nothing to import no longer shows an error." },
+      { kind: "added", text: "You are told if your settings or saved favourites could not be read." },
+    ],
+  },
+  {
     version: "0.1.79",
     notes: [
       { kind: "fixed", text: "Servers no longer vanish from the list when your internet drops." },

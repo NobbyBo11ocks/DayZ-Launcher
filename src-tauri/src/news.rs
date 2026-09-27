@@ -431,6 +431,10 @@ pub fn prune_thumbnails(dir: &std::path::Path, keep: &std::collections::HashSet<
 /// Latest `count` posts, newest first, with full bodies (`maxlength=0`) so the
 /// pictures and video previews further down a post are found; the gzip reply for
 /// 60 posts is well under 100 KB.
+/// The News page's error when there is no connection (row 14, F6, approved).
+const NEWS_OFFLINE: &str =
+    "The news could not be loaded: no connection to Steam. It is tried again when the connection is back.";
+
 pub async fn fetch(count: u32) -> Result<Vec<NewsItem>, String> {
     let client = reqwest::Client::builder()
         .user_agent(USER_AGENT)
@@ -447,7 +451,7 @@ pub async fn fetch(count: u32) -> Result<Vec<NewsItem>, String> {
         .get(url)
         .send()
         .await
-        .map_err(|e| format!("news request failed: {e}"))?
+        .map_err(|e| crate::http::request_error(e, "news request", NEWS_OFFLINE))?
         .error_for_status()
         .map_err(|e| format!("news request failed: {e}"))?;
     // 60 posts are well under 100 KB gzipped; 8 MB is far above any honest reply (D-163).

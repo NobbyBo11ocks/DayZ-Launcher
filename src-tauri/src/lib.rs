@@ -71,12 +71,17 @@ fn in_memory_cache(why: &str) -> browser::Cache {
                 "running without a cache file ({why}); favourites, join history and \
                  population will not be kept for this session"
             );
-            fatal_dialog(&format!(
-                "The launcher could not use its cache file:\n\n{why}\n\nIt is usually a \
-                 lock held by antivirus, a backup or a file-sync client, and it clears \
-                 by itself. The launcher will run normally this time, but favourites, \
-                 join history and population will not be saved.\n\nNothing was deleted."
-            ));
+            // It does start, so the caption says so: "could not start" stood above a
+            // message saying it would run (row 14, F14, approved).
+            message_box(
+                "DZSA CrayZ Launcher is running without its cache",
+                &format!(
+                    "The launcher could not use its cache file:\n\n{why}\n\nIt is usually a \
+                     lock held by antivirus, a backup or a file-sync client, and it clears \
+                     by itself. The launcher will run normally this time, but favourites, \
+                     join history and population will not be saved.\n\nNothing was deleted."
+                ),
+            );
             c
         }
         // `Connection::open_in_memory` failing means the process is out of memory;
@@ -108,13 +113,26 @@ fn in_memory_cache(why: &str) -> browser::Cache {
 /// (row 14, H3). A write in a transaction that is rolled back finds out; the file is
 /// opened again for two seconds in case the lock clears, then the session runs in
 /// memory.
-fn open_cache(db_path: &std::path::Path) -> Cache {
+///
+/// What it did goes with the cache, for the page to say (`cache_status`): a session in
+/// memory keeps nothing and shows nothing saved before, and a damaged file moved aside
+/// starts the favourites and Recent empty (row 14, F14 and H2, approved).
+fn open_cache(db_path: &std::path::Path) -> (Cache, commands::CacheOpened) {
     const REOPENS: u32 = 8;
+    let in_memory = |why: String, moved_to: Option<std::path::PathBuf>| {
+        (
+            in_memory_cache(&why),
+            commands::CacheOpened {
+                in_memory: true,
+                moved_to,
+            },
+        )
+    };
     let mut tries = 0;
     let err = loop {
         match Cache::open(db_path) {
             Ok(c) => match c.probe_write() {
-                Ok(()) => return c,
+                Ok(()) => return (c, commands::CacheOpened::default()),
                 // Another writer: SQLite has already waited its five seconds, and a
                 // busy database is a writable one once it is done.
                 Err(e) if cache_busy(&e) => {
@@ -123,7 +141,7 @@ fn open_cache(db_path: &std::path::Path) -> Cache {
                         "{} is busy at start ({e}); carrying on",
                         db_path.display()
                     );
-                    return c;
+                    return (c, commands::CacheOpened::default());
                 }
                 Err(e) if tries < REOPENS => {
                     if tries == 0 {
@@ -143,7 +161,7 @@ fn open_cache(db_path: &std::path::Path) -> Cache {
                         "{} still cannot be written ({e}); it is most likely held by another program, such as antivirus or a backup. Nothing was changed",
                         db_path.display()
                     );
-                    return in_memory_cache(&format!("{e}"));
+                    return in_memory(format!("{e}"), None);
                 }
             },
             Err(e) => break e,
@@ -162,7 +180,7 @@ fn open_cache(db_path: &std::path::Path) -> Cache {
             "{} is not damaged, most likely held by another program, such as antivirus or a backup. Nothing was changed",
             db_path.display()
         );
-        return in_memory_cache(&format!("{err}"));
+        return in_memory(format!("{err}"), None);
     }
     match move_aside(db_path) {
         Ok(aside) => match Cache::open(db_path) {
@@ -172,7 +190,13 @@ fn open_cache(db_path: &std::path::Path) -> Cache {
                     "damaged, moved to {} with its log; started on an empty cache. Favourites, history and population are in the moved file",
                     aside.display()
                 );
-                c
+                (
+                    c,
+                    commands::CacheOpened {
+                        in_memory: false,
+                        moved_to: Some(aside),
+                    },
+                )
             }
             Err(e2) => {
                 log_error!(
@@ -180,7 +204,7 @@ fn open_cache(db_path: &std::path::Path) -> Cache {
                     "damaged, moved to {}; a new cache could not be opened either: {e2}",
                     aside.display()
                 );
-                in_memory_cache(&format!("{e2}"))
+                in_memory(format!("{e2}"), Some(aside))
             }
         },
         Err(move_err) => {
@@ -189,7 +213,7 @@ fn open_cache(db_path: &std::path::Path) -> Cache {
                 "damaged, but {} could not be moved with its log ({move_err}). Nothing was changed",
                 db_path.display()
             );
-            in_memory_cache(&format!("{err}"))
+            in_memory(format!("{err}"), None)
         }
     }
 }
@@ -257,6 +281,11 @@ fn move_aside(db_path: &std::path::Path) -> std::io::Result<std::path::PathBuf> 
 /// either. The icon flashes and nothing else ever happens. One message box is the
 /// difference between "it doesn't work" and a sentence the user can act on (D-194).
 fn fatal_dialog(message: &str) {
+    message_box("DZSA CrayZ Launcher could not start", message);
+}
+
+/// A Windows message box with an error icon, for when there is no window yet.
+fn message_box(caption: &str, message: &str) {
     use std::os::windows::ffi::OsStrExt;
     let wide = |s: &str| -> Vec<u16> {
         std::ffi::OsStr::new(s)
@@ -265,7 +294,7 @@ fn fatal_dialog(message: &str) {
             .collect()
     };
     let text = wide(message);
-    let caption = wide("DZSA CrayZ Launcher could not start");
+    let caption = wide(caption);
     // SAFETY: both strings are NUL-terminated and outlive the call; a null owner window
     // is valid and makes the box application-modal.
     unsafe {
@@ -429,7 +458,8 @@ pub fn run() {
                 .name("temp-sweep".into())
                 .spawn(move || sweep_updater_leftovers(&product));
             let db_path = data_dir.join("cache.db");
-            let cache = Arc::new(Mutex::new(open_cache(&db_path)));
+            let (cache, cache_opened) = open_cache(&db_path);
+            let cache = Arc::new(Mutex::new(cache));
             let settings = SettingsStore::load(&app.path().app_config_dir()?.join("settings.json"));
             // Start-up logs before this point are kept deliberately: they are the ones
             // that explain a failure to start. From here the user's choice applies (D-169).
@@ -476,6 +506,7 @@ pub fn run() {
                 launching: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 rows_out: std::sync::Mutex::new(None),
                 settings,
+                cache_opened,
             });
             app.resources_table().add(ExitGuard(app.handle().clone()));
 
@@ -500,7 +531,9 @@ pub fn run() {
                             let c = Arc::clone(&cache);
                             let _ = tauri::async_runtime::spawn_blocking(move || {
                                 if let Ok(mut c) = c.lock() {
-                                    if let Err(e) = c.upsert(&rows) {
+                                    let stored = c.upsert(&rows);
+                                    browser::cache::note_write(&stored);
+                                    if let Err(e) = stored {
                                         // Release builds have no console, so this used to
                                         // vanish entirely (D-162): a full disk lost the
                                         // whole cached list without a trace.
@@ -841,6 +874,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::rows_subscribe,
+            commands::cache_status,
             commands::app_info,
             commands::diagnostics,
             commands::local_game_version,

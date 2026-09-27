@@ -9,9 +9,10 @@ import { mapHaystack, mapLabel } from "../maps";
 import { Channel } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
+import { notices } from "./notices.svelte";
 import { uiPrefs } from "./uiprefs.svelte";
 import { describe, logError, logWarn } from "../log";
-import { type CachedServers, compactRow, decodeCachedRows, type Favourite, type FriendInfo, type HistoryEntry, type ImportResult, isInflated, isUntrusted, type ModScanSummary, type ModsIndex, queueOf, type RefreshDone, type ServerMods, type ServerRow, type SteamStatus, trustedPlayers, type Verification, type VerifySummary } from "../types";
+import { type CacheStatus, type CachedServers, compactRow, decodeCachedRows, type Favourite, type FriendInfo, type HistoryEntry, type ImportResult, isInflated, isUntrusted, type ModScanSummary, type ModsIndex, queueOf, type RefreshDone, type ServerMods, type ServerRow, type SteamStatus, trustedPlayers, type Verification, type VerifySummary } from "../types";
 
 export type SortKey = "name" | "map" | "mods" | "players" | "ping" | "time" | "version";
 export type Perspective = "any" | "1pp" | "3pp";
@@ -84,7 +85,8 @@ type RowsMsg =
   | { kind: "verify-done"; data: VerifySummary }
   | { kind: "mods-start"; data: ModScanSummary }
   | { kind: "mods"; data: [ServerMods[], [number, string][], string[]] }
-  | { kind: "mods-done"; data: ModScanSummary };
+  | { kind: "mods-done"; data: ModScanSummary }
+  | { kind: "net"; data: boolean };
 
 /** Bit 1 = says PVE, 2 = says PVP, 4 = says RP. A server may say several. */
 const STYLE_PVE = 1;
@@ -158,6 +160,8 @@ const STALE_SECS = 120;
 const UNCOUNTED_STALE_SECS = 600;
 /** How many failed refreshes a session re-arms the automatic refresh for (row 14, F3). */
 const MAX_AUTO_REARMS = 3;
+/** How often the cache's write health is asked for (D-303). */
+const CACHE_POLL_MS = 60_000;
 /** Title-bar friend count poll (D-103); Steam answers from its local cache. */
 const FRIENDS_POLL_MS = 60_000;
 /** One collator for the whole session: `localeCompare` builds one per call (D-152). */
@@ -488,6 +492,15 @@ class ServersStore {
    *  and the Mods page shows "—" (D-277). */
   modsIndexLoaded = $state(false);
   modScanning = $state(false);
+  /** The checks find this PC's connection down (the host's `net` message), or Windows
+   *  says there is none: the Servers header says the list is kept as it was (row 14,
+   *  F1, approved). */
+  netDown = $state(false);
+  /** What start-up did with the cache, and whether its writes fail now (D-303). */
+  cache = $state<CacheStatus | null>(null);
+  /** The favourites could not be read at start: the Favourites page says so instead of
+   *  "No favourites yet" (row 14, F14, approved). */
+  favouritesUnread = $state(false);
   /** Set by a view that wants the app to switch section (Mods → Servers with a mod filter). */
   navigate = $state<string | null>(null);
   /** Friends in DayZ right now, for the title bar (D-103); polled while the Steam session is active. */
@@ -1052,6 +1065,7 @@ class ServersStore {
     try {
       await this.loadFavourites();
     } catch (e) {
+      this.favouritesUnread = true;
       logWarn("cache", `favourites unavailable at start: ${describe(e)}`);
     }
     // No mod index here: the pages that read it load it when they open (the filter
@@ -1108,6 +1122,26 @@ class ServersStore {
     void this.pollFriends();
     setInterval(() => void this.pollFriends(), FRIENDS_POLL_MS);
     setInterval(() => this.#watchdog(), WATCHDOG_MS);
+    // The cache as the host opened it, said once, and whether its writes fail, every
+    // minute after (D-303).
+    void this.pollCache(true);
+    setInterval(() => void this.pollCache(false), CACHE_POLL_MS);
+    // Windows' own word on the network between the host's checks (row 14, F1).
+    if (!navigator.onLine) this.netDown = true;
+    window.addEventListener("offline", () => (this.netDown = true));
+    window.addEventListener("online", () => (this.netDown = false));
+  }
+
+  /** Reads `cache_status`; at start, a damaged cache moved aside is said once (row 14,
+   *  H2, approved). */
+  async pollCache(atStart: boolean) {
+    try {
+      const c = await invoke<CacheStatus>("cache_status");
+      this.cache = c;
+      if (atStart && c.movedTo) notices.push("Saved data", `Saved data was damaged and moved to ${c.movedTo}. Favourites and Recent start empty.`);
+    } catch {
+      /* logged by the wrapper; the next minute asks again */
+    }
   }
 
   /**
@@ -1331,6 +1365,9 @@ class ServersStore {
         this.#scanningSince = 0;
         if (!this.modsIndexLoaded) void this.loadModsIndex();
         return;
+      case "net":
+        this.netDown = !m.data;
+        return;
     }
   }
 
@@ -1355,7 +1392,7 @@ class ServersStore {
       if (d.reason !== "busy") {
         this.verifying = false;
         this.#verifyingSince = 0;
-        this.fail("refresh", "Steam did not answer the refresh, so the list was not updated.");
+        this.fail("refresh", "Steam did not answer the refresh, so the list was not updated. Press Refresh to try again.");
         // Steam closed, restarted or answered nothing: the automatic refresh was spent,
         // so nothing followed when Steam was back, and the cached list and this line
         // stayed until someone pressed the multi-minute Refresh (row 14, F3/H7). It runs
@@ -1674,15 +1711,17 @@ class ServersStore {
     }
   }
 
-  async importOfficial(): Promise<ImportResult | null> {
-    this.error = null;
+  /** The official launcher's favourites, or why they could not be imported. The
+   *  failure is the caller's to show, on the page that asked: in the shared line it
+   *  followed the player to Servers, LAN and Recent, path and all (row 14, F7). */
+  async importOfficial(): Promise<ImportResult | string> {
     try {
       const r = await invoke<ImportResult>("import_official_favourites");
-      await this.loadFavourites();
+      if (!r.missing) await this.loadFavourites();
+      this.favouritesUnread = false;
       return r;
     } catch (e) {
-      this.error = String(e);
-      return null;
+      return String(e);
     }
   }
 

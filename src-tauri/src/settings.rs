@@ -198,10 +198,12 @@ pub struct SettingsStore {
     /// The file could not be parsed and was kept aside (`set_aside`): the settings in
     /// memory are the defaults standing in for it (row 14, H4).
     reset: AtomicBool,
+    /// The name of the copy `set_aside` kept of that file.
+    kept_as: Mutex<Option<String>>,
 }
 
 /// Whether the settings handed out are the player's own (row 14, H4).
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct SettingsHealth {
     /// The file exists but still cannot be read.
     pub unreadable: bool,
@@ -209,6 +211,8 @@ pub struct SettingsHealth {
     pub reset: bool,
     /// The file became readable just now and its settings replaced the defaults.
     pub adopted: bool,
+    /// The name of the copy kept of a damaged file.
+    pub kept_as: Option<String>,
 }
 
 /// A settings file is a JSON object. Anything else is corruption, whatever serde is
@@ -228,7 +232,8 @@ fn parse_settings(bytes: &[u8]) -> Result<Settings, String> {
 
 /// Keeps a copy of a file that could not be parsed, stamped so a second bad start
 /// cannot overwrite the first copy.
-fn set_aside(path: &Path, bytes: &[u8], e: &str) {
+/// Returns the copy's file name when it was written, for the page to name (D-303).
+fn set_aside(path: &Path, bytes: &[u8], e: &str) -> Option<String> {
     let aside = path.with_extension(format!(
         "json.unreadable-{}",
         std::time::SystemTime::now()
@@ -242,6 +247,9 @@ fn set_aside(path: &Path, bytes: &[u8], e: &str) {
         path.display(),
         aside.display()
     );
+    saved
+        .then(|| aside.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .flatten()
 }
 
 impl SettingsStore {
@@ -251,11 +259,12 @@ impl SettingsStore {
         // launch profiles for good (D-162). Keep a copy and say so.
         let mut unread = false;
         let mut reset = false;
+        let mut kept_as = None;
         let mut current = match std::fs::read(path) {
             Ok(bytes) => match parse_settings(&bytes) {
                 Ok(s) => s,
                 Err(e) => {
-                    set_aside(path, &bytes, &e);
+                    kept_as = set_aside(path, &bytes, &e);
                     reset = true;
                     Settings::default()
                 }
@@ -281,6 +290,7 @@ impl SettingsStore {
             current: Mutex::new(current),
             unread: AtomicBool::new(unread),
             reset: AtomicBool::new(reset),
+            kept_as: Mutex::new(kept_as),
         };
         store.apply_install_choices();
         store
@@ -350,7 +360,10 @@ impl SettingsStore {
                 }
                 // Corrupt after all: what `load` would have done with it.
                 Err(e) => {
-                    set_aside(&self.path, &bytes, &e);
+                    let kept = set_aside(&self.path, &bytes, &e);
+                    if let Ok(mut k) = self.kept_as.lock() {
+                        *k = kept;
+                    }
                     self.reset.store(true, Ordering::Release);
                     false
                 }
@@ -382,6 +395,7 @@ impl SettingsStore {
             unreadable: self.unread.load(Ordering::Acquire),
             reset: self.reset.load(Ordering::Acquire),
             adopted,
+            kept_as: self.kept_as.lock().ok().and_then(|k| k.clone()),
         };
         (cur.clone(), health)
     }

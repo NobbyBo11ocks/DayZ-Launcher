@@ -30,3 +30,21 @@ pub async fn body_capped(mut resp: Response, max: usize, what: &str) -> Result<V
     }
     Ok(out)
 }
+
+/// A request that failed for want of a connection — no route, refused, a name that did
+/// not resolve, a timeout — rather than because the other end answered badly.
+pub fn offline(e: &reqwest::Error) -> bool {
+    e.is_connect() || e.is_timeout()
+}
+
+/// The error the page shows for a request that failed: `no_connection`'s sentence when
+/// there was no connection, the raw text only in the log (row 14, F6, approved); any
+/// other failure as "{what} failed: {e}", as before.
+pub fn request_error(e: reqwest::Error, what: &str, no_connection: &str) -> String {
+    if offline(&e) {
+        crate::log_warn!("app", "{what} failed: {e}");
+        no_connection.to_string()
+    } else {
+        format!("{what} failed: {e}")
+    }
+}

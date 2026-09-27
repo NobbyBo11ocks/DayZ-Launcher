@@ -3,6 +3,9 @@
   // Favourite alerts used to share this rail; they were removed in D-182.
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { news } from "./state/news.svelte";
+  import { notices } from "./state/notices.svelte";
+
+  const count = $derived(news.alerts.length + notices.items.length);
 
   function read(gid: string, url: string) {
     void openUrl(url).catch(() => {});
@@ -14,11 +17,12 @@
    *  all, and Servers' Refresh — and the keyboard focus on them (WCAG 2.4.11, D-291).
    *  Not while a dialog is open or a field is being typed in: those keep their Escape. */
   function onKey(e: KeyboardEvent) {
-    if (e.key !== "Escape" || news.alerts.length === 0) return;
+    if (e.key !== "Escape" || count === 0) return;
     if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
     const t = e.target;
     if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) return;
     for (const n of [...news.alerts]) news.dismissAlert(n.gid);
+    notices.clear();
   }
 </script>
 
@@ -27,7 +31,17 @@
 <!-- The container is always in the DOM: wrapping it in the `{#if}` meant the live
      region was created together with its content, and a region that appears already
      populated is generally never announced (D-224). -->
-<div class="toasts" role="status" aria-live="polite" class:empty={news.alerts.length === 0}>
+<div class="toasts" role="status" aria-live="polite" class:empty={count === 0}>
+  <!-- One-off notices (D-303): the same card, with only the dismiss button. -->
+  {#each notices.items as n (n.id)}
+    <div class="toast notice">
+      <div class="text">
+        <strong>{n.title}</strong>
+        <span class="muted" id="notice-{n.id}">{n.text}</span>
+      </div>
+      <button class="close" onclick={() => notices.dismiss(n.id)} aria-label="Dismiss" aria-describedby="notice-{n.id}">✕</button>
+    </div>
+  {/each}
   {#if news.alerts.length}
       {#each news.alerts as n (n.gid)}
         <div class="toast">
@@ -50,6 +64,7 @@
      its Join then pointed the open dialog at a different server. */
   .toasts { position: fixed; top: 44px; right: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 40; width: min(360px, calc(100vw - 32px)); }
   .toast { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 10px 12px; border-radius: var(--radius); background: var(--bg-elev); border: 1px solid color-mix(in srgb, var(--accent) 60%, var(--border)); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4); font-size: 12.5px; }
+  .toast.notice { grid-template-columns: minmax(0, 1fr) auto; }
   .text { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
   .text strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .close { all: unset; cursor: pointer; color: var(--fg-muted); padding: 4px; }

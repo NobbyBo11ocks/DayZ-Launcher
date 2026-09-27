@@ -75,11 +75,13 @@ pub async fn fetch() -> Result<Vec<DzsaRow>, String> {
         .https_only(true)
         .build()
         .map_err(|e| format!("http client: {e}"))?;
-    let resp = client
-        .get(DZSA_URL)
-        .send()
-        .await
-        .map_err(|e| format!("DZSA request failed: {e}"))?;
+    let resp = client.get(DZSA_URL).send().await.map_err(|e| {
+        crate::http::request_error(
+            e,
+            "DZSA request",
+            "Could not download the DZSA list: no connection. Try again once you are online.",
+        )
+    })?;
     if !resp.status().is_success() {
         return Err(format!("DZSA answered HTTP {}", resp.status()));
     }

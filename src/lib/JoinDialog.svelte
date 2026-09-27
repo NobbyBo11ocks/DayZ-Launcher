@@ -9,6 +9,7 @@
   import { invokeLogged as invoke, logInfo, logWarn } from "./log";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
+  import { notices } from "./state/notices.svelte";
   import { servers } from "./state/servers.svelte";
   import { fmtBytes, isUntrusted, type ItemProgress, type JoinPlan, type LaunchExited, type Launched, type LaunchProfile, type ServerSlots, type Settings, type SyncDone, type SyncProgress } from "./types";
 
@@ -132,15 +133,28 @@
     const t = setInterval(() => rateTick++, 1000);
     return () => clearInterval(t);
   });
+  /** A minute without movement is said, not just shown as a missing speed (row 14, F4,
+   *  approved): Steam can sit on a download it has queued, or stop one it has begun. */
+  const STALL_NOTICE_MS = 60_000;
+  let lastBytes = -1;
+  let lastMove = 0;
+  let stalled = $state(false);
   $effect(() => {
     if (phase !== "syncing") {
       rateSamples = [];
       rate = 0;
+      lastBytes = -1;
+      stalled = false;
       return;
     }
     void rateTick;
     const bytes = downloadedBytes;
     const now = Date.now();
+    if (bytes !== lastBytes) {
+      lastBytes = bytes;
+      lastMove = now;
+    }
+    stalled = now - lastMove > STALL_NOTICE_MS;
     rateSamples.push({ t: now, bytes });
     while (rateSamples.length > 2 && now - rateSamples[0]!.t > RATE_WINDOW_MS) rateSamples.shift();
     const first = rateSamples[0]!;
@@ -412,6 +426,9 @@
       // ids, and an old entry under the new pid read as "DayZ exited" (D-265).
       exited.clear();
       launched = await invoke<Launched>("launch_game", { id: sid, password: password || null, profile: profile || null });
+      // The game started; only its record in Recent failed, which the log alone knew
+      // (row 14, F15, approved).
+      if (launched.historyError) notices.push("Recent", `Not added to Recent: ${launched.historyError}.`);
       const early = exited.get(launched.pid);
       if (early) {
         exit = early;
@@ -673,6 +690,7 @@
               0} · {fmtBytes(rate)}/s{#if etaText} · about {etaText} left{/if}{/if}</span
           >
         </p>
+        {#if stalled}<p class="status warn" role="status">Steam has not moved the download for a minute.</p>{/if}
       {:else if phase === "waiting"}
         <p class="status">
           {#if slotMisses >= 3}

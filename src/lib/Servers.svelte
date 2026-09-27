@@ -191,11 +191,18 @@
            error — shows here in the header row, and only while it is true. -->
       <div class="notices">
         {#if servers.steam && !servers.steam.initialized}
-          <span class="warn" title={servers.steam.error ?? "Steam is not running; the launcher connects as soon as it starts."}>Steam is not running; the launcher connects as soon as it starts.</span>
+          <!-- A Steam at its login prompt is running: it said "not running" (row 14,
+               F12, approved). -->
+          {@const why = servers.steam.signedOut ? "Steam is running but nobody is signed in; the launcher connects once you sign in." : "Steam is not running; the launcher connects as soon as it starts."}
+          <span class="warn" title={servers.steam.error ?? why}>{why}</span>
           <button class="link" onclick={() => servers.loadDzsa()} disabled={servers.dzsaLoading} title="Download the DZSA Launcher's public server list (about 24 MB) instead">
             {servers.dzsaLoading ? "Downloading…" : "Load list from DZSA"}
           </button>
         {/if}
+        <!-- While the checks find no connection, the rows keep what they had (row 14, F1,
+             approved), and while the cache cannot be written nothing new is kept (H9). -->
+        {#if servers.netDown}<span class="warn" title="No server is answering, so your connection may be down; the list is kept as it was.">No server is answering, so your connection may be down; the list is kept as it was.</span>{/if}
+        {#if servers.cache?.writeFailure}<span class="warn" title={servers.cache.writeFailure}>Favourites and recent joins are not being saved: {servers.cache.writeFailure}.</span>{/if}
         {#if servers.error}<span class="error" title={servers.error}>{servers.error}</span>{/if}
       </div>
 

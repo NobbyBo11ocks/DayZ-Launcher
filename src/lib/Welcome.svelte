@@ -1,6 +1,7 @@
 <script lang="ts">
   // First-run overlay (M7, D-055). Shown once; the flag lives in settings.json since D-070 (localStorage is only the legacy migration).
   import { servers } from "./state/servers.svelte";
+  import { NOTHING_TO_IMPORT } from "./types";
   import logoUrl from "../assets/logo.png";
 
   let { onDone }: { onDone: () => void } = $props();
@@ -11,7 +12,9 @@
     importing = true;
     const r = await servers.importOfficial();
     importing = false;
-    imported = r ? `${r.imported} imported${r.already ? `, ${r.already} already here` : ""}` : (servers.error ?? "nothing to import");
+    // A missing file is nothing to import, said in words, and a failure is shown here,
+    // where the import was asked for (row 14, F7).
+    imported = typeof r === "string" ? r : r.missing ? NOTHING_TO_IMPORT : `${r.imported} imported${r.already ? `, ${r.already} already here` : ""}`;
   }
 
   // It declares `aria-modal="true"` and behaved like nothing of the sort: focus stayed

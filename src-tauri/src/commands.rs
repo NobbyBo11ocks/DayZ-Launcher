@@ -42,6 +42,46 @@ pub struct AppState {
     pub launching: Arc<AtomicBool>,
     /// The page's end of the row stream, once it has subscribed (`send_rows`, D-297).
     pub rows_out: Mutex<Option<Channel<InvokeResponseBody>>>,
+    /// What start-up did with the cache (`cache_status`, D-303).
+    pub cache_opened: CacheOpened,
+}
+
+/// What start-up did with the cache: a session in memory, or a damaged file moved aside
+/// at this start (row 14, F14 and H2).
+#[derive(Debug, Clone, Default)]
+pub struct CacheOpened {
+    pub in_memory: bool,
+    pub moved_to: Option<PathBuf>,
+}
+
+/// The cache as the page should know it (row 14, F14, H2 and H9, approved): running in
+/// memory, where a damaged file went at this start, and why writes are failing now.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheStatus {
+    /// Nothing is kept this session, and nothing saved before is shown.
+    pub in_memory: bool,
+    /// The file name a damaged cache was moved to at this start.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub moved_to: Option<String>,
+    /// Why the cache's writes fail, until one succeeds again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub write_failure: Option<String>,
+}
+
+/// Cheap enough to ask every minute: no lock on the cache (`note_write`).
+#[tauri::command]
+pub fn cache_status(state: State<'_, AppState>) -> CacheStatus {
+    CacheStatus {
+        in_memory: state.cache_opened.in_memory,
+        moved_to: state
+            .cache_opened
+            .moved_to
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned()),
+        write_failure: crate::browser::cache::write_failure(),
+    }
 }
 
 /// Sends one row-lifecycle message to the page: a listing batch, a refresh done, a
@@ -180,6 +220,7 @@ pub fn settings_get(state: State<'_, AppState>) -> SettingsView {
         settings,
         unreadable: health.unreadable,
         reset: health.reset,
+        kept_as: health.kept_as,
     }
 }
 
@@ -195,6 +236,9 @@ pub struct SettingsView {
     pub unreadable: bool,
     /// The file was damaged and kept aside; these are the defaults.
     pub reset: bool,
+    /// The name of the copy kept of the damaged file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kept_as: Option<String>,
 }
 
 /// Replaces the launch options only; UI preferences are written through `ui_prefs_set`.
@@ -722,7 +766,29 @@ async fn publish_second_look(
             "{} server(s) did not answer and Steam's web API is out of reach too: the connection looks down, so none was recorded as offline",
             silent.len()
         );
+        set_net(app, false);
     }
+}
+
+/// The connection looked down at the last check that could tell (D-303).
+static NET_DOWN: AtomicBool = AtomicBool::new(false);
+
+/// Tells the page when the checks find this PC's connection down, and when it is back:
+/// the Servers header says so while it lasts, so a list that stops changing is not a
+/// mystery (row 14, F1, approved). Sent only on a change.
+pub fn set_net(app: &AppHandle, up: bool) {
+    if NET_DOWN.swap(!up, Ordering::AcqRel) == !up {
+        return;
+    }
+    if !up {
+        crate::log_info!(
+            "verify",
+            "the connection looks down; the list is kept as it was"
+        );
+    } else {
+        crate::log_info!("verify", "servers answer again");
+    }
+    send_rows(app, "net", &up);
 }
 
 /// Servers with a re-read waiting (`OFFLINE_REREAD_AFTER`), so the visible-row checks
@@ -788,11 +854,17 @@ async fn publish(
     for v in &results {
         latest.insert(v.id.clone(), v.verdict);
     }
+    // A server that answered is a connection that works.
+    if results.iter().any(|v| v.verdict != Verdict::Offline) {
+        set_net(app, true);
+    }
     send_rows(app, "verified", &results);
     let c = Arc::clone(cache);
     let _ = tauri::async_runtime::spawn_blocking(move || {
         if let Ok(mut c) = c.lock() {
-            if let Err(e) = c.apply_verifications(&results) {
+            let applied = c.apply_verifications(&results);
+            crate::browser::cache::note_write(&applied);
+            if let Err(e) = applied {
                 crate::log_error!(
                     "cache",
                     "apply_verifications of {} failed: {e}",
@@ -962,6 +1034,7 @@ pub async fn run_mod_scan(
                 "scan stopped: none of {} server(s) answered and Steam's web API is out of reach too, so none was recorded as failed",
                 failed.len()
             );
+            set_net(&app, false);
             break;
         }
         summary.scanned += batch.len();
@@ -1467,6 +1540,9 @@ pub async fn server_details(
     // The pane still says what it saw; the row keeps its verdict while this PC cannot
     // reach the internet, as for every other check (row 14, F1/H1).
     if verdict != Verdict::Offline || connection_up().await {
+        if verdict != Verdict::Offline {
+            set_net(&app, true);
+        }
         let persist = vec![verification.clone()];
         send_rows(&app, "verified", &persist);
         let _ = tauri::async_runtime::spawn_blocking(move || {
@@ -1480,6 +1556,7 @@ pub async fn server_details(
             "verify",
             "{id} did not answer and Steam's web API is out of reach too: the connection looks down, so it was not recorded as offline"
         );
+        set_net(&app, false);
     }
 
     Ok(ServerDetails {
@@ -2197,7 +2274,7 @@ pub async fn launch_game(
     // Asked again here: the game may have been started from Steam while the mod list
     // was read.
     refuse_if_running()?;
-    let (mut child, launched) = match launch::spawn(&game_dir, &args) {
+    let (mut child, mut launched) = match launch::spawn(&game_dir, &args) {
         Ok(v) => v,
         Err(e) => {
             crate::log_error!("launch", "spawn failed for {id}: {e}");
@@ -2235,16 +2312,21 @@ pub async fn launch_game(
             ..row.clone()
         };
         let mods = links.len();
-        let _ = tauri::async_runtime::spawn_blocking(move || {
-            if let Ok(c) = c.lock() {
-                // Q22: a join that is not recorded is exactly the reported symptom,
-                // so the failure has to leave a trace (D-162).
-                if let Err(e) = c.history_add(&row_for_history, mods) {
-                    crate::log_error!("cache", "history_add failed: {e}");
-                }
-            }
+        // Q22: a join that is not recorded is exactly the reported symptom, so the
+        // failure has to leave a trace (D-162) — and, since row 14 (F15, approved), be
+        // said: the dialog shows "Not added to Recent: …".
+        launched.history_error = tauri::async_runtime::spawn_blocking(move || {
+            let c = c
+                .lock()
+                .map_err(|_| "the cache is unavailable".to_string())?;
+            let added = c.history_add(&row_for_history, mods);
+            crate::browser::cache::note_write(&added);
+            added.map_err(|e| e.to_string())
         })
-        .await;
+        .await
+        .unwrap_or_else(|e| Err(format!("the history task failed: {e}")))
+        .err()
+        .inspect(|e| crate::log_error!("cache", "history_add failed: {e}"));
     }
     #[cfg(debug_assertions)]
     eprintln!(
@@ -2339,8 +2421,9 @@ pub async fn favourite_set(state: State<'_, AppState>, id: String, on: bool) -> 
         let c = c
             .lock()
             .map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
-        c.favourite_set(&id, on)
-            .map_err(|e| AppError::Internal(format!("cache: {e}")))
+        let set = c.favourite_set(&id, on);
+        crate::browser::cache::note_write(&set);
+        set.map_err(|e| AppError::Internal(format!("cache: {e}")))
     })
     .await
     .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?
@@ -2515,7 +2598,12 @@ pub async fn direct_connect(
             let ports = candidate_query_ports(port);
             probe_server(&state.a2s, ip, &ports, Some(port))
                 .await
-                .ok_or_else(|| AppError::Internal(format!("no DayZ server answered at {ip}:{port}; also tried query ports {ports:?} for that game port")))?
+                .ok_or_else(|| {
+                    // The ports tried go to the log; the player gets a sentence (row 14,
+                    // F16, approved), in Direct connect and on the Friends page alike.
+                    crate::log_info!("join", "no DayZ server answered at {ip}:{port}; also tried query ports {ports:?} for that game port");
+                    AppError::Internal(format!("No DayZ server answered at {ip}:{port}. Check the address, or the server may be offline."))
+                })?
         }
     };
     let stored = vec![row.clone()];
@@ -2566,6 +2654,9 @@ pub struct ImportResult {
     /// Added from the XML data only because the server did not answer A2S now.
     pub unreachable: usize,
     pub path: String,
+    /// The official launcher has no favourites file on this PC: nothing to import, which
+    /// is not an error (row 14, F7).
+    pub missing: bool,
 }
 
 fn import_failed(n: usize, e: &str) -> AppError {
@@ -2584,8 +2675,21 @@ pub async fn import_official_favourites(
 ) -> AppResult<ImportResult> {
     let path = crate::steam::official::favourites_path()
         .ok_or_else(|| AppError::Internal("LOCALAPPDATA is not set".into()))?;
-    let entries =
-        crate::steam::official::read_favourites(&path).map_err(|e| AppError::io(&path, e))?;
+    let entries = match crate::steam::official::read_favourites(&path) {
+        Ok(entries) => entries,
+        // No file is no favourites. The welcome's import button showed a new player
+        // "i/o error at C:\Users\<name>\…\FavouriteServers.xml … (os error 2)" (row 14,
+        // F7, approved).
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            crate::log_info!("app", "no official favourites file at {}", path.display());
+            return Ok(ImportResult {
+                path: path.to_string_lossy().into_owned(),
+                missing: true,
+                ..Default::default()
+            });
+        }
+        Err(e) => return Err(AppError::io(&path, e)),
+    };
     let mut result = ImportResult {
         total: entries.len(),
         path: path.to_string_lossy().into_owned(),

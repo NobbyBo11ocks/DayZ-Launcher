@@ -28,7 +28,7 @@
       }
     });
   });
-  import type { ImportResult } from "./types";
+  import { NOTHING_TO_IMPORT, type ImportResult } from "./types";
 
   let importing = $state(false);
   let imported = $state<ImportResult | null>(null);
@@ -42,12 +42,22 @@
    *  the Servers page this grid does not show (D-240). */
   const selected = $derived(servers.favouriteRows.find((r) => r.id === servers.selectedId) ?? null);
 
+  /** Why the last import failed, shown on this page only (row 14, F7). */
+  let importError = $state<string | null>(null);
+
   async function importOfficial() {
     importing = true;
-    imported = await servers.importOfficial();
+    const r = await servers.importOfficial();
     importing = false;
-    if (imported)
-      importNote = `Imported ${imported.imported}, ${imported.already} already there${imported.unreachable ? `, ${imported.unreachable} offline right now` : ""}.`;
+    if (typeof r === "string") {
+      importError = importNote = r;
+      return;
+    }
+    importError = null;
+    imported = r;
+    importNote = r.missing
+      ? NOTHING_TO_IMPORT
+      : `Imported ${r.imported}, ${r.already} already there${r.unreachable ? `, ${r.unreachable} offline right now` : ""}.`;
   }
 
   // F on the last favourite takes the grid, and the focus in it, away with it: focus
@@ -79,14 +89,17 @@
       </button>
       <span class="muted">
         {servers.favouriteRows.length} favourite{servers.favouriteRows.length === 1 ? "" : "s"}
-        {#if imported}· imported {imported.imported}, {imported.already} already there{#if imported.unreachable}, {imported.unreachable} offline right now{/if}{/if}
+        {#if imported?.missing}· {NOTHING_TO_IMPORT}{:else if imported}· imported {imported.imported}, {imported.already} already there{#if imported.unreachable}, {imported.unreachable} offline right now{/if}{/if}
       </span>
+      {#if importError}<span class="error" role="alert">{importError}</span>{/if}
       {#if servers.error}<span class="error" role="alert">{servers.error}</span>{/if}
     </div>
   </div>
   {#if servers.favourites.size === 0}
     <div class="empty">
-      <p tabindex="-1" bind:this={emptyEl}>No favourites yet.</p>
+      <!-- A cache the host could not use this session, or a read that failed at start, is
+           not "none yet" (row 14, F14, approved). -->
+      <p tabindex="-1" bind:this={emptyEl}>{servers.cache?.inMemory || servers.favouritesUnread ? "Your favourites could not be read this session." : "No favourites yet."}</p>
       <p class="muted">Press <kbd>F</kbd> on a server or click its star. The official launcher's favourites can be imported with the button above.</p>
     </div>
   {:else}

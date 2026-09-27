@@ -472,6 +472,9 @@ h1 {
 .crashed-why { color: var(--fg-muted); font-size: 12.5px; overflow-wrap: anywhere; }
 .crashed-retry { cursor: pointer; padding: 6px 14px; border-radius: var(--radius); background: var(--bg-row); border: 1px solid var(--border-control); color: var(--fg); font: inherit; }
 .crashed-retry:hover { border-color: var(--accent); }
+/* The join window's own, over the dialogs' backdrop (D-303). */
+.join-crashed { position: fixed; inset: 0; z-index: 50; display: grid; background: rgba(0, 0, 0, 0.45); }
+.join-crashed > .crashed { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; }
 
 /* Shared button base (D-226). Components override with their own scoped rules,
    which are more specific because Svelte adds a scoping class to them. */

@@ -21,6 +21,7 @@
   import WhatsNew from "./lib/WhatsNew.svelte";
   import { modUpdates } from "./lib/state/mods.svelte";
   import { news } from "./lib/state/news.svelte";
+  import { notices } from "./lib/state/notices.svelte";
   import { prefs } from "./lib/state/prefs.svelte";
   import { servers } from "./lib/state/servers.svelte";
   import { uiPrefs } from "./lib/state/uiprefs.svelte";
@@ -86,6 +87,13 @@
   let showWelcome = $state(false);
   $effect(() => {
     void uiPrefs.ready.then((u) => {
+      // A settings file the host could not read, or had to set aside, is said once: the
+      // defaults stood in for it with nothing on screen (row 14, F8/H4, approved).
+      const h = uiPrefs.health;
+      if (h.unreadable || h.reset) {
+        const kept = h.reset && h.keptAs ? ` The damaged file was kept as ${h.keptAs}.` : "";
+        notices.push("Settings", `The settings file could not be read, so the defaults are in use.${kept}`);
+      }
       // Only a settings file that was actually read and says "not onboarded" opens
       // the overlay; an unreadable backend must not look like a first run (D-112).
       if (!uiPrefs.readOk) return;
@@ -316,7 +324,20 @@
        this a new joiningId left the old plan, password and mod list on screen while
        the buttons acted on the new server. Now it is rebuilt from scratch. -->
   {#key servers.joiningId}
-    <JoinDialog serverId={servers.joiningId} onClose={() => (servers.joiningId = null)} />
+    <!-- A join window that fails to draw left its backdrop over the app with nothing on
+         it (D-222); now it says so and can be closed (row 14, F18, approved). -->
+    <svelte:boundary onerror={(e) => logError("view", `the join window failed to render: ${describe(e)}`)}>
+      <JoinDialog serverId={servers.joiningId} onClose={() => (servers.joiningId = null)} />
+      {#snippet failed()}
+        <div class="join-crashed" role="presentation">
+          <div class="crashed" role="alertdialog" aria-modal="true" aria-labelledby="join-crashed-text">
+            <p id="join-crashed-text">The join window stopped working.</p>
+            <!-- svelte-ignore a11y_autofocus -->
+            <button class="btn" autofocus onclick={() => (servers.joiningId = null)}>Close</button>
+          </div>
+        </div>
+      {/snippet}
+    </svelte:boundary>
   {/key}
 {/if}
 <Toasts />

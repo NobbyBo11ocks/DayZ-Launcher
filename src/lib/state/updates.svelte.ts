@@ -18,6 +18,10 @@ const FOCUS_CHECK_INTERVAL_MS = 3600 * 1000;
 const DOWNLOAD_TIMEOUT_MS = 30 * 60_000;
 /** A download with no data for this long is given up on (row 14, F5). */
 const DOWNLOAD_STALL_MS = 60_000;
+/** How the updater's HTTP client says there was no connection: reqwest's text for a
+ *  refused, unresolved or timed-out request (S-111). */
+const OFFLINE_ERROR = /error sending request|timed out|dns error|connection (?:refused|reset|closed)/i;
+const CHECK_OFFLINE = "Could not reach GitHub to check for updates. Check your connection and try again.";
 
 class Updates {
   state = $state<"idle" | "checking" | "none" | "available" | "downloading" | "ready" | "error">("idle");
@@ -98,7 +102,9 @@ class Updates {
         this.state = "none";
       }
     } catch (e) {
-      const message = silent ? shown : String(e);
+      // No connection is said in words; the request's own text, with its URL, stays in
+      // the log below (row 14, F6, approved).
+      const message = silent ? shown : OFFLINE_ERROR.test(String(e)) ? CHECK_OFFLINE : String(e);
       this.error = message;
       this.state = message ? "error" : "idle";
       this.#checkFailed = !!message;
@@ -184,6 +190,23 @@ class Updates {
       await u.install();
       this.state = "ready";
     } catch (e) {
+      // The setup is written to %TEMP% first, and only then does the updater hide the
+      // window and close the app's resources (tauri 2.11.6 `cleanup_before_exit` hides
+      // every window on Windows; S-111). A window still showing is a setup that could not
+      // even be saved — a full disk — with the launcher and its update intact, so Install
+      // is offered again instead of a restart (row 14, F13/H13c, approved).
+      let saved = true;
+      try {
+        saved = !(await getCurrentWindow().isVisible());
+      } catch {
+        /* the old message is the safe one */
+      }
+      if (!saved) {
+        this.state = "available";
+        this.error = `Could not save the ${u.version} setup (${describe(e)}). Press Install and restart to try again.`;
+        logWarn("update", `the ${u.version} setup could not be saved: ${describe(e)}`);
+        return;
+      }
       // Before it starts the setup, the updater hides the window and closes the app's
       // resources, the Steam session with them, and it does not undo that when Windows
       // refuses the setup (an antivirus holding the unsigned file, for one): the launcher

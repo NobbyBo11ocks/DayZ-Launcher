@@ -206,6 +206,8 @@ export type SteamStatus = {
   /** Steamworks was released after inactivity (Q16); the next command that needs a
    *  session re-opens it, while the cache reads (Workshop flags, avatars) do not (D-275). */
   idle: boolean;
+  /** Steam runs but nobody is signed in to it (row 14, F12). */
+  signedOut?: boolean;
 };
 
 export type PartitionResult = {
@@ -567,6 +569,8 @@ export type Settings = {
   unreadable?: boolean;
   /** From `settings_get` only: the file was damaged and kept aside; the defaults. */
   reset?: boolean;
+  /** From `settings_get` only: the name of the copy kept of the damaged file. */
+  keptAs?: string;
 };
 
 export type ModPlanItem = {
@@ -645,14 +649,21 @@ export type SyncProgress = { job: number; items: ItemProgress[]; installed: numb
 /** `failedId`: the item `error` is about, when it is about one; `superseded`: a newer
  *  download took over, which is not a failure (D-277). */
 export type SyncDone = { job: number; ok: boolean; error: string | null; failedId: number | null; superseded: boolean; items: ItemProgress[]; elapsedMs: number };
-export type Launched = { pid: number; exe: string; commandLine: string };
+/** `historyError`: why the join could not be added to Recent (row 14, F15). */
+export type Launched = { pid: number; exe: string; commandLine: string; historyError?: string };
 export type LaunchExited = { pid: number; code: number | null };
 
 export type Favourite = { id: string; addedAt: number };
 /** One past join, for the Recent page (D-054). */
 export type HistoryEntry = { id: string; joinedAt: number; name: string; ip: string; gamePort: number; mods: number };
 export type PopulationSample = { ts: number; players: number; queue: number };
-export type ImportResult = { total: number; imported: number; already: number; unreachable: number; path: string };
+/** `missing`: the official launcher has no favourites file on this PC (row 14, F7). */
+export type ImportResult = { total: number; imported: number; already: number; unreachable: number; path: string; missing?: boolean };
+/** Shown when the official launcher has no favourites file (row 14, F7, approved). */
+export const NOTHING_TO_IMPORT = "Nothing to import: the official DayZ launcher has no saved favourites on this PC.";
+
+/** What start-up did with the cache, and whether its writes fail now (D-303). */
+export type CacheStatus = { inMemory: boolean; movedTo?: string; writeFailure?: string };
 
 /** 0 is "0 kB": it said "1 kB" for an empty Workshop and before a download began (D-256). */
 export const fmtBytes = (n: number): string =>

@@ -45,6 +45,9 @@ class UiPrefsStore {
   current: UiPrefs | null = null;
   /** True once the backend answered; false means `current` is the defaults, not the file. */
   readOk = false;
+  /** What the host said about the file: unreadable, or damaged and kept aside under
+   *  this name. The app says it once at start (row 14, F8/H4, approved). */
+  health: { unreadable: boolean; reset: boolean; keptAs: string | null } = { unreadable: false, reset: false, keptAs: null };
   /** Resolves once the file has been read; stores reconcile their caches against it. */
   readonly ready: Promise<UiPrefs>;
   #pending: Partial<UiPrefs> = {};
@@ -69,6 +72,7 @@ class UiPrefsStore {
         // set aside, the host hands out the defaults, and taken as the file they turned
         // the News page back on for someone who had switched it off (row 14, H4).
         this.readOk = !s.unreadable && !s.reset;
+        this.health = { unreadable: !!s.unreadable, reset: !!s.reset, keptAs: s.keptAs ?? null };
         // A change made before the file arrived is still on its way to it; the copy
         // has to show it, or `patch` compares the next change against stale values.
         this.current = { ...(s.ui ?? defaultUiPrefs()), ...this.#pending };

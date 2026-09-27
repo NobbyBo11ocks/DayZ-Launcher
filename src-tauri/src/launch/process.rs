@@ -19,6 +19,9 @@ pub struct Launched {
     pub pid: u32,
     pub exe: String,
     pub command_line: String,
+    /// Why the join could not be added to Recent, when it could not (row 14, F15).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history_error: Option<String>,
 }
 
 pub fn spawn(game_dir: &Path, args: &[String]) -> AppResult<(Child, Launched)> {
@@ -38,6 +41,7 @@ pub fn spawn(game_dir: &Path, args: &[String]) -> AppResult<(Child, Launched)> {
         pid: child.id(),
         exe: exe.to_string_lossy().into_owned(),
         command_line: display_command_line(&exe.to_string_lossy(), args),
+        history_error: None,
     };
     Ok((child, launched))
 }

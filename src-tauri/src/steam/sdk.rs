@@ -147,6 +147,9 @@ pub struct SteamStatus {
     /// command that needs a session re-opens it. The reads Steam answers from its cache
     /// (the Workshop update flags, friends' avatars) do not (D-220, D-275).
     pub idle: bool,
+    /// The session did not open because nobody is signed in to the Steam that runs: the
+    /// Servers header says that instead of "Steam is not running" (row 14, F12).
+    pub signed_out: bool,
 }
 
 /// Release Steamworks after this long without a command or active job: 5 minutes by
@@ -192,10 +195,34 @@ fn note_init_failure(e: &SteamAPIInitError) {
     }
 }
 
+/// The session's error while Steam runs with nobody signed in (row 14, F12, approved).
+pub const NOBODY_SIGNED_IN: &str =
+    "Steam is running but nobody is signed in; the launcher connects once you sign in.";
+
+/// How a session that did not open is shown (row 14, F12/H8, approved). Every failure
+/// read "Steam is not running", and Settings showed the crate's fixed "Some other
+/// failure": a Steam at its login prompt says so now, and otherwise Steam's own reason
+/// stands in. The registry is read only here, on a failure.
+fn init_failure_text(e: &SteamAPIInitError) -> String {
+    let steam = crate::steam::registry::detect();
+    if steam.running && steam.active_user == 0 {
+        return NOBODY_SIGNED_IN.to_string();
+    }
+    let (SteamAPIInitError::FailedGeneric(why)
+    | SteamAPIInitError::NoSteamClient(why)
+    | SteamAPIInitError::VersionMismatch(why)) = e;
+    let why = why.trim();
+    if why.is_empty() {
+        e.to_string()
+    } else {
+        why.to_string()
+    }
+}
+
 fn open_session() -> Result<Session, String> {
     let client = Client::init_app(DAYZ_APP_ID).map_err(|e| {
         note_init_failure(&e);
-        e.to_string()
+        init_failure_text(&e)
     })?;
     let mms = client.matchmaking_servers();
     let ugc = client.ugc();
@@ -230,6 +257,7 @@ fn publish_open(shared: &Shared, events: &UnboundedSender<SteamEvent>, s: &Sessi
         st.initialized = true;
         st.idle = false;
         st.error = None;
+        st.signed_out = false;
         st.steam_id = Some(steam_id);
         st.persona = Some(persona);
     });
@@ -1205,7 +1233,10 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
             match open_session() {
                 Ok(s) => session = Some(s),
                 Err(e) => {
-                    shared.set_status(&events, |st| st.error = Some(e));
+                    shared.set_status(&events, |st| {
+                        st.signed_out = e == NOBODY_SIGNED_IN;
+                        st.error = Some(e);
+                    });
                     next_try = Instant::now() + STEAM_RETRY;
                 }
             }
@@ -1316,6 +1347,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                         shared.set_status(&events, |st| {
                             st.initialized = false;
                             st.idle = false;
+                            st.signed_out = e == NOBODY_SIGNED_IN;
                             st.error = Some(e.clone());
                         });
                         reject(cmd, &events, e);
