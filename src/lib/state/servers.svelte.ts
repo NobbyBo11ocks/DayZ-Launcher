@@ -1374,9 +1374,12 @@ class ServersStore {
     this.flushRows();
     let n = 0;
     const delta = new Map<number, number>();
+    /** The name of the server a join dialog is open for, if this prune takes it. */
+    let joinGone: string | null = null;
     for (const id of ids) {
       const gone = this.rows.get(id);
       if (!gone) continue;
+      if (id === this.joiningId) joinGone = gone.name;
       this.rows.delete(id);
       this.#count(gone, -1);
       n++;
@@ -1403,8 +1406,12 @@ class ServersStore {
     for (const id of ids) this.friendsOn.delete(id);
     if (this.selectedId && !this.rows.has(this.selectedId)) this.selectedId = null;
     // A join dialog open on a pruned row would fail its next step with "unknown
-    // server"; it closes instead (D-248).
-    if (this.joiningId && !this.rows.has(this.joiningId)) this.joiningId = null;
+    // server"; it closes instead (D-248), and says why: it vanished mid-wait or
+    // mid-download without a word, a typed password with it (D-296).
+    if (this.joiningId && !this.rows.has(this.joiningId)) {
+      this.joiningId = null;
+      if (joinGone !== null) this.error = `${joinGone} dropped out of the server list, so its join was closed. Join it again from Recent or with Direct connect.`;
+    }
     // It only ever went from false to true, so once the prune took the last row Steam
     // listed as empty, the empty state kept saying "widen the filters" instead of
     // offering the Refresh that brings them back (D-210, D-236).

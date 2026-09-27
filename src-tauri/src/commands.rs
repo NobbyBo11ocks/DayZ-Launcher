@@ -1376,6 +1376,17 @@ async fn keep_join_facts(
     .await;
 }
 
+/// Orders two DayZ versions ("1.29.163709") by their numbers; `None` when either is not
+/// all numbers (D-296).
+fn version_order(a: &str, b: &str) -> Option<std::cmp::Ordering> {
+    let parse = |s: &str| {
+        s.split('.')
+            .map(|p| p.trim().parse::<u64>().ok())
+            .collect::<Option<Vec<u64>>>()
+    };
+    Some(parse(a)?.cmp(&parse(b)?))
+}
+
 /// "12 minutes ago" / "3 hours ago" / "2 days ago", for text the user reads once.
 fn humanise_age(secs: i64) -> String {
     let plural = |n: i64, unit: &str| format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" });
@@ -1633,17 +1644,31 @@ pub async fn join_plan(
         .filter_map(|m| m.size)
         .sum();
     let local_version = diag.dayz.as_ref().and_then(|g| g.game_version.clone());
-    let version_mismatch = local_version
-        .as_deref()
-        .is_some_and(|v| v != server_version);
-    if version_mismatch {
+    // An unknown server version is no mismatch: it read "Server runs  but…" (D-296).
+    let version_mismatch = !server_version.is_empty()
+        && local_version
+            .as_deref()
+            .is_some_and(|v| v != server_version);
+    if let (true, Some(local)) = (version_mismatch, local_version.as_deref()) {
+        // Which side is behind. For hours after a DayZ patch the game is current and the
+        // servers are not, and the warning sent the player to Steam, which had nothing
+        // to update (D-296).
+        let remedy = match version_order(local, &server_version) {
+            Some(std::cmp::Ordering::Less) => {
+                "; the server will reject the connection until Steam updates your game."
+            }
+            Some(std::cmp::Ordering::Greater) => {
+                "; the server will reject the connection until the server is updated to your version."
+            }
+            _ => "; the server will reject the connection.",
+        };
         warnings.push(format!(
-            "Server runs {} but your DayZ is {}; the server will reject the connection until Steam updates the game.",
-            server_version,
-            local_version.clone().unwrap_or_default()
+            "Server runs {server_version} but your DayZ is {local}{remedy}"
         ));
     }
-    if !diag.steam.running {
+    // Without an install, the machine check below says "Steam is not installed" (D-296).
+    let steam_installed = diag.steam.path.is_some();
+    if steam_installed && !diag.steam.running {
         warnings.push("Steam is not running; DayZ cannot start without it.".into());
     }
     // Re-checked here, not taken from start-up (D-288): the launcher often starts before
@@ -1678,10 +1703,14 @@ pub async fn join_plan(
     let game_found = diag.dayz.is_some();
     let battleye_present = diag.dayz.as_ref().is_some_and(|g| g.has_battleye_exe);
     if !game_found {
-        warnings.push(
-            "DayZ was not found in any Steam library; install it, or check that its drive is connected."
-                .into(),
-        );
+        // With Steam installed the machine check says it, naming the folder when the
+        // library is on a drive that is not connected; this is for when it cannot (D-296).
+        if !steam_installed {
+            warnings.push(
+                "DayZ was not found in any Steam library; install it, or check that its drive is connected."
+                    .into(),
+            );
+        }
     } else if !battleye_present {
         warnings.push(
             "DayZ_BE.exe is missing from the game folder; verify the game files in Steam.".into(),
@@ -1689,8 +1718,27 @@ pub async fn join_plan(
     }
     // Whatever else the machine check turned up (no library folders, an unreadable
     // Workshop folder, nobody signed in): the user could only see these in
-    // Diagnostics before, while the join in front of them quietly failed.
-    warnings.extend(diag.warnings.iter().cloned());
+    // Diagnostics before, while the join in front of them quietly failed. Its Steam and
+    // BattlEye lines are said above in the join's own words, and each problem once; and
+    // an unreadable Workshop list does not stop this plan, which checks the folders
+    // itself (D-265), so its "cannot be checked" was untrue here (D-296).
+    let (unreadable_head, unreadable_tail) = diagnostics::WORKSHOP_UNREADABLE;
+    warnings.extend(
+        diag.warnings
+            .iter()
+            .filter(|w| *w != diagnostics::STEAM_NOT_RUNNING && *w != diagnostics::BATTLEYE_MISSING)
+            .map(|w| {
+                match w
+                    .strip_prefix(unreadable_head)
+                    .and_then(|r| r.strip_suffix(unreadable_tail))
+                {
+                    Some(e) => format!(
+                        "Steam's Workshop list could not be read ({e}); installed mods were checked from their folders."
+                    ),
+                    None => w.clone(),
+                }
+            }),
+    );
 
     let settings = state.settings.get();
     let profile_name = if settings.profile_name.trim().is_empty() {
@@ -2500,4 +2548,32 @@ pub async fn import_official_favourites(
         ));
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::version_order;
+    use std::cmp::Ordering;
+
+    /// The join's version warning names the side that is behind (D-296).
+    #[test]
+    fn versions_order_by_their_numbers() {
+        assert_eq!(
+            version_order("1.29.163709", "1.29.163709"),
+            Some(Ordering::Equal)
+        );
+        assert_eq!(
+            version_order("1.28.161464", "1.29.163709"),
+            Some(Ordering::Less)
+        );
+        assert_eq!(
+            version_order("1.29.163709", "1.28.161464"),
+            Some(Ordering::Greater)
+        );
+        // By number, not by text: 9 is older than 10.
+        assert_eq!(version_order("1.9.1", "1.10.1"), Some(Ordering::Less));
+        assert_eq!(version_order("1.29", "1.29.163709"), Some(Ordering::Less));
+        assert_eq!(version_order("1.29.x", "1.29.163709"), None);
+        assert_eq!(version_order("", "1.29.163709"), None);
+    }
 }

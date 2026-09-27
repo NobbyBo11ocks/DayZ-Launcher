@@ -119,7 +119,10 @@
           <!-- Index in the key: two joins to the same server in the same second are
                otherwise duplicate keys and Svelte throws (D-151). -->
           {#each servers.history as h, i (`${h.id}@${h.joinedAt}#${i}`)}
-            {@const live = servers.rowsTick >= 0 ? servers.rows.get(h.id) : undefined}
+            <!-- The listed row only while it is still this entry's server: on another game
+                 port, the id belongs to another server now, and its name was shown (D-296). -->
+            {@const listed = servers.rowsTick >= 0 ? servers.rows.get(h.id) : undefined}
+            {@const live = listed?.gamePort === h.gamePort ? listed : undefined}
             <tr>
               <td class="muted">{when(h.joinedAt)}</td>
               <td>{live?.name ?? h.name}{#if servers.favourites.has(h.id)} <span class="star" role="img" aria-label="Favourite" title="Favourite">★</span>{/if}</td>

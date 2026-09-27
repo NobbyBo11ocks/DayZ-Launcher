@@ -98,6 +98,18 @@ fn s(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
+/// The lines the join plan says in its own words, so it can leave these out and say each
+/// problem once (D-296).
+pub const STEAM_NOT_RUNNING: &str = "Steam is not running; the server list and Workshop need it.";
+pub const BATTLEYE_MISSING: &str =
+    "DayZ_BE.exe is missing; BattlEye servers will reject the client.";
+/// An unreadable Workshop list: "…could not be read ({e}); installed mods cannot be
+/// checked." True on the Mods page; the join plan checks the folders itself (D-296).
+pub const WORKSHOP_UNREADABLE: (&str, &str) = (
+    "Steam's Workshop list could not be read (",
+    "); installed mods cannot be checked.",
+);
+
 pub fn collect() -> AppResult<Diagnostics> {
     let t0 = Instant::now();
     let mut warnings = Vec::new();
@@ -106,7 +118,7 @@ pub fn collect() -> AppResult<Diagnostics> {
     if steam.path.is_none() {
         warnings.push("Steam is not installed (no registry key).".into());
     } else if !steam.running {
-        warnings.push("Steam is not running; the server list and Workshop need it.".into());
+        warnings.push(STEAM_NOT_RUNNING.into());
     } else if steam.active_user == 0 {
         warnings.push("Steam is running but nobody is logged in.".into());
     }
@@ -146,8 +158,7 @@ pub fn collect() -> AppResult<Diagnostics> {
         }
         let has_be = g.battleye_exe().is_file();
         if !has_be {
-            warnings
-                .push("DayZ_BE.exe is missing; BattlEye servers will reject the client.".into());
+            warnings.push(BATTLEYE_MISSING.into());
         }
         dayz = Some(GameInfo {
             library: s(&g.library.path),
@@ -184,7 +195,8 @@ pub fn collect() -> AppResult<Diagnostics> {
             }
             Err(e) => {
                 warnings.push(format!(
-                    "Steam's Workshop list could not be read ({e}); installed mods cannot be checked."
+                    "{}{e}{}",
+                    WORKSHOP_UNREADABLE.0, WORKSHOP_UNREADABLE.1
                 ));
                 None
             }

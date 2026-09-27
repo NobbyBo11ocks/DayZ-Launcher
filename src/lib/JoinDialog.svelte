@@ -9,7 +9,8 @@
   import { invokeLogged as invoke, logInfo, logWarn } from "./log";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
-  import { fmtBytes, type ItemProgress, type JoinPlan, type LaunchExited, type Launched, type LaunchProfile, type ServerSlots, type Settings, type SyncDone, type SyncProgress } from "./types";
+  import { servers } from "./state/servers.svelte";
+  import { fmtBytes, isUntrusted, type ItemProgress, type JoinPlan, type LaunchExited, type Launched, type LaunchProfile, type ServerSlots, type Settings, type SyncDone, type SyncProgress } from "./types";
 
   let { serverId, onClose }: { serverId: string; onClose: () => void } = $props();
   /** The server this dialog is for, read once. The prop is a live read of the store's
@@ -83,7 +84,17 @@
   let pollTimer: ReturnType<typeof setInterval> | undefined;
   let clockTimer: ReturnType<typeof setInterval> | undefined;
 
-  const full = $derived(!!slots && slots.maxPlayers > 0 && slots.players >= slots.maxPlayers);
+  /** The slot count is the server's own INFO claim, which the list does not take on trust
+   *  (D-038). A server it has flagged as untrusted is never called full: a faker claiming
+   *  60/60 could be waited on for ever. And the queue beside the count follows the list's
+   *  rule (`queueOf`), so a junk queue tag no longer read "7/60 · 172 in queue" (D-296). */
+  const untrusted = $derived.by(() => {
+    const row = servers.rowsTick >= 0 ? servers.rows.get(sid) : undefined;
+    return !!row && isUntrusted(row);
+  });
+  const claimsFull = $derived(!!slots && slots.maxPlayers > 0 && slots.players >= slots.maxPlayers);
+  const full = $derived(claimsFull && !untrusted);
+  const queue = $derived(!untrusted && slots?.queue && slots.players >= slots.maxPlayers - 2 ? slots.queue : 0);
   const toSync = $derived(plan ? plan.mods.filter((m) => !m.installed || m.needsUpdate) : []);
   const canLaunch = $derived(!!plan && plan.gameFound && plan.steamRunning && plan.battleyePresent && toSync.length === 0 && (!plan.passwordRequired || password.length > 0));
   const canSync = $derived(!!plan && plan.steamRunning && toSync.length > 0);
@@ -356,7 +367,7 @@
     // dialog waited for a slot sent the launch into "not installed; sync mods first",
     // with only Join — the same failure — on offer (D-240).
     if (Date.now() - plannedAt > PLAN_MAX_AGE_MS && (await replan()) && toSync.length > 0) {
-      error = "The server's mods changed while you waited. Download them to join.";
+      error = "Some of this server's mods need downloading since its list was read. Download them to join.";
       phase = "ready";
       say("");
       return;
@@ -544,7 +555,7 @@
       <span class="muted">
         {#if plan}{plan.ip}:{plan.gamePort} · v{plan.serverVersion}{/if}
         {#if slots}
-          · <span class:warn={full}>{slots.players}/{slots.maxPlayers}{#if slots.queue} · {slots.queue} in queue{/if}</span>
+          · <span class:warn={full}>{slots.players}/{slots.maxPlayers}{#if queue} · {queue} in queue{/if}</span>
         {/if}
       </span>
     </header>
@@ -598,7 +609,9 @@
         </label>
       {/if}
 
-      {#if full && (phase === "ready" || phase === "error")}
+      {#if claimsFull && untrusted && (phase === "ready" || phase === "error")}
+        <p class="muted small">The server reports itself full, but its player count is not trusted here. Join now and DayZ's own queue decides.</p>
+      {:else if full && (phase === "ready" || phase === "error")}
         <label class="wait">
           <input type="checkbox" bind:checked={waitForSlot} />
           <span>
@@ -643,7 +656,7 @@
           {:else}
             Waiting for a free slot…
             <span aria-hidden="true"
-              >{#if slots}{slots.players}/{slots.maxPlayers}{#if slots.queue} · {slots.queue} in queue{/if} · {/if}{checks} check{checks === 1 ? "" : "s"} · {mmss(waitedSecs)}</span
+              >{#if slots}{slots.players}/{slots.maxPlayers}{#if queue} · {queue} in queue{/if} · {/if}{checks} check{checks === 1 ? "" : "s"} · {mmss(waitedSecs)}</span
             >
           {/if}
         </p>
