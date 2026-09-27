@@ -250,8 +250,14 @@
         .grid {
           grid-template-columns: 1fr;
         }
+        /* Out of sight, still the heading's text for a screen reader. */
         h1 span {
-          display: none;
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          overflow: hidden;
+          clip-path: inset(50%);
+          white-space: nowrap;
         }
       }
 
