@@ -78,6 +78,24 @@ impl Rules {
     /// ones only (id 0 is a server-side mod nobody can download, D-221), each id once —
     /// 47 of 22 794 scanned servers list one twice, which put it into `-mod=` twice
     /// (D-265). Not the load order: that is the reverse (`launch_game`, D-265).
+    /// The list as the cache stores it: each id once, where it first appears, id 0
+    /// included (D-276). The launch reads it back without id 0 (`Cache::server_mods`).
+    /// The join plan stored `required_mods()` instead, so after every plan the server's
+    /// Mods count read one lower than the scan's (D-295); both use this now.
+    pub fn stored_mods(&self) -> Vec<(u64, String)> {
+        let mut seen = std::collections::HashSet::new();
+        self.dayz
+            .as_ref()
+            .map(|d| {
+                d.mods
+                    .iter()
+                    .filter(|m| seen.insert(m.workshop_id))
+                    .map(|m| (m.workshop_id, m.name.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub fn required_mods(&self) -> Vec<(u64, String)> {
         let mut seen = std::collections::HashSet::new();
         self.dayz

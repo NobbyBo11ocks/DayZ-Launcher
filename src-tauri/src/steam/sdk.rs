@@ -458,9 +458,16 @@ const DETAILS_PAGE: usize = 50;
 const SYNC_EMIT_INTERVAL: Duration = Duration::from_millis(250);
 /// Re-issue `DownloadItem` when Steam has not started within this time.
 const SYNC_KICK_INTERVAL: Duration = Duration::from_secs(5);
-/// How long an item Steam calls installed may go without a folder after its kick
-/// before the sync gives up on it with the remedy (Q30, D-265).
+/// How long an item Steam calls installed may go without a folder before the sync gives
+/// up on it with the remedy (Q30, D-265). Counted from when that was first seen: from
+/// the item's last kick, as it was, a download over a minute long had spent it by the
+/// time it finished, and one look during Steam's final move of the files failed a
+/// healthy download (D-295).
 const MISSING_FOLDER_GRACE: Duration = Duration::from_secs(60);
+/// How often a download is looked at. Every turn of the loop, 10 ms apart, read each
+/// item's state, install info and folder twice: at 140 mods that was 5.7 ms of `is_dir`
+/// alone in every 10 ms, a third of a core, for progress sent every 250 ms (D-295).
+const SYNC_TICK: Duration = Duration::from_millis(100);
 /// A download is given up when Steam has moved nothing for this long. It used to be 45
 /// minutes from the start whatever was happening, and a first join to a big modded
 /// server — the project's own twelve-mod set is 5.91 GB (D-120) — needs 17.5 Mbit/s to
@@ -682,12 +689,18 @@ impl SteamWorker {
     }
 
     /// Workshop titles and sizes, fetched in pages of 50. Blocking: call from a blocking task.
-    pub fn item_details(&self, ids: &[u64]) -> Result<Vec<ItemDetails>, String> {
+    ///
+    /// The pages that answered are kept when one does not, with its error beside them:
+    /// one failed page cost a server with more than 50 mods every title and size
+    /// (D-295). A page Steam does not answer at all ends the loop, so a stuck client
+    /// still costs one 15 s wait, not one per page.
+    pub fn item_details(&self, ids: &[u64]) -> Result<(Vec<ItemDetails>, Option<String>), String> {
         let s = self.status();
         if !s.initialized {
             return Err(s.error.unwrap_or_else(|| "Steam is not initialised".into()));
         }
         let mut out = Vec::with_capacity(ids.len());
+        let mut missed: Option<String> = None;
         for page in ids.chunks(DETAILS_PAGE) {
             let (reply, rx) = mpsc::channel();
             self.cmd
@@ -696,12 +709,23 @@ impl SteamWorker {
                     reply,
                 })
                 .map_err(|_| "steamworks thread has stopped".to_string())?;
-            let got = rx.recv_timeout(Duration::from_secs(15)).map_err(|_| {
-                "Steam did not answer the Workshop details query in 15 s".to_string()
-            })??;
-            out.extend(got);
+            match rx.recv_timeout(Duration::from_secs(15)) {
+                Ok(Ok(got)) => out.extend(got),
+                Ok(Err(e)) => {
+                    missed.get_or_insert(e);
+                }
+                Err(_) => {
+                    missed.get_or_insert_with(|| {
+                        "Steam did not answer the Workshop details query in 15 s".to_string()
+                    });
+                    break;
+                }
+            }
         }
-        Ok(out)
+        match missed {
+            Some(e) if out.is_empty() => Err(e),
+            missed => Ok((out, missed)),
+        }
     }
 }
 
@@ -805,6 +829,9 @@ struct ActiveSync {
     /// Download errors Steam reported per item; one can be transient, two are not.
     download_errors: HashMap<u64, u8>,
     kicked: HashMap<u64, Instant>,
+    /// When each item was first seen installed in Steam's books with no folder.
+    missing_since: HashMap<u64, Instant>,
+    last_tick: Instant,
 }
 
 fn start_sync(ugc: &UGC, job: u64, mut ids: Vec<u64>, subscribe: bool) -> ActiveSync {
@@ -850,14 +877,25 @@ fn start_sync(ugc: &UGC, job: u64, mut ids: Vec<u64>, subscribe: bool) -> Active
         failed: HashMap::new(),
         download_errors: HashMap::new(),
         kicked,
+        missing_since: HashMap::new(),
+        last_tick: Instant::now() - SYNC_TICK,
     }
 }
 
-fn item_progress(ugc: &UGC, id: u64, failed: Option<&String>) -> ItemProgress {
+/// One look at an item: its progress, and whether Steam calls it installed while its
+/// folder is missing. One read of the state, the install info and the disk serves both;
+/// the missing-folder check used to make its own (D-295).
+fn item_progress(ugc: &UGC, id: u64, failed: Option<&String>) -> (ItemProgress, bool) {
     let file = PublishedFileId(id);
     let st = ugc.item_state(file);
     let (downloaded, total) = ugc.item_download_info(file).unwrap_or((0, 0));
     let info = ugc.item_install_info(file);
+    let installed_in_steam = st.contains(ItemState::INSTALLED)
+        && !st.intersects(ItemState::DOWNLOADING | ItemState::DOWNLOAD_PENDING);
+    let folder_there = installed_in_steam
+        && info
+            .as_ref()
+            .is_some_and(|i| std::path::Path::new(&i.folder).is_dir());
     let state = if failed.is_some() {
         "failed"
     } else if st.contains(ItemState::DOWNLOADING) {
@@ -871,13 +909,10 @@ fn item_progress(ugc: &UGC, id: u64, failed: Option<&String>) -> ItemProgress {
         // Steam's back stays INSTALLED in its books, the join plan (which looks at
         // the disk) sends it here, and "installed" finished the sync at once, so the
         // launch failed with "sync mods first" and the next Join did it again. It
-        // stays pending; a minute after its kick with still no folder, `tick_sync` fails
-        // it with the remedy rather than letting it wait out the 15-minute stall (S-79,
-        // Q30, D-265).
-        if info
-            .as_ref()
-            .is_some_and(|i| std::path::Path::new(&i.folder).is_dir())
-        {
+        // stays pending; a minute after that is first seen with still no folder,
+        // `tick_sync` fails it with the remedy rather than letting it wait out the
+        // 15-minute stall (S-79, Q30, D-265, D-295).
+        if folder_there {
             "installed"
         } else {
             "pending"
@@ -887,14 +922,15 @@ fn item_progress(ugc: &UGC, id: u64, failed: Option<&String>) -> ItemProgress {
     } else {
         "subscribing"
     };
-    ItemProgress {
+    let progress = ItemProgress {
         id,
         state: state.into(),
         downloaded,
         total: total.max(info.as_ref().map_or(0, |i| i.size_on_disk)),
         folder: info.map(|i| i.folder),
         error: failed.cloned(),
-    }
+    };
+    (progress, installed_in_steam && !folder_there)
 }
 
 /// One scheduler tick for the active sync. Returns the completion event when finished.
@@ -931,37 +967,31 @@ fn tick_sync(
     // An item Steam lists as installed whose folder is gone (D-245) had only the
     // start's kick and no second error report to fail on, so it sat on "Queued" for the
     // whole 15-minute stall and then failed without saying what fixes it (Q30). A
-    // minute after its last kick, if Steam still calls it installed and there is still
-    // no folder, Steam is not going to fetch it: it fails now, with the remedy (S-79,
-    // D-265).
+    // minute after that is first seen, if Steam still calls it installed and there is
+    // still no folder, Steam is not going to fetch it: it fails now, with the remedy
+    // (S-79, D-265, D-295).
+    let mut items: Vec<ItemProgress> = Vec::with_capacity(sync.ids.len());
     for &id in &sync.ids {
-        if sync.failed.contains_key(&id) {
-            continue;
-        }
-        let st = ugc.item_state(PublishedFileId(id));
-        let installed_in_steam = st.contains(ItemState::INSTALLED)
-            && !st.intersects(ItemState::DOWNLOADING | ItemState::DOWNLOAD_PENDING);
-        if !installed_in_steam {
-            continue;
-        }
-        let folder_there = ugc
-            .item_install_info(PublishedFileId(id))
-            .is_some_and(|i| std::path::Path::new(&i.folder).is_dir());
-        let since = sync.kicked.get(&id).copied().unwrap_or(sync.started);
-        if !folder_there && since.elapsed() >= MISSING_FOLDER_GRACE {
-            sync.failed.insert(
-                id,
+        let (mut p, missing_folder) = item_progress(ugc, id, sync.failed.get(&id));
+        if !missing_folder || sync.failed.contains_key(&id) {
+            sync.missing_since.remove(&id);
+        } else if sync
+            .missing_since
+            .entry(id)
+            .or_insert_with(Instant::now)
+            .elapsed()
+            >= MISSING_FOLDER_GRACE
+        {
+            let e = String::from(
                 "Steam lists it as installed but its folder is gone. Unsubscribe it on the \
-                 Mods page (or in Steam), then join again to download it afresh"
-                    .into(),
+                 Mods page (or in Steam), then join again to download it afresh",
             );
+            p.state = "failed".into();
+            p.error = Some(e.clone());
+            sync.failed.insert(id, e);
         }
+        items.push(p);
     }
-    let items: Vec<ItemProgress> = sync
-        .ids
-        .iter()
-        .map(|&id| item_progress(ugc, id, sync.failed.get(&id)))
-        .collect();
     for p in &items {
         if matches!(p.state.as_str(), "subscribed" | "needs_update") {
             let last = sync.kicked.get(&p.id).copied().unwrap_or(sync.started);
@@ -1805,9 +1835,13 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
         }
 
         if let Some(job) = sync.as_mut() {
-            if let Some(done) = tick_sync(ugc, job, &s.download_errors, &events) {
-                let _ = events.send(SteamEvent::SyncDone(done));
-                sync = None;
+            // On its own clock, not the loop's 10 ms (D-295).
+            if job.last_tick.elapsed() >= SYNC_TICK {
+                job.last_tick = Instant::now();
+                if let Some(done) = tick_sync(ugc, job, &s.download_errors, &events) {
+                    let _ = events.send(SteamEvent::SyncDone(done));
+                    sync = None;
+                }
             }
         } else {
             // Results for downloads nobody is waiting on (Steam's own updates) must not
@@ -1819,7 +1853,9 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
             unsub = None;
         }
 
-        std::thread::sleep(if active.is_some() || sync.is_some() || unsub.is_some() {
+        // A download alone does not need the fast turn: it is looked at every
+        // `SYNC_TICK`, which is the idle interval (D-295).
+        std::thread::sleep(if active.is_some() || unsub.is_some() {
             TICK_ACTIVE
         } else {
             TICK_IDLE
@@ -1949,7 +1985,13 @@ fn list_friends(client: &Client) -> Vec<FriendInfo> {
                 .map(|g| FriendServer {
                     ip: g.game_address.to_string(),
                     game_port: g.game_port,
-                    query_port: g.query_port,
+                    // 0xFFFF is "not asked yet" and 0xFFFE "could not get it"
+                    // (`k_usFriendGameInfoQueryPort_*`, isteamfriends.h, S-108); passed
+                    // on, the page probed `ip:65535`. 0 is "unknown" here (D-295).
+                    query_port: match g.query_port {
+                        0xFFFE | 0xFFFF => 0,
+                        p => p,
+                    },
                 });
             if in_dayz && server.is_none() {
                 server = f

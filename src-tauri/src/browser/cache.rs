@@ -343,6 +343,23 @@ impl Cache {
         Ok(())
     }
 
+    /// A join's own INFO read of the game port and the password flag, kept when it
+    /// differs from the row. Only a Steam listing or a direct connect changed them, so
+    /// after a server moved its game port a launch whose own read dropped fell back to
+    /// the old one, and the history recorded it (D-295). Returns the rows changed.
+    pub fn update_join_facts(
+        &self,
+        id: &str,
+        game_port: u16,
+        password: bool,
+    ) -> rusqlite::Result<usize> {
+        self.conn.execute(
+            "UPDATE servers SET game_port = ?2, password = ?3
+             WHERE id = ?1 AND (game_port <> ?2 OR password <> ?3)",
+            params![id, i64::from(game_port), password],
+        )
+    }
+
     // ----- history -----------------------------------------------------------
 
     pub fn history_add(&self, row: &ServerRow, mods: usize) -> rusqlite::Result<()> {
@@ -1129,6 +1146,20 @@ mod tests {
             verdict: None,
             country: None,
         }
+    }
+
+    /// A join's own INFO read of the game port and the password is kept, and only
+    /// written when it differs (D-295).
+    #[test]
+    fn join_facts_are_kept_when_they_differ() {
+        let mut c = Cache::open_in_memory().unwrap();
+        c.upsert(&[row(27017, 5)]).unwrap();
+        let id = ServerRow::id_for("51.81.8.81", 27017);
+        assert_eq!(c.update_join_facts(&id, 2402, false).unwrap(), 0);
+        assert_eq!(c.update_join_facts(&id, 2502, true).unwrap(), 1);
+        let w = c.get(&id).unwrap().unwrap();
+        assert_eq!((w.game_port, w.password), (2502, true));
+        assert_eq!(c.update_join_facts("1.2.3.4:5", 2502, true).unwrap(), 0);
     }
 
     #[test]

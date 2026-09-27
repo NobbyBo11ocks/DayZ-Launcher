@@ -337,7 +337,7 @@
         <span class="muted">· query {row.queryPort}</span>
       </div>
       <div class="actions">
-        <button class="join" onclick={() => (servers.joiningId = row.id)} title="Check mods, download what is missing, and start DayZ">Join</button>
+        <button class="join" onclick={() => servers.requestJoin(row.id)} title="Check mods, download what is missing, and start DayZ">Join</button>
         <!-- One name and a pressed state: a name that flipped with the state read
              "Remove from favourites, toggle button, pressed" (D-291). -->
         <button class="star" aria-label="Favourite" class:on={servers.favourites.has(row.id)} onclick={() => servers.toggleFavourite(row.id)} aria-pressed={servers.favourites.has(row.id)} title="Favourite (F)">

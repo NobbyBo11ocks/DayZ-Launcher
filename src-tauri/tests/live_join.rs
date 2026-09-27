@@ -45,7 +45,8 @@ fn live_join() {
     }
 
     // --- Workshop details ----------------------------------------------------
-    let details = steam.item_details(&[mod_id]).expect("item details");
+    let (details, missed) = steam.item_details(&[mod_id]).expect("item details");
+    assert_eq!(missed, None, "every page answered");
     assert_eq!(details.len(), 1, "one detail row");
     println!(
         "mod {}: {:?} {} bytes, updated {}",

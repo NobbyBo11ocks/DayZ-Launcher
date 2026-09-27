@@ -42,6 +42,9 @@ db.close();
 console.log(`sampling ${rows.length} populated servers from the cache, ${CONCURRENCY} at a time`);
 
 const out = { infoOk: 0, infoFail: 0, rulesOk: 0, rulesTimeout: 0, rulesError: 0, rttInfo: [], rttRules: [], mods: [] };
+// Answered RULES with no mod fragments at all, and how many of those say `mod` in INFO's
+// keywords: the join plans such a server as vanilla and launches it without mods (D-295).
+const bare = { any: 0, taggedModded: [] };
 const failures = [];
 // Widths seen in the mod id-length byte (Q9): the parser accepts 1–8; live servers
 // send 4, and four of 3 213 entries once sent 1 (D-140).
@@ -49,9 +52,10 @@ const idWidths = new Map();
 
 async function probe(r) {
   const port = Number(r.query_port);
+  let keywords = "";
   try {
     const info = await query(r.ip, port, buildInfo);
-    parseInfo(info.data);
+    keywords = parseInfo(info.data).keywords ?? "";
     out.infoOk++;
     out.rttInfo.push(info.rtt);
   } catch {
@@ -64,6 +68,10 @@ async function probe(r) {
     out.rulesOk++;
     out.rttRules.push(rules.rtt);
     out.mods.push(parsed.mods?.length ?? 0);
+    if (parsed.chunkCount === 0) {
+      bare.any++;
+      if (keywords.split(",").includes("mod")) bare.taggedModded.push(`${r.ip}:${port} (${r.name ?? ""})`);
+    }
     for (const m of parsed.mods ?? []) {
       const w = (m.idLenByte ?? 0) & 0x0f;
       idWidths.set(w, (idWidths.get(w) ?? 0) + 1);
@@ -93,6 +101,7 @@ RULES  answered ${out.rulesOk}/${answered} = ${pct(out.rulesOk, answered)}% of s
        timeout ${out.rulesTimeout} (${pct(out.rulesTimeout, answered)}%), other error ${out.rulesError}
 RTT    INFO median ${median(out.rttInfo)} ms, RULES median ${median(out.rttRules)} ms
 MODS   median ${median(out.mods)} per server, max ${out.mods.length ? Math.max(...out.mods) : 0}
+BARE   RULES with no mod fragments: ${bare.any}, of them tagged "mod" in INFO: ${bare.taggedModded.length}${bare.taggedModded.length ? " — " + bare.taggedModded.slice(0, 5).join(", ") : ""}
 IDLEN  mod id widths seen: ${[...idWidths.entries()].sort((a, b) => a[0] - b[0]).map(([w, n]) => `${w} bytes ×${n}`).join(", ") || "none"}`);
 
 if (failures.length) {

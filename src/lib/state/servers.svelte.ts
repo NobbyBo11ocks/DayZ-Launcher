@@ -431,8 +431,14 @@ class ServersStore {
   favourites = new SvelteSet<string>();
   /** Servers joined before, newest first (D-054). */
   history = $state<HistoryEntry[]>([]);
-  /** Server the join dialog is open for. */
+  /** Server the join dialog is open for. Opened through `requestJoin`; closing sets null. */
   joiningId = $state<string | null>(null);
+  /** Opens the join dialog, unless one is open: every page's Join set `joiningId`
+   *  directly, and with focus let out of the modal, Enter behind it replaced a dialog
+   *  that was waiting, downloading or holding a typed password (D-295). */
+  requestJoin(id: string) {
+    if (this.joiningId === null) this.joiningId = id;
+  }
   /** Mod ids per scanned server and the mod catalogue with server counts (D-080). */
   modsByServer = new SvelteMap<string, number[]>();
   /** Each scanned server's mod count, in a plain map beside the reactive one, for the
@@ -524,6 +530,18 @@ class ServersStore {
   #byIp = new Map<string, Set<string>>();
   idsAt(ip: string): ReadonlySet<string> {
     return this.#byIp.get(ip) ?? EMPTY_IDS;
+  }
+  /** The rows at `ip` on `gamePort`, best first: answering before offline, then the most
+   *  recently counted. One game address can carry several ids — hosts hand query ports on,
+   *  and a server can move its own — and the rows arrive in cache order, so taking the
+   *  first put a friend on an older, often offline id (D-295). */
+  rowsAtGameAddress(ip: string, gamePort: number): ServerRow[] {
+    const out: ServerRow[] = [];
+    for (const sid of this.idsAt(ip)) {
+      const r = this.rows.get(sid);
+      if (r?.gamePort === gamePort) out.push(r);
+    }
+    return out.sort((a, b) => Number(a.verdict === "offline") - Number(b.verdict === "offline") || (b.verifiedAt ?? 0) - (a.verifiedAt ?? 0));
   }
 
   /**
@@ -1147,17 +1165,10 @@ class ServersStore {
         if (!f.server) continue;
         const direct = f.server.queryPort > 0 ? `${f.server.ip}:${f.server.queryPort}` : null;
         let id = direct && this.rows.has(direct) ? direct : null;
-        // Without a query port, the servers at that address are few: the one on this
-        // game port is it. A map of every row by game port was rebuilt each minute for
-        // this, 11 ms at 40 000 rows and 19 ms at 71 000 (D-164, D-284).
-        if (!id) {
-          for (const sid of this.idsAt(f.server.ip)) {
-            if (this.rows.get(sid)?.gamePort === f.server.gamePort) {
-              id = sid;
-              break;
-            }
-          }
-        }
+        // Without a query port, the servers at that address are few: the best one on
+        // this game port is it. A map of every row by game port was rebuilt each minute
+        // for this, 11 ms at 40 000 rows and 19 ms at 71 000 (D-164, D-284).
+        if (!id) id = this.rowsAtGameAddress(f.server.ip, f.server.gamePort)[0]?.id ?? null;
         if (id) on.set(id, [...(on.get(id) ?? []), f.name]);
       }
       for (const key of [...this.friendsOn.keys()]) if (!on.has(key)) this.friendsOn.delete(key);

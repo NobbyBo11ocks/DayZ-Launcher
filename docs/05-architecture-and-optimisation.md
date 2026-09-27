@@ -5,9 +5,10 @@
 ```text
 dayz-launcher.exe (Tauri 2 / Rust)             msedgewebview2.exe ×6 (shared WebView2 runtime)
 ├─ tokio runtime (UDP A2S fan-out, HTTP, SQLite)   └─ Svelte 5 UI, one window, virtualised table
-├─ Steam thread (steamworks Client; run_callbacks every 10 ms while a refresh,
-│  download or unsubscribe runs, 100 ms otherwise, not at all while Steamworks is
-│  released or Steam is not running: the thread then waits on its channel, D-164, D-275)
+├─ Steam thread (steamworks Client; run_callbacks every 10 ms while a refresh or
+│  unsubscribe runs, 100 ms otherwise — a download is looked at every 100 ms, D-295 —
+│  and not at all while Steamworks is released or Steam is not running: the thread then
+│  waits on its channel, D-164, D-275)
 └─ launch: launch/process.rs spawns DayZ_BE.exe; launch_game awaits its exit on a
    blocking task and emits launch:exited
 ```

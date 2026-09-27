@@ -19,9 +19,14 @@
   let joining = $state<string | null>(null);
   async function joinAgain(h: HistoryEntry) {
     if (joining) return;
-    if (servers.rowsTick >= 0 && servers.rows.has(h.id)) {
-      servers.select(h.id);
-      servers.joiningId = h.id;
+    // The listed row only while it is still this entry's server. The store keeps rows up
+    // to 30 days, so the check below — which only ran for rows missing from it — almost
+    // never ran: an id whose query port another server holds now opened that server,
+    // and one the server moved away from planned against a port nobody answers (D-295).
+    const known = servers.rowsTick >= 0 ? servers.rows.get(h.id) : undefined;
+    if (known && known.gamePort === h.gamePort && known.verdict !== "offline") {
+      if (servers.joiningId === null) servers.select(h.id);
+      servers.requestJoin(h.id);
       return;
     }
     joining = h.id;
@@ -42,7 +47,7 @@
       if (!row) servers.error = `${h.name} did not answer on ${h.ip}:${h.gamePort}; it may be offline or have moved.`;
       else if (servers.joiningId === null) {
         servers.selectedId = row.id;
-        servers.joiningId = row.id;
+        servers.requestJoin(row.id);
       }
     } finally {
       joining = null;

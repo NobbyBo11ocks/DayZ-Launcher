@@ -76,15 +76,20 @@ pub fn ensure_junctions(
         let mut chosen: Option<(PathBuf, bool)> = None;
         for path in &candidates {
             match std::fs::symlink_metadata(path) {
-                Ok(_) => {
-                    if let Ok(target) = junction::get_target(path) {
-                        if same_dir(&target, source) {
-                            chosen = Some((path.clone(), false));
-                            break;
-                        }
+                Ok(_) => match read_target(path) {
+                    Ok(target) if same_dir(&target, source) => {
+                        chosen = Some((path.clone(), false));
+                        break;
                     }
-                    // exists but is not our junction: try the next candidate
-                }
+                    // Still in use after the retries: a sibling now would be a second,
+                    // permanent junction for this mod (D-295).
+                    Err(e) if e.raw_os_error() == Some(ERROR_SHARING_VIOLATION) => {
+                        return Err(AppError::io(path, e));
+                    }
+                    // A plain folder, another kind of link, or a junction to somewhere
+                    // else: not ours, so the next candidate.
+                    _ => {}
+                },
                 Err(_) => {
                     if let Err(e) = junction::create(source, path) {
                         // `junction::create` makes the folder first and turns it into a
@@ -118,6 +123,27 @@ pub fn ensure_junctions(
         });
     }
     Ok(out)
+}
+
+/// Windows' `ERROR_SHARING_VIOLATION`.
+const ERROR_SHARING_VIOLATION: i32 = 32;
+
+/// A junction's target, read again while another reader holds it. `junction::get_target`
+/// opens the reparse point for exclusive access (junction 2.0.0, `open_reparse_point`),
+/// and the Mods page and the details pane walk every junction when a download ends,
+/// which is when "Download and join" launches: the launch took `@CF` for someone else's
+/// and made `@CF (1559212036)` beside it, which nothing ever removes (D-295).
+fn read_target(path: &Path) -> std::io::Result<PathBuf> {
+    let mut retries = 0;
+    loop {
+        match junction::get_target(path) {
+            Err(e) if e.raw_os_error() == Some(ERROR_SHARING_VIOLATION) && retries < 3 => {
+                retries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            r => return r,
+        }
+    }
 }
 
 /// A real, empty directory: not a junction or any other reparse point, nothing inside.
@@ -208,6 +234,49 @@ mod tests {
             let _ = junction::delete(&l.junction);
             let _ = std::fs::remove_dir(&l.junction);
         }
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Held the way `junction::get_target` holds it — the reparse point itself, shared
+    /// with nobody — for less than the retries last: reused, not duplicated (D-295).
+    #[test]
+    fn a_junction_in_use_is_read_again_not_duplicated() {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        let tmp = std::env::temp_dir().join(format!("dzl-junction-busy-{}", std::process::id()));
+        let game = tmp.join("game");
+        let src = tmp.join("content").join("111");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::create_dir_all(&src).unwrap();
+        let first = ensure_junctions(&game, &[(111, src.clone(), Some("Busy".into()))]).unwrap();
+        assert!(first[0].created);
+
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
+            .open(&first[0].junction)
+            .unwrap();
+        assert_eq!(
+            junction::get_target(&first[0].junction)
+                .unwrap_err()
+                .raw_os_error(),
+            Some(ERROR_SHARING_VIOLATION),
+            "the crate cannot read a junction someone else holds"
+        );
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(80));
+            drop(held);
+        });
+        let again = ensure_junctions(&game, &[(111, src.clone(), Some("Busy".into()))]).unwrap();
+        release.join().unwrap();
+        assert!(!again[0].created, "the junction in use is reused");
+        assert_eq!(again[0].junction, first[0].junction);
+        assert!(!game.join("!Workshop").join("@Busy (111)").exists());
+
+        let _ = junction::delete(&first[0].junction);
+        let _ = std::fs::remove_dir(&first[0].junction);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

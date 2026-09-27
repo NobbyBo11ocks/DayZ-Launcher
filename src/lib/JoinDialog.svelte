@@ -4,12 +4,19 @@
   // 10 s and starts the game the moment the server reports a free slot.
   // Every command through the logging wrapper: a failure is recorded with its
   // command name before it is rethrown (D-158).
-  import { invokeLogged as invoke } from "./log";
+  import { tick, untrack } from "svelte";
+  import { invoke as invokeQuiet } from "@tauri-apps/api/core";
+  import { invokeLogged as invoke, logInfo, logWarn } from "./log";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
   import { fmtBytes, type ItemProgress, type JoinPlan, type LaunchExited, type Launched, type LaunchProfile, type ServerSlots, type Settings, type SyncDone, type SyncProgress } from "./types";
 
   let { serverId, onClose }: { serverId: string; onClose: () => void } = $props();
+  /** The server this dialog is for, read once. The prop is a live read of the store's
+   *  `joiningId`, and the launch read it after awaiting a re-plan: a dialog taken down
+   *  meanwhile launched null, or the next dialog's server with this one's password and
+   *  profile (D-295). */
+  const sid = untrack(() => serverId);
 
   type Phase = "planning" | "ready" | "syncing" | "waiting" | "launching" | "running" | "exited" | "error";
   let phase = $state<Phase>("planning");
@@ -27,6 +34,13 @@
    *  the pattern that often goes unannounced (D-224); a download that finished without
    *  launching said nothing at all (D-291). */
   let announce = $state("");
+  /** Says `text` from that region, even when it is what the region already holds: an
+   *  unchanged text is not read again, so a retried step went unsaid. `""` clears it, so
+   *  an error or a stop leaves no stale step behind (D-295). */
+  function say(text: string) {
+    announce = "";
+    if (text) void tick().then(() => (announce = text));
+  }
   let autoLaunch = false;
   const job = Date.now();
   const exited = new Map<number, LaunchExited>();
@@ -38,7 +52,7 @@
   /** Asks the host for a fresh plan; false when it could not answer. */
   async function replan(): Promise<boolean> {
     try {
-      plan = await invoke<JoinPlan>("join_plan", { id: serverId });
+      plan = await invoke<JoinPlan>("join_plan", { id: sid });
       plannedAt = Date.now();
       return true;
     } catch {
@@ -73,7 +87,8 @@
   const toSync = $derived(plan ? plan.mods.filter((m) => !m.installed || m.needsUpdate) : []);
   const canLaunch = $derived(!!plan && plan.gameFound && plan.steamRunning && plan.battleyePresent && toSync.length === 0 && (!plan.passwordRequired || password.length > 0));
   const canSync = $derived(!!plan && plan.steamRunning && toSync.length > 0);
-  /** The warnings, as the description of the footer's buttons (D-291). */
+  /** The warnings, as the description of the primary button (D-291). Every footer button
+   *  carried them, so each Tab read the whole list again (D-295). */
   const warned = $derived(plan?.warnings.length ? "join-warnings" : undefined);
   const downloadedBytes = $derived([...progress.values()].reduce((a, p) => a + (p.state === "installed" ? p.total : p.downloaded), 0));
   const totalBytes = $derived([...progress.values()].reduce((a, p) => a + p.total, 0));
@@ -114,16 +129,38 @@
 
   async function refreshSlots(): Promise<ServerSlots | null> {
     try {
-      slots = await invoke<ServerSlots>("server_slots", { id: serverId });
+      // Not through the logging wrapper: a wait on a server that stopped answering
+      // wrote an error line every 10 s, 360 an hour in the Logs page's "Problems only".
+      // The third miss in a row is logged once, and the recovery (D-295).
+      slots = await invokeQuiet<ServerSlots>("server_slots", { id: sid });
+      if (slotMisses >= 3) logInfo("join", `server_slots answers again for ${sid} after ${slotMisses} misses`);
       slotMisses = 0;
       return slots;
-    } catch {
+    } catch (e) {
       // Returning the last snapshot made every failure look like "still full": the
       // wait loop's guard is `!s`, which was never null once one probe had worked, so
       // a server that had gone away counted up forever.
       slotMisses += 1;
+      if (slotMisses === 3) logWarn("join", `server_slots failed three times in a row for ${sid}: ${String(e)}`);
       return null;
     }
+  }
+
+  /** Mods a download reports installed, marked so in the plan with the bytes left. Only
+   *  a complete download updated the plan, so after a failed one the rows that finished
+   *  showed ✓ under "5 to download" and a button offering all five again (D-295). */
+  function markInstalled(items: ItemProgress[]) {
+    if (!plan) return;
+    const done = new Set(items.filter((i) => i.state === "installed").map((i) => i.id));
+    if (done.size === 0) return;
+    const mods = plan.mods.map((m) => (done.has(m.id) ? { ...m, installed: true, needsUpdate: false } : m));
+    plan = {
+      ...plan,
+      mods,
+      missing: mods.filter((m) => !m.installed).length,
+      updates: mods.filter((m) => m.installed && m.needsUpdate).length,
+      downloadBytes: mods.filter((m) => !m.installed || m.needsUpdate).reduce((a, m) => a + (m.size ?? 0), 0),
+    };
   }
 
   $effect(() => {
@@ -144,19 +181,23 @@
           if (plan) plan = { ...plan, mods: plan.mods.map((m) => ({ ...m, installed: true, needsUpdate: false })), missing: 0, updates: 0 };
           phase = "ready";
           if (autoLaunch) void joinNow();
-          else announce = "All mods are installed.";
+          else say("All mods are installed.");
         } else if (ev.payload.superseded) {
+          markInstalled(ev.payload.items);
           // Not a failure: a newer download took over, and this one can be started
           // again from here (D-277).
           note = "Replaced by a newer download.";
-          announce = note;
+          say(note);
           phase = "ready";
         } else {
-          // Led by the mod it failed on (D-277).
+          markInstalled(ev.payload.items);
+          // Led by the mod it failed on (D-277). The alert says it; the region keeps no
+          // "Downloading" behind it (D-295).
           const why = ev.payload.error ?? "Mod download failed";
           const m = plan?.mods.find((x) => x.id === ev.payload.failedId);
           error = m ? `${m.title ?? m.name}: ${why}` : why;
           phase = "error";
+          say("");
         }
       }),
       listen<LaunchExited>("launch:exited", (ev) => {
@@ -166,23 +207,30 @@
         if (launched && ev.payload.pid === launched.pid) {
           exit = ev.payload;
           phase = "exited";
-          announce = exitText(ev.payload);
+          say(exitText(ev.payload));
         }
       }),
     ];
     (async () => {
       void refreshSlots();
       try {
-        const p = await invoke<JoinPlan>("join_plan", { id: serverId });
+        const p = await invoke<JoinPlan>("join_plan", { id: sid });
         plan = p;
         plannedAt = Date.now();
         phase = "ready";
-        // What stands in the way first, then what the join will do (D-291).
+        // The server first: the dialog was still titled "Join server" when focus landed
+        // on it, and nothing said the name after (D-295). What stands in the way next
+        // (D-291) — unless focus lands on the primary button, whose description is the
+        // same warnings, which were then read twice (D-295) — then what the join will do.
         const toGet = p.mods.filter((m) => !m.installed || m.needsUpdate).length;
-        announce = [
-          ...p.warnings,
-          toGet ? `${toGet} mod${toGet === 1 ? "" : "s"} to download.` : p.mods.length ? "All mods are installed." : "",
-        ].join(" ");
+        const primaryReadsThem = !p.passwordRequired && (toGet ? canSync : canLaunch);
+        say(
+          [
+            `${p.name}.`,
+            ...(primaryReadsThem ? [] : p.warnings),
+            toGet ? `${toGet} mod${toGet === 1 ? "" : "s"} to download.` : p.mods.length ? "All mods are installed." : "",
+          ].join(" "),
+        );
       } catch (e) {
         error = String(e);
         phase = "error";
@@ -197,7 +245,7 @@
       stopWaiting();
       if (!wasClosed)
         queueMicrotask(() => {
-          if (opener?.isConnected && (!document.activeElement || document.activeElement === document.body)) opener.focus();
+          if (!document.activeElement || document.activeElement === document.body) returnFocus();
         });
     };
   });
@@ -205,7 +253,7 @@
   const exitText = (e: LaunchExited) => `DayZ exited${e.code != null ? ` with code ${e.code}` : ""}.`;
   // The server stopped answering while the dialog waited: said once, when it happens.
   $effect(() => {
-    if (phase === "waiting" && slotMisses === 3) announce = "The server has stopped answering. Still trying.";
+    if (phase === "waiting" && slotMisses === 3) say("The server has stopped answering. Still trying.");
   });
 
   async function sync(thenLaunch: boolean) {
@@ -214,12 +262,16 @@
     error = null;
     note = null;
     phase = "syncing";
-    announce = `Downloading ${toSync.length} mod${toSync.length === 1 ? "" : "s"} through Steam.`;
+    const n = toSync.length;
     try {
       await invoke("mods_sync", { job, ids: toSync.map((m) => m.id) });
+      // Said once Steam has taken the job, which it refuses at once when it is not
+      // running, and not over a finish that came first (D-295).
+      if (phase === "syncing") say(`Downloading ${n} mod${n === 1 ? "" : "s"} through Steam.`);
     } catch (e) {
       error = String(e);
       phase = "error";
+      say("");
     }
   }
 
@@ -229,23 +281,36 @@
     else await launch();
   }
 
+  /** Moved on by every start and end of a wait the player makes, so a poll from an
+   *  earlier wait, or one still inside its attention request, does nothing: the phase
+   *  stayed "waiting" through that request, and "Stop waiting" then still started DayZ,
+   *  and "Join now anyway" started it twice (D-295). */
+  let waitGen = 0;
+
   function startWaiting() {
     stopWaiting();
+    const gen = ++waitGen;
     phase = "waiting";
-    announce = "Waiting for a free slot. DayZ starts as soon as one opens.";
+    say("Waiting for a free slot. DayZ starts as soon as one opens.");
     error = null;
     note = null;
     checks = 0;
     waitedSecs = 0;
+    // A wait started again began at the last one's count, and at 0:00 read "stopped
+    // answering · 5 checks in a row" (D-295).
+    slotMisses = 0;
     const started = Date.now();
     clockTimer = setInterval(() => (waitedSecs = Math.floor((Date.now() - started) / 1000)), 1000);
+    // `closed` as well as the phase: closing never changed the phase, so a poll already
+    // in flight when the player closed the dialog still found "waiting", and a slot
+    // freeing up then started DayZ from a dialog that was gone (D-265). And this wait's
+    // own generation, checked after every await (D-295).
+    const current = () => !closed && gen === waitGen && phase === "waiting";
     const poll = async () => {
       const s = await refreshSlots();
+      if (!current()) return;
       checks += 1;
-      // `closed` as well as the phase: closing never changed the phase, so a poll
-      // already in flight when the player closed the dialog still found "waiting",
-      // and a slot freeing up then started DayZ from a dialog that was gone (D-265).
-      if (closed || phase !== "waiting" || !s) return;
+      if (!s) return;
       if (s.players < s.maxPlayers) {
         stopWaiting();
         try {
@@ -253,7 +318,7 @@
         } catch {
           /* attention request not permitted; the launch is the signal */
         }
-        if (closed) return;
+        if (!current()) return;
         await launch();
       }
     };
@@ -268,41 +333,64 @@
   }
 
   function cancelWaiting() {
+    waitGen++;
     stopWaiting();
     phase = "ready";
+    // "Still trying" stayed in the region after the wait had stopped (D-295).
+    say("");
+  }
+
+  function joinAnyway() {
+    waitGen++;
+    stopWaiting();
+    void launch();
   }
 
   async function launch() {
-    if (!plan) return;
+    // One at a time: a slot poll and "Join now anyway" could both get here (D-295).
+    if (!plan || phase === "launching") return;
     error = null;
     note = null;
     phase = "launching";
-    announce = "Starting DayZ through BattlEye.";
     // The plan was never made again, so a mod the server added or updated while this
     // dialog waited for a slot sent the launch into "not installed; sync mods first",
     // with only Join — the same failure — on offer (D-240).
     if (Date.now() - plannedAt > PLAN_MAX_AGE_MS && (await replan()) && toSync.length > 0) {
       error = "The server's mods changed while you waited. Download them to join.";
       phase = "ready";
+      say("");
       return;
     }
+    // Closed during the re-plan; or the fresh plan asks for a password it did not ask
+    // for before, or the field was emptied during a download that then launched by
+    // itself without one. The dialog shows what is missing (D-295).
+    if (closed) return;
+    if (!canLaunch) {
+      phase = "ready";
+      say("");
+      return;
+    }
+    // Said once the re-plan is behind it: it was said, and shown, before a re-plan that
+    // could end with nothing started (D-295).
+    say("Starting DayZ through BattlEye.");
     try {
       // Exits recorded for an earlier launch from this dialog: Windows reuses process
       // ids, and an old entry under the new pid read as "DayZ exited" (D-265).
       exited.clear();
-      launched = await invoke<Launched>("launch_game", { id: serverId, password: password || null, profile: profile || null });
+      launched = await invoke<Launched>("launch_game", { id: sid, password: password || null, profile: profile || null });
       const early = exited.get(launched.pid);
       if (early) {
         exit = early;
         phase = "exited";
-        announce = exitText(early);
+        say(exitText(early));
       } else {
         phase = "running";
-        announce = "DayZ is running. You can close this window.";
+        say("DayZ is running. You can close this window.");
       }
     } catch (e) {
       error = String(e);
       phase = "error";
+      say("");
       // So the footer offers what the failure asks for (a download) rather than the
       // same Join again.
       void replan();
@@ -328,19 +416,56 @@
   /** Set once the dialog is closed or destroyed; a wait already in flight checks it (D-265). */
   let closed = false;
 
+  /** Back to where the dialog was opened from. When that is gone — Friends' 30 s reload
+   *  drops the Join of a friend who has left the server — focus fell to `<body>`: the
+   *  list takes it, or else the page's section in the rail (D-295). */
+  function returnFocus() {
+    const back = opener?.isConnected
+      ? opener
+      : (document.querySelector<HTMLElement>('main [role="grid"]') ?? document.querySelector<HTMLElement>('.rail-item[aria-current="page"]'));
+    back?.focus();
+  }
+
   function close() {
     closed = true;
     stopWaiting();
     onClose();
     // After the dialog is gone: focusing an element that is about to be hidden does
     // nothing useful.
-    queueMicrotask(() => {
-      if (opener?.isConnected) opener.focus();
-    });
+    queueMicrotask(returnFocus);
   }
 
   /** The dialog element, focused on open so the page behind it stops seeing keys. */
   let dialogEl = $state<HTMLElement | null>(null);
+
+  /** Where focus lands: the password field when one is needed, else the primary button,
+   *  else the first enabled control. The mod list and the command line are Tab stops
+   *  (`trap`) but not landing places: since D-291 they matched here, so a launch put
+   *  focus on the list and kept it there through an error, and a finished vanilla
+   *  launch landed on the command line rather than Close (D-295). */
+  function landing(): HTMLElement | null {
+    return (
+      dialogEl?.querySelector<HTMLElement>('input[type="password"]:not([disabled])') ??
+      dialogEl?.querySelector<HTMLElement>("button.btn:not(.secondary):not([disabled])") ??
+      dialogEl?.querySelector<HTMLElement>("input:not([disabled]), select:not([disabled]), button:not([disabled]), [href]") ??
+      null
+    );
+  }
+
+  // Focus that leaves the modal is brought back (D-295). Minimise and Maximise sit above
+  // the backdrop by design (D-151) and may keep it; anything else — Tab on from the title
+  // bar, or a control that went disabled while focused — reached the rail and the page
+  // behind, where a Join replaced this dialog.
+  $effect(() => {
+    const onFocusIn = (e: FocusEvent) => {
+      const t = e.target;
+      if (!dialogEl || !(t instanceof Element) || dialogEl.contains(t) || t.closest(".titlebar")) return;
+      (landing() ?? dialogEl).focus();
+    };
+    document.addEventListener("focusin", onFocusIn);
+    return () => document.removeEventListener("focusin", onFocusIn);
+  });
+
   $effect(() => {
     // The first focusable control, or the dialog itself: either way the grid behind
     // no longer has focus, and Tab starts inside the dialog.
@@ -358,7 +483,9 @@
     // dialog holds focus until there is something worth landing on (D-256).
     const active = document.activeElement;
     if (active !== dialogEl && dialogEl?.contains(active)) return;
-    if (phase === "planning") {
+    // Waiting too: its primary button is "Join now anyway", so a second Enter after
+    // "Wait and join" skipped the wait (D-295).
+    if (phase === "planning" || phase === "waiting") {
       dialogEl?.focus();
       return;
     }
@@ -366,13 +493,7 @@
     // the first control was the footer's Cancel, so Enter on a row and Enter again —
     // the natural next keypress — cancelled the join, and a screen reader's first
     // word on a dialog named after a server was "Cancel" (D-248).
-    const first =
-      dialogEl?.querySelector<HTMLElement>('input[type="password"]:not([disabled])') ??
-      dialogEl?.querySelector<HTMLElement>("button.btn:not(.secondary):not([disabled])") ??
-      dialogEl?.querySelector<HTMLElement>(
-        'input:not([disabled]), select:not([disabled]), button:not([disabled]), summary, [href], [tabindex]:not([tabindex="-1"])',
-      );
-    (first ?? dialogEl)?.focus();
+    (landing() ?? dialogEl)?.focus();
   });
 
   /** Keeps Tab inside the dialog while it is open. `summary` and the scrolling mod list
@@ -383,10 +504,16 @@
     const items = [...dialogEl.querySelectorAll<HTMLElement>('input:not([disabled]), select:not([disabled]), button:not([disabled]), summary, [href], [tabindex]:not([tabindex="-1"])')].filter(
       (el) => el.offsetParent !== null,
     );
-    if (items.length === 0) return;
+    const active = document.activeElement as HTMLElement | null;
+    // Nothing enabled to move to — a vanilla launch disables every button — or focus on
+    // a control the list no longer holds: the key left the modal (D-295).
+    if (items.length === 0 || (active !== dialogEl && !items.includes(active as HTMLElement))) {
+      e.preventDefault();
+      (items[0] ?? dialogEl).focus();
+      return;
+    }
     const first = items[0]!;
     const last = items[items.length - 1]!;
-    const active = document.activeElement as HTMLElement | null;
     if (e.shiftKey && (active === first || active === dialogEl)) {
       e.preventDefault();
       last.focus();
@@ -397,7 +524,13 @@
   }
 
   function onKey(e: KeyboardEvent) {
-    if (e.key === "Escape" && !busy) close();
+    if (e.key === "Escape" && !busy) {
+      // The dialog's Escape alone: a page mounted after it registered its own listener
+      // later, found no dialog open once this one had closed, and cleared the selection
+      // with the same key (D-295).
+      e.stopImmediatePropagation();
+      close();
+    }
   }
 </script>
 
@@ -420,7 +553,7 @@
       <p class="muted">Reading the server's mod list and checking your Workshop…</p>
     {:else if plan}
       {#if plan.warnings.length}
-        <!-- Read with the footer's buttons, which name them as their description: a
+        <!-- Read with the primary button, which names them as its description: a
              warning that disables Join was never said when focus landed there (D-291). -->
         <ul class="warnings" id="join-warnings">
           {#each plan.warnings as w (w)}<li>{w}</li>{/each}
@@ -531,15 +664,15 @@
     <footer>
       {#if phase === "waiting"}
         <button class="btn secondary" onclick={cancelWaiting}>Stop waiting</button>
-        <button class="btn" onclick={() => { stopWaiting(); void launch(); }} disabled={!canLaunch}>Join now anyway</button>
+        <button class="btn" onclick={joinAnyway} disabled={!canLaunch}>Join now anyway</button>
       {:else}
-        <button class="btn secondary" onclick={close} disabled={busy} title={phase === "syncing" ? "Steam keeps downloading in the background; watch it on the Mods page" : undefined} aria-describedby={warned}>
+        <button class="btn secondary" onclick={close} disabled={busy} title={phase === "syncing" ? "Steam keeps downloading in the background; watch it on the Mods page" : undefined}>
           {phase === "running" || phase === "exited" ? "Close" : phase === "syncing" ? "Close (keeps downloading)" : "Cancel"}
         </button>
         {#if phase === "ready" || phase === "error" || phase === "exited"}
           {#if toSync.length}
             <button class="btn" onclick={() => sync(true)} disabled={!canSync || (plan?.passwordRequired && !password)} aria-describedby={warned}>Download {toSync.length} mod{toSync.length === 1 ? "" : "s"} and join</button>
-            <button class="btn secondary" onclick={() => sync(false)} disabled={!canSync} aria-describedby={warned}>Download only</button>
+            <button class="btn secondary" onclick={() => sync(false)} disabled={!canSync}>Download only</button>
           {:else}
             <button class="btn" onclick={joinNow} disabled={!canLaunch} aria-describedby={warned}>{waitForSlot && full ? "Wait and join" : "Join"}</button>
           {/if}

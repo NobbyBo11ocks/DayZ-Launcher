@@ -102,7 +102,7 @@
         filterKey={servers.filterKey}
         inert={servers.joiningId !== null}
       onVisible={(ids) => servers.verifyVisible(ids)}
-        onActivate={(id) => (servers.joiningId = id)}
+        onActivate={(id) => servers.requestJoin(id)}
         onFavourite={(id) => servers.toggleFavourite(id)}
         friendsOn={servers.friendsOn}
         modsByServer={servers.modsByServer}

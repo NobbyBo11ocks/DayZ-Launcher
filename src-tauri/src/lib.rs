@@ -353,6 +353,7 @@ pub fn run() {
                 verifying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 scanning: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 dzsa: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                launching: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 settings,
             });
             app.resources_table().add(ExitGuard(app.handle().clone()));

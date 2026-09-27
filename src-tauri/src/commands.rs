@@ -13,7 +13,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::a2s::{self, Client};
 use crate::browser::verify::{self, Target, Verdict, Verification};
-use crate::browser::{Cache, HistoryEntry, PopulationSample, ServerRow};
+use crate::browser::{Cache, HistoryEntry, PopulationSample, ServerMods, ServerRow};
 use crate::error::{AppError, AppResult};
 use crate::launch::{self, LaunchSpec, Launched};
 use crate::settings::{Settings, SettingsStore, UiPrefs};
@@ -35,6 +35,10 @@ pub struct AppState {
     /// same mutex, emit two `servers:done` and queue two verification passes for one
     /// list; the front end's own guard does not survive a reload (D-209).
     pub dzsa: Arc<AtomicBool>,
+    /// A launch is between its first check and the spawn. Two of them both passed the
+    /// running-game check, which came after the mod read, and both started
+    /// `DayZ_BE.exe` (D-165's symptom, D-295).
+    pub launching: Arc<AtomicBool>,
 }
 
 /// Clears its flag however the pass ends, including an early `return`.
@@ -718,8 +722,6 @@ pub async fn run_mod_scan(
     client: Client,
     scanning: Arc<AtomicBool>,
 ) -> ModScanSummary {
-    use crate::browser::ServerMods;
-
     // One scan at a time, claimed here rather than at a call site so both callers are
     // covered: the button went through `mods_scan`, which guarded, and the automatic
     // scan after a refresh called this directly, which did not (D-204).
@@ -773,20 +775,11 @@ pub async fn run_mod_scan(
         for (id, addr) in chunk.iter().cloned() {
             let c = client.clone();
             set.spawn(async move {
-                let mods = c.rules(addr).await.ok().map(|r| {
-                    r.value.dayz.map_or_else(Vec::new, |d| {
-                        // Each id once, where it first appears (D-265), id 0 included:
-                        // the cache keeps one row per id, so a list sent with every
-                        // server-side mod counted more in the Mods column than the same
-                        // list read back after a restart (D-276).
-                        let mut seen = HashSet::new();
-                        d.mods
-                            .into_iter()
-                            .filter(|m| seen.insert(m.workshop_id))
-                            .map(|m| (m.workshop_id, m.name))
-                            .collect::<Vec<(u64, String)>>()
-                    })
-                });
+                // Each id once, where it first appears (D-265), id 0 included: the
+                // cache keeps one row per id, so a list sent with every server-side mod
+                // counted more in the Mods column than the same list read back after a
+                // restart (D-276). The join plan stores the same shape (D-295).
+                let mods = c.rules(addr).await.ok().map(|r| r.value.stored_mods());
                 (id, mods)
             });
         }
@@ -1350,6 +1343,39 @@ async fn cached_mods(
     .flatten()
 }
 
+/// Keeps what a join's own INFO read said about the game port and the password when it
+/// differs from the cached row: only a Steam listing or a direct connect changed them,
+/// so after a server moved its game port a launch whose own read dropped went to the
+/// old one, and Recent recorded the old one (D-295).
+async fn keep_join_facts(
+    cache: &Arc<Mutex<Cache>>,
+    row: &ServerRow,
+    game_port: u16,
+    password: bool,
+) {
+    if row.game_port == game_port && row.password == password {
+        return;
+    }
+    if row.game_port != game_port {
+        crate::log_info!(
+            "join",
+            "{} answers on game port {game_port} now, not {}",
+            row.id,
+            row.game_port
+        );
+    }
+    let c = Arc::clone(cache);
+    let id = row.id.clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        if let Ok(c) = c.lock() {
+            if let Err(e) = c.update_join_facts(&id, game_port, password) {
+                crate::log_warn!("cache", "the join's game port was not kept: {e}");
+            }
+        }
+    })
+    .await;
+}
+
 /// "12 minutes ago" / "3 hours ago" / "2 days ago", for text the user reads once.
 fn humanise_age(secs: i64) -> String {
     let plural = |n: i64, unit: &str| format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" });
@@ -1405,7 +1431,11 @@ pub struct JoinPlan {
 /// Everything the join dialog needs: required mods (live RULES, else the stored list),
 /// local state, Steam titles/sizes for every required mod, and preconditions.
 #[tauri::command]
-pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<JoinPlan> {
+pub async fn join_plan(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<JoinPlan> {
     let row = cached_row(&state.cache, &id)
         .await
         .ok_or_else(|| AppError::Internal(format!("unknown server {id}")))?;
@@ -1423,20 +1453,35 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
         .map_err(|e| AppError::Internal(format!("diagnostics task failed: {e}")))??;
     // The list this plan read becomes the cached one: a launch whose own RULES read
     // drops falls back to the cache, which could be a day-old scan rather than the
-    // list the player was shown seconds earlier (D-265).
+    // list the player was shown seconds earlier (D-265). In the scan's shape, and sent
+    // to the list as a scan's is, so the Mods column agrees with it (D-295).
     if let Ok(r) = &rules {
         if r.value.dayz.is_some() {
-            let list = vec![(id.clone(), r.value.required_mods())];
+            let stored = r.value.stored_mods();
+            let payload = vec![ServerMods {
+                id: id.clone(),
+                mods: stored.iter().map(|(m, _)| *m).collect(),
+            }];
+            let names: Vec<(u64, String)> =
+                stored.iter().filter(|(m, _)| *m > 0).cloned().collect();
+            let list = vec![(id.clone(), stored)];
             let c = Arc::clone(&state.cache);
             let now = ServerRow::now_unix();
-            let _ = tauri::async_runtime::spawn_blocking(move || {
-                if let Ok(mut c) = c.lock() {
-                    if let Err(e) = c.replace_server_mods_many(&list, now) {
-                        crate::log_warn!("cache", "the plan's mod list was not stored: {e}");
-                    }
-                }
+            let saved = tauri::async_runtime::spawn_blocking(move || {
+                c.lock().is_ok_and(|mut c| {
+                    c.replace_server_mods_many(&list, now)
+                        .map_err(|e| {
+                            crate::log_warn!("cache", "the plan's mod list was not stored: {e}")
+                        })
+                        .is_ok()
+                })
             })
-            .await;
+            .await
+            .unwrap_or(false);
+            // Stored first, then sent, as the scan does (D-281).
+            if saved {
+                let _ = app.emit("servers:mods", &(payload, names, Vec::<String>::new()));
+            }
         }
     }
     let server_version = info
@@ -1447,6 +1492,9 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
         .as_ref()
         .and_then(|i| i.game_port)
         .unwrap_or(row.game_port);
+    if info.is_some() {
+        keep_join_facts(&state.cache, &row, game_port, password_required).await;
+    }
 
     let mut warnings = Vec::new();
     let required: Vec<(u64, String)> = match &rules {
@@ -1535,7 +1583,7 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
         if worker_status.initialized {
             let cmd = state.steam.clone_handle();
             match tauri::async_runtime::spawn_blocking(move || cmd.item_details(&ids)).await {
-                Ok(Ok(details)) => {
+                Ok(Ok((details, missed))) => {
                     let by_id: HashMap<u64, ItemDetails> =
                         details.into_iter().map(|d| (d.id, d)).collect();
                     for m in &mut mods {
@@ -1543,6 +1591,10 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
                             m.title = Some(d.title.clone());
                             m.size = Some(d.file_size);
                         }
+                    }
+                    // Some pages answered and one did not (D-295).
+                    if let Some(e) = missed {
+                        warnings.push(format!("Workshop details unavailable: {e}"));
                     }
                 }
                 Ok(Err(e)) => warnings.push(format!("Workshop details unavailable: {e}")),
@@ -1729,18 +1781,30 @@ pub async fn launch_game(
     password: Option<String>,
     profile: Option<String>,
 ) -> AppResult<Launched> {
+    // One launch at a time, and a running game refused before anything is read or
+    // linked. The check came after RULES, INFO and the junctions with nothing held
+    // across it, so two overlapping calls both passed it and both started DayZ (D-295).
+    let Some(_launching) = InFlight::claim(&state.launching) else {
+        return Err(AppError::Internal("DayZ is already starting.".into()));
+    };
+    refuse_if_running()?;
     let row = cached_row(&state.cache, &id)
         .await
         .ok_or_else(|| AppError::Internal(format!("unknown server {id}")))?;
     let addr: SocketAddr = id
         .parse()
         .map_err(|_| AppError::Internal(format!("bad server id {id}")))?;
-    // INFO beside RULES for the game port, as in the plan (D-265).
+    // INFO beside RULES for the game port, as in the plan (D-265), and kept when it
+    // moved (D-295).
     let (rules, info) = tokio::join!(state.a2s.rules(addr), state.a2s.info(addr));
+    let info = info.ok().map(|r| r.value);
     let game_port = info
-        .ok()
-        .and_then(|r| r.value.game_port)
+        .as_ref()
+        .and_then(|i| i.game_port)
         .unwrap_or(row.game_port);
+    if let Some(i) = &info {
+        keep_join_facts(&state.cache, &row, game_port, i.password).await;
+    }
     let required: Vec<(u64, String)> = match &rules {
         // Published mods only, each once (D-221, D-265).
         Ok(r) => r.value.required_mods(),
@@ -1891,17 +1955,9 @@ pub async fn launch_game(
     // Spawn FIRST, then step aside (D-119, corrected in D-151): a child started by a
     // BELOW_NORMAL parent inherits that class, so lowering the launcher before the spawn
     // handed DayZ itself a below-normal priority — the opposite of the intent.
-    // A second DayZ would fight the first for the game's own single-instance lock,
-    // and its immediate exit used to restore the launcher's priority while the real
-    // game was still playing (D-119, D-165).
-    if let Some(pid) = crate::steam::registry::process::find_named("DayZ_x64.exe")
-        .or_else(|| crate::steam::registry::process::find_named("DayZ_BE.exe"))
-    {
-        crate::log_warn!("launch", "DayZ is already running as pid {pid}");
-        return Err(AppError::Internal(
-            "DayZ is already running; close it before joining another server.".into(),
-        ));
-    }
+    // Asked again here: the game may have been started from Steam while the mod list
+    // was read.
+    refuse_if_running()?;
     let (mut child, launched) = match launch::spawn(&game_dir, &args) {
         Ok(v) => v,
         Err(e) => {
@@ -1933,7 +1989,12 @@ pub async fn launch_game(
     crate::proc::set_priority(crate::proc::Priority::BelowNormal);
     {
         let c = Arc::clone(&state.cache);
-        let row_for_history = row.clone();
+        // The port DayZ was started with, which Recent's "Join again" checks the
+        // server's answer against (D-265, D-295).
+        let row_for_history = ServerRow {
+            game_port,
+            ..row.clone()
+        };
         let mods = links.len();
         let _ = tauri::async_runtime::spawn_blocking(move || {
             if let Ok(c) = c.lock() {
@@ -1964,6 +2025,21 @@ pub async fn launch_game(
         let _ = app.emit("launch:exited", &LaunchExited { pid, code });
     });
     Ok(launched)
+}
+
+/// Refuses a launch while DayZ runs: a second copy fights the first for the game's own
+/// single-instance lock, and its immediate exit used to restore the launcher's priority
+/// while the real game was still playing (D-119, D-165).
+fn refuse_if_running() -> AppResult<()> {
+    if let Some(pid) = crate::steam::registry::process::find_named("DayZ_x64.exe")
+        .or_else(|| crate::steam::registry::process::find_named("DayZ_BE.exe"))
+    {
+        crate::log_warn!("launch", "DayZ is already running as pid {pid}");
+        return Err(AppError::Internal(
+            "DayZ is already running; close it before joining another server.".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Whether DayZ is running, for the confirmation before "Install and restart" (D-280):

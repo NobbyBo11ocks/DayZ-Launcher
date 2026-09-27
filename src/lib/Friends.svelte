@@ -129,20 +129,24 @@
    * The listed row for a friend known only by a game address (rich presence carries no
    * query port): looked up by ip and game port, so a server already in the list is
    * not probed for, and the probe's port guess — which misses 14 % of populated
-   * servers (D-245) — is not needed (D-265). Only on Join: it scans every row.
+   * servers (D-245) — is not needed (D-265). Only when exactly one row answers there:
+   * with two ids at one game address, or an offline one, the list cannot tell which is
+   * live, and the probe checks the reply's game port (D-295).
    */
   function byGameAddress(ip: string, gamePort: number): ServerRow | null {
-    for (const r of servers.rows.values()) if (r.ip === ip && r.gamePort === gamePort) return r;
-    return null;
+    const at = servers.rowsAtGameAddress(ip, gamePort);
+    return at.length === 1 && at[0]!.verdict !== "offline" ? at[0]! : null;
   }
 
   async function join(f: FriendInfo) {
     if (!f.server) return;
     if (joining) return;
-    const known = serverOf(f) ?? byGameAddress(f.server.ip, f.server.gamePort);
+    // By game address only when Steam gave no query port: with one, a row missing from
+    // the list is a server to probe, not another id at the same game port (D-295).
+    const known = serverOf(f) ?? (f.server.queryPort > 0 ? null : byGameAddress(f.server.ip, f.server.gamePort));
     if (known) {
-      servers.select(known.id);
-      servers.joiningId = known.id;
+      if (servers.joiningId === null) servers.select(known.id);
+      servers.requestJoin(known.id);
       return;
     }
     joining = f.steamId;
@@ -161,7 +165,7 @@
     // be mid-download or mid-launch (D-265), nor be reported as silent (D-281).
     else if (servers.joiningId === null) {
       servers.selectedId = row.id;
-      servers.joiningId = row.id;
+      servers.requestJoin(row.id);
     }
   }
 </script>
