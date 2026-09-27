@@ -2,31 +2,42 @@ DZSA CrayZ Launcher — All rights reserved
 
 Copyright (c) 2026 NobbyBo11ocks. All rights reserved.
 
-The source code in this repository is published so that anyone can read it,
-audit it and build it for their own personal use. It is not open source, and no
-other rights are granted.
+Everything in this repository, and every build made from it (together, "the
+Software"), belongs to the copyright holder. The source code is published so
+that it can be read. It is not open source, and the only rights granted are
+the two below.
 
 You MAY:
 
-  1. View and study this source code.
-  2. Build it and run the result on computers you own or control, for your own
-     personal, non-commercial use.
-  3. Keep a private copy or fork for that purpose, and propose changes back to
-     this repository.
+  1. Read the source code where the copyright holder publishes it.
+  2. Download the official installer from this repository's Releases page and
+     use it, with the updates it installs itself, on computers you own or
+     control.
+
+GitHub's Terms of Service also let GitHub users view this repository and fork
+it on GitHub. That permission covers only what GitHub's own features do on
+GitHub; it allows none of the things listed below, there or anywhere else.
 
 You MAY NOT, without prior written permission from the copyright holder:
 
-  1. Sell, licence, rent, or otherwise charge for this software, any build of
-     it, or access to it, whether on its own or as part of a larger offering.
-  2. Redistribute or publish this software or any build of it, in source or
-     binary form, on any site, store, mirror, launcher, mod pack or other
-     channel.
-  3. Rebrand it: publish a copy or a derived work under a different name, logo
-     or identity, or remove or alter its name, branding, credits or this
-     notice.
-  4. Publish a modified version, or create a derived work that is distributed
-     to anyone else.
-  5. Use its name or branding to promote a different product.
+  1. Copy the Software or any part of it, including single files, functions,
+     snippets, artwork, images or text, into anything else.
+  2. Build, compile or run the Software from its source code.
+  3. Modify it, translate it, or make any work based on it.
+  4. Redistribute, publish, upload, re-upload or mirror the Software or any
+     build of it, including the official installer, anywhere: websites, file
+     hosts, stores, launchers, mod packs or any other channel.
+  5. Sell, rent, lend or sublicense the Software, any build of it, or access
+     to it, or charge for any of them.
+  6. Rebrand it, or remove or alter its name, logo, credits or this notice.
+  7. Use its name, logo or branding for anything else.
+  8. Reverse engineer, decompile or disassemble any build, except to the
+     extent that applicable law allows it whatever this licence says.
+  9. Use the Software or any part of it to train, fine-tune or evaluate a
+     machine-learning model, or include it in a dataset.
+
+Any breach of this licence ends every permission it grants, at once and
+without notice.
 
 Third-party components keep their own licences, and nothing above overrides
 them. In particular this project includes IP geolocation data by DB-IP

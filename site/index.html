@@ -1,26 +1,21 @@
 <!doctype html>
-<html lang="en" data-theme="slate">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>DZSA CrayZ Launcher — a fast, honest DayZ server browser</title>
-    <meta
-      name="description"
-      content="A Windows launcher for DayZ Standalone: player counts verified against the servers themselves, one click from the list to the game, and no accounts or telemetry."
-    />
+    <title>DZSA CrayZ Launcher</title>
+    <meta name="description" content="A Windows launcher for DayZ: player counts checked against the servers themselves, mods that install themselves, one click to play." />
     <link rel="icon" href="icon.png" />
-
     <meta property="og:type" content="website" />
     <meta property="og:title" content="DZSA CrayZ Launcher" />
-    <meta property="og:description" content="Player counts you can trust, one click from list to game. Windows, free, no accounts." />
-    <meta property="og:image" content="servers.png" />
+    <meta property="og:description" content="Player counts you can trust, one click from the list to the game. Free, for Windows." />
+    <meta property="og:image" content="https://raw.githubusercontent.com/NobbyBo11ocks/DayZ-Launcher/main/site/servers.png" />
     <meta name="twitter:card" content="summary_large_image" />
-
     <style>
-      /* After the launcher's tokens (src/app.css), so the site and the app read as one
-         thing. Three differ: --ok and --warn are brighter here than the app's, and
-         --border is the app's value from before D-197 changed it there. No frameworks,
-         no web fonts, no trackers — same rule as the app. */
+      /* The launcher's own tokens (src/app.css): the Slate theme with the default lime
+         accent. The tabs are its section rail laid on its side — the raised surface, the
+         heavier label and the short accent pill, centred on the bottom edge here where the
+         rail centres it on the left. No framework, no web fonts, no trackers. */
       :root {
         --bg: #0f1216;
         --bg-elev: #161b22;
@@ -29,27 +24,29 @@
         --fg-muted: #8b949e;
         --accent: #a3e635;
         --accent-fg: #111;
-        --ok: #4ade80;
-        --warn: #fbbf24;
-        --border: #262d37;
+        --border: #3a4452;
         --radius: 8px;
+        color-scheme: dark;
       }
 
       * {
         box-sizing: border-box;
       }
 
-      html {
-        scroll-behavior: smooth;
+      /* A panel's own display would otherwise beat the attribute's. */
+      [hidden] {
+        display: none !important;
       }
 
       body {
         margin: 0;
+        min-height: 100vh;
+        min-height: 100svh;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
         background: var(--bg);
         color: var(--fg);
-        font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
-        font-size: 16px;
-        line-height: 1.6;
+        font: 14px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
         -webkit-font-smoothing: antialiased;
       }
 
@@ -57,478 +54,324 @@
         color: var(--accent);
       }
 
-      .wrap {
-        max-width: 1060px;
-        margin: 0 auto;
-        padding: 0 20px;
+      .icon {
+        flex: none;
+        width: 18px;
+        height: 18px;
+        color: var(--accent);
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
       }
 
-      /* --- top bar ------------------------------------------------------- */
-      .top {
-        position: sticky;
-        top: 0;
-        z-index: 10;
-        background: color-mix(in srgb, var(--bg) 88%, transparent);
-        backdrop-filter: blur(8px);
+      /* --- the bar ------------------------------------------------------------ */
+      header {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        height: 48px;
+        padding: 0 16px;
+        background: var(--bg-elev);
         border-bottom: 1px solid var(--border);
       }
 
-      .top .wrap {
-        display: flex;
-        align-items: center;
-        gap: 14px;
-        height: 56px;
-      }
-
-      .brand {
+      h1 {
         display: flex;
         align-items: center;
         gap: 10px;
-        font-weight: 650;
-        letter-spacing: -0.01em;
-        text-decoration: none;
-        color: var(--fg);
+        margin: 0;
+        font-size: 13px;
+        font-weight: 600;
+        white-space: nowrap;
       }
 
-      .brand img {
-        width: 26px;
-        height: 26px;
-      }
-
-      .top nav {
-        margin-left: auto;
+      [role="tablist"] {
         display: flex;
-        gap: 18px;
+        gap: 4px;
+        margin-left: auto;
+      }
+
+      [role="tab"] {
+        all: unset;
+        box-sizing: border-box;
+        cursor: pointer;
+        position: relative;
+        display: flex;
         align-items: center;
+        gap: 9px;
+        height: 32px;
+        padding: 0 12px;
+        border-radius: var(--radius);
+        font-size: 13px;
+        font-weight: 500;
+        transition: background-color 120ms;
       }
 
-      .top nav a {
-        color: var(--fg-muted);
-        text-decoration: none;
-        font-size: 14px;
+      [role="tab"]:hover,
+      [role="tab"][aria-selected="true"] {
+        background: var(--bg-row);
       }
 
-      .top nav a:hover {
-        color: var(--fg);
+      [role="tab"][aria-selected="true"] {
+        font-weight: 600;
       }
 
-      /* --- buttons ------------------------------------------------------- */
+      [role="tab"][aria-selected="true"]::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        bottom: 0;
+        width: 16px;
+        height: 3px;
+        border-radius: 2px;
+        background: var(--accent);
+        transform: translateX(-50%);
+        animation: pill 150ms ease-out;
+      }
+
+      @keyframes pill {
+        from {
+          width: 0;
+        }
+      }
+
+      [role="tab"]:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
+      }
+
+      /* --- the pages ---------------------------------------------------------- */
+      main {
+        display: grid;
+        place-items: center;
+        padding: 28px 16px;
+      }
+
+      #download {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 18px;
+        text-align: center;
+      }
+
+      /* As large as the window allows with the button still in view. */
+      .shot {
+        display: block;
+        width: min(1120px, 100%, max(640px, (100svh - 250px) * 16 / 9));
+        height: auto;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: 0 24px 70px rgb(0 0 0 / 0.5);
+      }
+
       .btn {
         display: inline-flex;
         align-items: center;
         gap: 9px;
-        padding: 11px 20px;
-        border-radius: 10px;
+        height: 38px;
+        padding: 0 18px;
+        border-radius: var(--radius);
         background: var(--accent);
         color: var(--accent-fg);
-        font-weight: 650;
+        font-weight: 600;
         text-decoration: none;
-        border: 1px solid transparent;
-        white-space: nowrap;
+      }
+
+      .btn .icon {
+        color: inherit;
       }
 
       .btn:hover {
         filter: brightness(1.08);
       }
 
-      .btn.ghost {
-        background: transparent;
-        color: var(--fg);
-        border-color: var(--border);
-        font-weight: 500;
+      .btn:focus-visible {
+        outline: 2px solid var(--fg);
+        outline-offset: 2px;
       }
 
-      .btn.ghost:hover {
-        border-color: var(--accent);
-        filter: none;
-      }
-
-      .btn.sm {
-        padding: 7px 14px;
-        font-size: 14px;
-      }
-
-      /* --- hero ---------------------------------------------------------- */
-      .hero {
-        padding: 72px 0 8px;
-        text-align: center;
-      }
-
-      /* The logo over the headline, lit from behind in its own green (D-258). */
-      .hero .logo {
-        display: block;
-        width: min(220px, 56vw);
-        height: auto;
-        margin: -20px auto 10px;
-        filter: drop-shadow(0 10px 36px rgb(125 255 42 / 0.2));
-      }
-
-      .hero h1 {
-        margin: 0 0 14px;
-        font-size: clamp(32px, 6vw, 52px);
-        line-height: 1.08;
-        letter-spacing: -0.02em;
-        font-weight: 700;
-      }
-
-      .hero h1 .accent {
-        color: var(--accent);
-      }
-
-      .hero p.lede {
-        margin: 0 auto 26px;
-        max-width: 62ch;
+      .small {
+        margin: -8px 0 0;
         color: var(--fg-muted);
-        font-size: clamp(16px, 2.2vw, 19px);
+        font-size: 12px;
       }
 
-      .cta {
-        display: flex;
-        gap: 12px;
-        justify-content: center;
-        flex-wrap: wrap;
-      }
-
-      .under {
-        margin-top: 14px;
-        color: var(--fg-muted);
-        font-size: 13.5px;
-      }
-
-      .shot {
-        margin: 44px 0 0;
-        border: 1px solid var(--border);
-        border-radius: 14px;
-        overflow: hidden;
-        background: var(--bg-elev);
-        box-shadow: 0 30px 80px rgb(0 0 0 / 0.45);
-      }
-
-      .shot img {
-        display: block;
+      #features {
         width: 100%;
-        height: auto;
-      }
-
-      /* --- sections ------------------------------------------------------ */
-      section {
-        padding: 64px 0;
-      }
-
-      section h2 {
-        margin: 0 0 6px;
-        font-size: clamp(22px, 3.4vw, 30px);
-        letter-spacing: -0.01em;
-      }
-
-      section .sub {
-        margin: 0 0 30px;
-        color: var(--fg-muted);
-        max-width: 70ch;
       }
 
       .grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-        gap: 14px;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        width: min(1120px, 100%);
+        margin: 0 auto;
       }
 
       .card {
-        border: 1px solid var(--border);
-        border-radius: 12px;
+        padding: 14px 16px 16px;
         background: var(--bg-elev);
-        padding: 18px 20px 20px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
       }
 
-      .card h3 {
-        margin: 0 0 6px;
-        font-size: 16px;
+      .card h2 {
         display: flex;
         align-items: center;
-        gap: 9px;
+        gap: 10px;
+        margin: 0 0 6px;
+        font-size: 14px;
+        font-weight: 600;
       }
 
       .card p {
         margin: 0;
         color: var(--fg-muted);
-        font-size: 14.5px;
-      }
-
-      .dot {
-        width: 7px;
-        height: 7px;
-        border-radius: 50%;
-        background: var(--accent);
-        flex: none;
-      }
-
-      /* --- numbers ------------------------------------------------------- */
-      .stats {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: 12px;
-      }
-
-      .stat {
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        background: var(--bg-elev);
-        padding: 16px 18px;
-      }
-
-      .stat .v {
-        font-size: 26px;
-        font-weight: 650;
-        letter-spacing: -0.02em;
-        color: var(--accent);
-        font-variant-numeric: tabular-nums;
-      }
-
-      .stat .k {
-        color: var(--fg-muted);
-        font-size: 13.5px;
-        margin-top: 2px;
-      }
-
-      /* --- lists --------------------------------------------------------- */
-      .split {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-        gap: 32px;
-      }
-
-      ul.clean {
-        margin: 0;
-        padding: 0;
-        list-style: none;
-      }
-
-      ul.clean li {
-        position: relative;
-        padding-left: 22px;
-        margin-bottom: 9px;
-        color: var(--fg-muted);
-        font-size: 15px;
-      }
-
-      ul.clean li::before {
-        content: "";
-        position: absolute;
-        left: 4px;
-        top: 10px;
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: var(--accent);
-      }
-
-      ul.clean li strong {
-        color: var(--fg);
-        font-weight: 600;
-      }
-
-      .note {
-        border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
-        background: color-mix(in srgb, var(--warn) 7%, var(--bg-elev));
-        border-radius: 12px;
-        padding: 14px 18px;
-        color: var(--fg-muted);
-        font-size: 14.5px;
-      }
-
-      .note strong {
-        color: var(--warn);
+        font-size: 13px;
       }
 
       footer {
-        border-top: 1px solid var(--border);
-        padding: 30px 0 46px;
+        padding: 14px 16px 18px;
         color: var(--fg-muted);
-        font-size: 13.5px;
+        font-size: 12px;
+        text-align: center;
       }
 
-      footer .wrap {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px 22px;
-        align-items: center;
+      @media (max-width: 900px) {
+        .grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
       }
 
-      footer .spacer {
-        flex: 1;
-      }
-
-      @media (max-width: 620px) {
-        .top nav a:not(.btn) {
+      @media (max-width: 520px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+        h1 span {
           display: none;
         }
-        .hero {
-          padding-top: 44px;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        [role="tab"],
+        [role="tab"]::after {
+          transition: none;
+          animation: none;
         }
       }
     </style>
   </head>
 
   <body>
-    <header class="top">
-      <div class="wrap">
-        <a class="brand" href="#top"><img src="icon.png" alt="" /> DZSA CrayZ Launcher</a>
-        <nav>
-          <a href="#features">Features</a>
-          <a href="#trust">Player counts</a>
-          <a href="#privacy">Privacy</a>
-          <a class="btn sm" href="https://github.com/NobbyBo11ocks/DayZ-Launcher/releases/latest">Download</a>
-        </nav>
-      </div>
+    <header>
+      <h1><img src="emblem.png" width="18" height="20" alt="" /><span>DZSA CrayZ Launcher</span></h1>
+      <nav role="tablist" aria-label="Sections">
+        <button role="tab" id="tab-download" aria-controls="download" aria-selected="true">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14" /></svg>
+          Download
+        </button>
+        <button role="tab" id="tab-features" aria-controls="features" aria-selected="false" tabindex="-1">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.7L14.29 9.54L20.56 9.92L15.71 13.91L17.29 19.98L12 16.6L6.71 19.98L8.29 13.91L3.44 9.92L9.71 9.54Z" /></svg>
+          Features
+        </button>
+      </nav>
     </header>
 
-    <main id="top">
-      <div class="wrap hero">
-        <img class="logo" src="logo.png" width="220" height="220" alt="DZSA CrayZ Launcher: a skull in a gas mask on a biohazard sign, over the name" />
-        <h1>Player counts you can <span class="accent">actually trust</span></h1>
-        <p class="lede">
-          A Windows launcher for DayZ Standalone. Every populated server is queried directly and cross-checked against
-          Steam, so the servers padding their numbers are flagged and hidden. Missing mods install themselves, and the
-          game starts through BattlEye the way it is supposed to.
-        </p>
-        <div class="cta">
-          <a class="btn" href="https://github.com/NobbyBo11ocks/DayZ-Launcher/releases/latest">Download for Windows</a>
-          <a class="btn ghost" href="https://github.com/NobbyBo11ocks/DayZ-Launcher">Source on GitHub</a>
-        </div>
-        <p class="under">Free · Windows 10 and 11 · 7.7 MB installer · no account, no telemetry</p>
+    <main>
+      <section id="download" role="tabpanel" aria-labelledby="tab-download">
+        <img class="shot" src="servers.png" width="1600" height="900" fetchpriority="high" alt="The launcher's server list: verified player counts, filters in the left rail and a server's details and mods on the right." />
+        <a class="btn" id="dl" href="https://github.com/NobbyBo11ocks/DayZ-Launcher/releases/latest">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14" /></svg>
+          Download for Windows
+        </a>
+        <p class="small" id="meta">Free · Windows 10 and 11</p>
+      </section>
 
-        <div class="shot"><img src="servers.png" alt="The server browser: country flags, verified player counts, filters, and a details pane showing the server's mods and population history." /></div>
-      </div>
-
-      <section id="trust" class="wrap">
-        <h2>Most DayZ servers lie about their player count</h2>
-        <p class="sub">
-          More than half of community servers inflate the number they report, so a list that simply repeats it is
-          useless. This launcher checks instead of trusting.
-        </p>
+      <section id="features" role="tabpanel" aria-labelledby="tab-features" hidden>
         <div class="grid">
           <div class="card">
-            <h3><span class="dot"></span> Asked, not assumed</h3>
-            <p>Every populated server gets a direct A2S_PLAYER query. The real head-count is what you see.</p>
+            <h2><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4" width="17" height="7" rx="2" /><rect x="3.5" y="13" width="17" height="7" rx="2" /><path d="M7.5 7.5h.01M7.5 16.5h.01" stroke-width="2.6" /></svg>Player counts you can trust</h2>
+            <p>Every populated server is asked directly and checked against Steam. The ones inflating their numbers are flagged and hidden.</p>
           </div>
           <div class="card">
-            <h3><span class="dot"></span> Cross-checked with Steam</h3>
-            <p>Steam knows which servers have authenticated players. A server Steam says is empty but that claims a full lobby is flagged.</p>
+            <h2><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 20 7.6v8.8L12 20.8 4 16.4V7.6z" /><path d="M4 7.6l8 4.4 8-4.4M12 12v8.8" /></svg>Mods install themselves</h2>
+            <p>Missing Workshop mods download through Steam, then the game starts through BattlEye.</p>
           </div>
           <div class="card">
-            <h3><span class="dot"></span> Fabricated lists caught</h3>
-            <p>Player lists where everyone shares a handful of session lengths are marked as synthetic rather than counted.</p>
+            <h2><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16l-6.2 7.4V19l-3.6-1.8v-4.8z" /></svg>Filters that matter</h2>
+            <p>Perspective, hive, map, country, mods, ping, queue, version and friends playing.</p>
           </div>
           <div class="card">
-            <h3><span class="dot"></span> Hidden by default</h3>
-            <p>Inflated and unverifiable servers are filtered out unless you ask to see them. It is one toggle.</p>
+            <h2><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></svg>Wait for a slot</h2>
+            <p>On a full server, it joins the moment a place opens.</p>
           </div>
-        </div>
-      </section>
-
-      <section class="wrap">
-        <h2>Measured, not claimed</h2>
-        <p class="sub">
-          Taken on the reference machine — cold start and memory at v0.1.19 and v0.1.23 with the whole cached list loaded, the refresh as the median of five passes at v0.1.37, the installer at v0.1.69. Each number
-          has a written budget, and every measurement so far is recorded in the repository.
-        </p>
-        <div class="stats">
-          <div class="stat"><div class="v">0.43 s</div><div class="k">cold start to first frame</div></div>
-          <div class="stat"><div class="v">0.20 %</div><div class="k">of one core, idle</div></div>
-          <div class="stat"><div class="v">7.7 MB</div><div class="k">installer</div></div>
-          <div class="stat"><div class="v">≈35 s</div><div class="k">populated-server refresh, then ≈25 s to verify</div></div>
-          <div class="stat"><div class="v">~306 MB</div><div class="k">memory, whole app</div></div>
-        </div>
-      </section>
-
-      <section id="features" class="wrap">
-        <h2>What it does</h2>
-        <p class="sub">The things a launcher is for, done properly.</p>
-        <div class="split">
-          <div>
-            <h3 style="margin: 0 0 12px; font-size: 15px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-muted)">Finding a server</h3>
-            <ul class="clean">
-              <li><strong>Steam's own list</strong>, no API key and no third-party service.</li>
-              <li><strong>Filters that matter</strong>: perspective, official or community hive, map, country, mod, queue, password, daytime, version, ping and friends — and maps by the name people use, so "Livonia" finds the ones the protocol calls <code>enoch</code>.</li>
-              <li><strong>Country flags</strong> from an offline table — no lookup service, no requests per row.</li>
-              <li><strong>Find servers by mod</strong>, from the mods actually seen on live servers.</li>
-              <li><strong>Live details</strong>: mods with installed ticks, 72 h population history, and the other servers at the same address.</li>
-              <li><strong>LAN discovery</strong> and direct connect by address.</li>
-            </ul>
+          <div class="card">
+            <h2><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3.5" /><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6" /><path d="M15.5 5.2a3.5 3.5 0 0 1 0 6.6M17.5 14.3c2.1.7 3.5 2.9 3.5 5.7" /></svg>Play with friends</h2>
+            <p>See which server your Steam friends are on and join them in one click.</p>
           </div>
-          <div>
-            <h3 style="margin: 0 0 12px; font-size: 15px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-muted)">Getting into the game</h3>
-            <ul class="clean">
-              <li><strong>Missing mods install themselves</strong> through Steam, with the <code>!Workshop</code> links made the way the official launcher makes them.</li>
-              <li><strong>Wait for a free slot</strong> on a full server and join the moment one opens.</li>
-              <li><strong>Launch profiles</strong>: saved sets of launch options, picked per join.</li>
-              <li><strong>Friends</strong>: who is in DayZ, on which server, with a Join button.</li>
-              <li><strong>Mod manager</strong>: update, unsubscribe, and clean up stale Workshop links.</li>
-              <li><strong>Signed one-click updates</strong>, verified before anything is installed.</li>
-            </ul>
+          <div class="card">
+            <h2><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2.5" /><path d="M8 8.5h8M8 12h3M8 15.5h3" /><rect x="14" y="12" width="2" height="3.5" rx=".5" /></svg>DayZ news</h2>
+            <p>The latest DayZ updates on the home page, videos included.</p>
           </div>
-        </div>
-      </section>
-
-      <section id="privacy" class="wrap">
-        <h2>Nothing to sign up for</h2>
-        <p class="sub">No account, no API key, no telemetry, no analytics. Here is everything it talks to, in full:</p>
-        <div class="split">
-          <div>
-            <ul class="clean">
-              <li><strong>Steam, on your own machine</strong>, for the server list, the Workshop and your friends.</li>
-              <li><strong>The game servers</strong>, directly, to check ping, mods and who is really on them.</li>
-              <li><strong>GitHub</strong>, for the update manifest and the installer.</li>
-              <li><strong>Steam's news feed and its picture CDN</strong>, for the home page — with that page switched off, never.</li>
-              <li><strong>YouTube</strong>, for the preview pictures of video posts on that same page, and its no-cookie player only while a video plays.</li>
-              <li><strong>DZSA's public server list</strong>, when Steam will not start: once by itself if the last Steam refresh is over an hour old, and whenever you ask.</li>
-              <li><strong>Microsoft</strong>, once, for the WebView2 runtime if the installer finds none.</li>
-            </ul>
+          <div class="card">
+            <h2><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M12 16V8.5M8.5 11.5 12 8l3.5 3.5" /></svg>One-click updates</h2>
+            <p>New versions install in one click, each checked against its signature first.</p>
           </div>
-          <div>
-            <p style="margin: 0 0 16px; color: var(--fg-muted); font-size: 15px">
-              Your cache, favourites, history and settings stay in your own app-data folder. There is a Logs page showing
-              exactly what the launcher has been doing, which you can read, copy, mute by area, or switch off completely.
-            </p>
-            <div class="note">
-              <strong>SmartScreen.</strong> The installer is not code-signed yet, so Windows shows "Windows protected
-              your PC" the first time. Click <em>More info</em>, then <em>Run anyway</em>. The source is public if you
-              would rather build it yourself.
-            </div>
+          <div class="card">
+            <h2><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 19 6v5.6c0 4.3-2.9 7.9-7 9.2-4.1-1.3-7-4.9-7-9.2V6z" /></svg>Private</h2>
+            <p>No account and no telemetry. Nothing about you is sent anywhere.</p>
           </div>
-        </div>
-      </section>
-
-      <section class="wrap">
-        <h2>The home page</h2>
-        <p class="sub">DayZ's own news, with the updates that matter marked unread — and a switch in Settings to remove the page entirely.</p>
-        <div class="shot" style="margin-top: 0"><img src="home.jpg" alt="The home page: the latest DayZ updates as cards with pictures and video previews." /></div>
-      </section>
-
-      <section class="wrap" style="text-align: center; padding-bottom: 76px">
-        <h2 style="margin-bottom: 10px">Get it</h2>
-        <p class="sub" style="margin: 0 auto 26px">Windows 10 or 11, 64-bit. Steam running and signed in, DayZ installed through Steam.</p>
-        <div class="cta">
-          <a class="btn" href="https://github.com/NobbyBo11ocks/DayZ-Launcher/releases/latest">Download the latest release</a>
-          <a class="btn ghost" href="https://github.com/NobbyBo11ocks/DayZ-Launcher#build-from-source">Build from source</a>
         </div>
       </section>
     </main>
 
-    <footer>
-      <div class="wrap">
-        <span>© 2026 NobbyBo11ocks. All rights reserved.</span>
-        <span class="spacer"></span>
-        <a href="https://github.com/NobbyBo11ocks/DayZ-Launcher">GitHub</a>
-        <a href="https://github.com/NobbyBo11ocks/DayZ-Launcher/releases">Releases</a>
-        <a href="https://github.com/NobbyBo11ocks/DayZ-Launcher/issues">Report a problem</a>
-      </div>
-      <div class="wrap" style="margin-top: 12px">
-        <span>
-          Not affiliated with Bohemia Interactive or Valve. DayZ is a trademark of Bohemia Interactive. IP geolocation by
-          <a href="https://db-ip.com">DB-IP</a> (CC BY 4.0); flags by <a href="https://github.com/lipis/flag-icons">flag-icons</a> (MIT).
-        </span>
-      </div>
-    </footer>
+    <footer>© 2026 NobbyBo11ocks. All rights reserved. Not affiliated with Bohemia Interactive or Valve; DayZ is a trademark of Bohemia Interactive.</footer>
+
+    <script>
+      // Tabs, as the ARIA tabs pattern has them: arrows move between them, and
+      // #features opens that one, so it can be linked.
+      const tabs = [...document.querySelectorAll('[role="tab"]')];
+      function show(id, focus) {
+        for (const t of tabs) {
+          const on = t.getAttribute("aria-controls") === id;
+          t.setAttribute("aria-selected", String(on));
+          t.tabIndex = on ? 0 : -1;
+          document.getElementById(t.getAttribute("aria-controls")).hidden = !on;
+          if (on && focus) t.focus();
+        }
+      }
+      tabs.forEach((t, i) => {
+        t.addEventListener("click", () => {
+          const id = t.getAttribute("aria-controls");
+          show(id);
+          history.replaceState(null, "", id === "features" ? "#features" : location.pathname);
+        });
+        t.addEventListener("keydown", (e) => {
+          const step = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
+          if (!step) return;
+          e.preventDefault();
+          show(tabs[(i + step + tabs.length) % tabs.length].getAttribute("aria-controls"), true);
+        });
+      });
+      const fromHash = () => show(location.hash === "#features" ? "features" : "download");
+      addEventListener("hashchange", fromHash);
+      fromHash();
+
+      // The button goes straight to the newest installer when GitHub answers, and to the
+      // releases page when it does not.
+      fetch("https://api.github.com/repos/NobbyBo11ocks/DayZ-Launcher/releases/latest")
+        .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+        .then((release) => {
+          const setup = release.assets.find((a) => /-setup\.exe$/i.test(a.name));
+          if (!setup) return;
+          document.getElementById("dl").href = setup.browser_download_url;
+          document.getElementById("meta").textContent =
+            `${release.tag_name} · ${(setup.size / 1048576).toFixed(1)} MB · Free · Windows 10 and 11`;
+        })
+        .catch(() => {});
+    </script>
   </body>
 </html>

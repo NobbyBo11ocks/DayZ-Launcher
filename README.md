@@ -22,7 +22,7 @@ Fake populations flagged and hidden. Mods synced and the game started in one cli
 
 <sub>
 
-[Why](#why-it-exists) · [Compared](#how-it-compares) · [Tour](#a-tour) · [Everything it does](#everything-it-does) · [How it works](#how-it-works) · [Install](#install) · [FAQ](#faq) · [Build](#build-from-source)
+[Why](#why-it-exists) · [Compared](#how-it-compares) · [Tour](#a-tour) · [Everything it does](#everything-it-does) · [How it works](#how-it-works) · [Install](#install) · [FAQ](#faq)
 
 </sub>
 
@@ -368,7 +368,9 @@ Yes: the server list, the Workshop downloads and your friends come from the Stea
 
 ---
 
-## Build from source
+## Building (maintainer only)
+
+These notes are for the maintainer. The [licence](LICENSE) does not allow anyone else to build, modify or redistribute the launcher.
 
 Prerequisites: Node 24, Rust 1.98 or newer via rustup, Visual Studio 2022 Build Tools with the C++ x64 workload, and WebView2 (already part of Windows 11).
 
@@ -558,4 +560,4 @@ DayZ is a trademark of Bohemia Interactive. This project is not affiliated with 
 
 ## License
 
-**All rights reserved** ([LICENSE](LICENSE)). The source is public so you can read it, audit it and build it for your own use. Selling it, rebranding it, or redistributing it in any form needs written permission. Third-party components keep their own licences.
+**All rights reserved** ([LICENSE](LICENSE)). The source is public so it can be read, and the official releases can be installed and used; nothing else is permitted. Copying any part of it, building or modifying it, re-uploading it or its installer anywhere, and rebranding it all need written permission. Third-party components keep their own licences.
