@@ -20,6 +20,11 @@ Mark a row `IN PROGRESS` before starting it, and leave notes there if work stops
 | 9 | **Performance** at the current row counts (~40 000 cached servers) | done 2026-09-26 | D-284, released as v0.1.68: the name sort re-ranked every row on each new id (176 ms at 71 000); every flush re-read every row; start-up sent 36 MB of JSON; 5 more |
 | 10 | **Docs against code** | done 2026-09-27 | D-287, released as v0.1.70: docs/02 said to pass `-mod=` in RULES order, undoing D-265; the README, the site and Settings said the DZSA list is only fetched on request; docs/05's verification step and docs/06's details pane described things that do not exist; 99 comments cited the wrong decision; two log writes ran on the main thread; about 90 more, mostly docs |
 | 11 | **Accessibility** — report only: every item needs approval first | done 2026-09-27 | D-291, released as v0.1.72: server rows were read as unlabelled numbers; keyboard sorting was silent and lost the row; closing the details pane dropped focus to the page; the Mods chips and headers and the toast's close had no focus ring; 36 more. Approved: everything not visible, and visible 1–5, 9 and 10; declined 6, 7, 8 and 11 |
+| 12 | **Join path, second pass**: row 1's ground again, for what the changes since v0.1.55 broke (about 1 500 changed lines in the join dialog, the plan, the launch, the Workshop sync, junctions and the stores) | IN PROGRESS since 2026-09-27 08:31 UTC | |
+| 13 | **Memory at today's row counts** (Q28): the whole app read 358–364 MB against its 330 MB gate on v0.1.70 — what the renderer and the host hold per row, and what to cut or re-budget | todo | |
+| 14 | **Failure and recovery**: Steam closing or restarting, the network dropping, a full disk, a locked or corrupt cache or settings file — what the player sees and whether the app recovers without a restart | todo | |
+| 15 | **Settings, profiles and upgrades**: settings.json reads, writes and migrations, launch profiles, preferences across versions, the first start after an update | todo | |
+| 16 | **User experience** — report only: flows, wording and layout as a new player meets them; every item needs approval first | todo | |
 
 
 ## Waiting for approval (visual changes are never applied without it)
