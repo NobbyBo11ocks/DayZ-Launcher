@@ -57,8 +57,9 @@
     });
   });
 
-  // Coming back to the window checks for a release again once a day has passed, so a
-  // launcher left open learns of one without a restart (D-280).
+  // Coming back to the window checks for a release again once an hour has passed, so
+  // a launcher left open learns of one without a restart (D-280, D-300). A start always
+  // checks.
   $effect(() => {
     const onFocus = () => updates.focusCheck();
     window.addEventListener("focus", onFocus);

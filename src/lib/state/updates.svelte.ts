@@ -8,7 +8,11 @@ import { uiPrefs } from "./uiprefs.svelte";
 import { describe, logInfo, logWarn } from "../log";
 
 const LAST_CHECK_KEY = "dayz-launcher.update-check";
-const AUTO_CHECK_INTERVAL_MS = 24 * 3600 * 1000;
+/** How long after a check coming back to the window asks again. It was a day for the
+ *  start as well, and releases ship several times a day: most starts never learnt of one
+ *  until "Check for updates" was pressed (user report, D-300). A start always asks now;
+ *  the check is one small request for the release manifest. */
+const FOCUS_CHECK_INTERVAL_MS = 3600 * 1000;
 /** The whole download, not a gap between chunks (reqwest's `timeout`): 7.5 MB in
  *  30 minutes is 4 KB/s, slower than any connection that can play DayZ. */
 const DOWNLOAD_TIMEOUT_MS = 30 * 60_000;
@@ -22,15 +26,16 @@ class Updates {
 
   #autoRun: Promise<void> | null = null;
 
-  /** Silent startup check, at most once a day. One at a time and only from a settled
-   *  state: two calls close together ran two checks, and one during a download turned
-   *  "downloading" back into "checking" and then "available", putting the Install
-   *  button back beside a download still running (D-281). */
-  autoCheck(): Promise<void> {
-    return (this.#autoRun ??= this.#autoCheck().finally(() => (this.#autoRun = null)));
+  /** Silent check, at every start (D-300), and on coming back to the window once
+   *  `FOCUS_CHECK_INTERVAL_MS` has passed. One at a time and only from a settled state:
+   *  two calls close together ran two checks, and one during a download turned
+   *  "downloading" back into "checking" and then "available", putting the Install button
+   *  back beside a download still running (D-281). */
+  autoCheck(minGapMs = 0): Promise<void> {
+    return (this.#autoRun ??= this.#autoCheck(minGapMs).finally(() => (this.#autoRun = null)));
   }
 
-  async #autoCheck() {
+  async #autoCheck(minGapMs: number) {
     const settled = () => this.state === "idle" || this.state === "none";
     if (!settled()) return;
     await uiPrefs.ready;
@@ -42,15 +47,16 @@ class Updates {
     } catch {
       /* storage unavailable */
     }
-    if (Date.now() - last < AUTO_CHECK_INTERVAL_MS || !settled()) return;
+    if (Date.now() - last < minGapMs || !settled()) return;
     await this.checkNow(true);
   }
 
-  /** The start-up check again when the window comes back into focus, so a launcher left
-   *  open learns of a release without a restart; still at most once a day, and only from
-   *  a settled state, never over an offer, a download or an error on screen (D-280). */
+  /** The check again when the window comes back into focus, so a launcher left open
+   *  learns of a release without a restart; at most once an hour, and only from a
+   *  settled state, never over an offer, a download or an error on screen (D-280,
+   *  D-300). */
   focusCheck() {
-    if (this.state === "idle" || this.state === "none") void this.autoCheck();
+    if (this.state === "idle" || this.state === "none") void this.autoCheck(FOCUS_CHECK_INTERVAL_MS);
   }
 
   async checkNow(silent = false) {

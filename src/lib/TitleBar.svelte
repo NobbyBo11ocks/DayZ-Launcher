@@ -61,8 +61,10 @@
   .mark { flex: none; width: 18px; height: 20px; margin-right: -6px; }
   .spacer { flex: 1; height: 100%; }
   .controls { display: flex; height: 100%; }
-  .wbtn { all: unset; width: 40px; height: 100%; display: inline-flex; align-items: center; justify-content: center; color: var(--fg-muted); cursor: default; }
-  .wbtn:hover { background: var(--bg-row); color: var(--fg); }
+  /* In the accent like the counts and the greeting beside them (user request, D-300);
+     the hover is the raised surface, and close keeps Windows' red. */
+  .wbtn { all: unset; width: 40px; height: 100%; display: inline-flex; align-items: center; justify-content: center; color: var(--accent-ink); cursor: default; }
+  .wbtn:hover { background: var(--bg-row); }
   .wbtn.close:hover { background: #e81123; color: #fff; }
   .wbtn:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
 </style>
