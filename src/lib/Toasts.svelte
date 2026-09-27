@@ -8,7 +8,21 @@
     void openUrl(url).catch(() => {});
     news.dismissAlert(gid);
   }
+
+  /** Escape clears the stack. It stays until dismissed and sits over the top right of
+   *  every page, where it hid the Logs page's header controls, Mods' Rescan and Update
+   *  all, and Servers' Refresh — and the keyboard focus on them (WCAG 2.4.11, D-291).
+   *  Not while a dialog is open or a field is being typed in: those keep their Escape. */
+  function onKey(e: KeyboardEvent) {
+    if (e.key !== "Escape" || news.alerts.length === 0) return;
+    if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+    const t = e.target;
+    if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) return;
+    for (const n of [...news.alerts]) news.dismissAlert(n.gid);
+  }
 </script>
+
+<svelte:window onkeydown={onKey} />
 
 <!-- The container is always in the DOM: wrapping it in the `{#if}` meant the live
      region was created together with its content, and a region that appears already
@@ -19,10 +33,12 @@
         <div class="toast">
           <div class="text">
             <strong>DayZ update</strong>
-            <span class="muted">{n.title}</span>
+            <span class="muted" id="toast-{n.gid}">{n.title}</span>
           </div>
-          <button class="btn" onclick={() => read(n.gid, n.url)}>Read</button>
-          <button class="close" onclick={() => news.dismissAlert(n.gid)} aria-label="Dismiss">✕</button>
+          <!-- Each pair says which post it is for: up to three toasts stack, with the same
+               two buttons in each (D-291). -->
+          <button class="btn" onclick={() => read(n.gid, n.url)} aria-describedby="toast-{n.gid}">Read</button>
+          <button class="close" onclick={() => news.dismissAlert(n.gid)} aria-label="Dismiss" aria-describedby="toast-{n.gid}">✕</button>
         </div>
       {/each}
   {/if}
@@ -38,4 +54,7 @@
   .text strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .close { all: unset; cursor: pointer; color: var(--fg-muted); padding: 4px; }
   .close:hover { color: var(--fg); }
+  /* `all: unset` above outranks app.css's `button:focus-visible`, so the ring was never
+     drawn here; this is the same ring (D-291). */
+  .close:focus-visible { outline: 2px solid var(--accent-ink); border-radius: 4px; }
 </style>

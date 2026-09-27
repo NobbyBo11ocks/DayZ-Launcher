@@ -1,9 +1,10 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { mapLabel } from "./maps";
   // Virtualised server table (docs/05 §5, docs/06 §2): fixed 36 px rows, renders only
   // the viewport plus overscan, reports visible ids for verification, keyboard nav.
   import Flag from "./Flag.svelte";
-  import { clock, isInflated, isUnchecked, isUntrusted, queueOf, type ServerRow, trustedPlayers } from "./types";
+  import { clock, countryName, isInflated, isUnchecked, isUntrusted, queueOf, type ServerRow, trustedPlayers } from "./types";
   import { pingUnmeasured, type SortKey } from "./state/servers.svelte";
 
   let {
@@ -22,6 +23,8 @@
     empty,
     filterKey = "",
     inert = false,
+    label = "Servers",
+    onSearch,
   }: {
     rows: ServerRow[];
     selectedId: string | null;
@@ -47,10 +50,86 @@
     /** Changes only when the filters change, so a filter that swaps the rows under an
      *  unchanged viewport still re-arms on-demand verification (D-209). */
     filterKey?: string;
+    /** The grid's name: Favourites and LAN use this table too, and every one of them was
+     *  announced as "Servers" (D-291). */
+    label?: string;
+    /** "/" from the list moves to the page's search. Only while the list has focus: a
+     *  single-character key that works everywhere cannot be switched off (WCAG 2.1.4,
+     *  D-291). */
+    onSearch?: () => void;
   } = $props();
 
+  const uid = $props.id();
+  const fmt = new Intl.NumberFormat();
   const ROW = 36;
   const OVERSCAN = 8;
+
+  /** What the list says without being asked. A sort or a favourite from the keyboard
+   *  changed nothing a screen reader hears: `aria-sort` sits on headers that never take
+   *  focus (D-291). Always in the document, so a change is announced (D-224). */
+  let note = $state("");
+  /** Set by the keys that sort, so a sort from a header click stays quiet. */
+  let keyedSort = false;
+  $effect(() => {
+    const { key, dir } = sort;
+    if (!keyedSort) return;
+    keyedSort = false;
+    note = `Sorted by ${columns.find((c) => c.key === key)?.label ?? key}, ${dir === 1 ? "ascending" : "descending"}.`;
+    // The selected row keeps its place on screen: after a sort it could be thousands
+    // of rows away, with `aria-activedescendant` naming a row that was not rendered.
+    untrack(() => {
+      if (selectedId) ensureVisible(selectedId);
+    });
+  });
+  // How many rows a filter or search leaves, a second after it settles: D-250 removed the
+  // count from the screen, and nothing was said at all. Keyed on the filters only, so the
+  // batches of a refresh stay silent; an empty result is said by the message below.
+  let countTimer: ReturnType<typeof setTimeout> | undefined;
+  let filtersSeen = false;
+  $effect(() => {
+    void filterKey;
+    if (!filtersSeen) {
+      filtersSeen = true;
+      return;
+    }
+    clearTimeout(countTimer);
+    countTimer = setTimeout(() => {
+      const n = untrack(() => rows.length);
+      note = n > 0 ? `${fmt.format(n)} server${n === 1 ? "" : "s"}.` : "";
+    }, 1000);
+    return () => clearTimeout(countTimer);
+  });
+
+  /** A row as a screen reader hears it. Focus stays on the grid and the rows are named
+   *  from their content, which began with the star's label, ran the numbers together
+   *  with no column names, and left out every tooltip: the verdict, "not verified yet",
+   *  the version mismatch, the friends' names and the ping band (D-291). */
+  function rowLabel(r: ServerRow, mods: number | undefined): string {
+    const untrusted = isUntrusted(r);
+    const unchecked = isUnchecked(r);
+    const queue = queueOf(r);
+    const friends = friendsOn?.get(r.id);
+    const mismatch = localVersion != null && r.version !== localVersion;
+    return [
+      r.name,
+      mapLabel(r.map),
+      `${unchecked ? r.players : trustedPlayers(r)} of ${r.maxPlayers} players` +
+        (untrusted ? ", count not trusted" : unchecked ? ", not verified yet" : "") +
+        (queue ? `, ${queue} in the queue` : ""),
+      pingUnmeasured(r) ? "ping not measured" : `ping ${r.pingMs} ms, ${pingWord(r.pingMs)}`,
+      mods === undefined ? (r.tags.modded ? "modded, mod list not scanned yet" : "mod list not scanned yet") : mods === 0 ? "no mods" : `${mods} mod${mods === 1 ? "" : "s"}`,
+      r.tags.timeMinutes != null ? `time ${clock(r.tags.timeMinutes)}` : "",
+      `version ${r.version}${mismatch ? `, not your version ${localVersion}` : ""}`,
+      r.password ? "password" : "",
+      r.tags.firstPersonOnly ? "first person only" : "",
+      r.tags.dlc ? "needs DLC" : "",
+      friends?.length ? `friends here: ${friends.join(", ")}` : "",
+      favourites.has(r.id) ? "favourite" : "",
+      r.country ? countryName(r.country) : "",
+    ]
+      .filter(Boolean)
+      .join(", ");
+  }
 
   let body = $state<HTMLDivElement | null>(null);
   let scrollTop = $state(0);
@@ -128,10 +207,17 @@
       }
       return;
     }
+    if (e.key === "/" && onSearch) {
+      e.preventDefault();
+      onSearch();
+      return;
+    }
     // A bare F only: Ctrl+F and Alt+F used to toggle the favourite too (D-248).
     if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.altKey && !e.metaKey) {
       if (selectedId) {
         e.preventDefault();
+        const name = rows.find((r) => r.id === selectedId)?.name ?? "The server";
+        note = `${name} ${favourites.has(selectedId) ? "removed from" : "added to"} favourites.`;
         onFavourite(selectedId);
       }
       return;
@@ -143,11 +229,15 @@
       e.preventDefault();
       const i = columns.findIndex((c) => c.key === sort.key);
       const next = columns[(i + (e.key === "ArrowRight" ? 1 : columns.length - 1)) % columns.length];
-      if (next) onSort(next.key);
+      if (next) {
+        keyedSort = true;
+        onSort(next.key);
+      }
       return;
     }
     if (e.key === " ") {
       e.preventDefault();
+      keyedSort = true;
       onSort(sort.key);
       return;
     }
@@ -195,14 +285,15 @@
   const pingClass = (ms: number) => (ms < 60 ? "ok" : ms >= 120 ? "warn" : "");
   /** Ping quality in words: the colour alone said it, which is not available to a
    *  screen reader and not distinguishable to everyone else (D-198). */
-  const pingTitle = (ms: number) => `${ms} ms — ${ms < 60 ? "good" : ms >= 120 ? "far away" : "usable"}`;
+  const pingWord = (ms: number) => (ms < 60 ? "good" : ms >= 120 ? "far away" : "usable");
+  const pingTitle = (ms: number) => `${ms} ms — ${pingWord(ms)}`;
 </script>
 
 <!-- Roving selection on the grid: the grid takes focus, arrow keys move the selected row. -->
 <!-- `aria-activedescendant` is what makes arrow-key movement audible: focus never
      leaves the container, so without it the selection moved silently (D-224).
-     `aria-rowcount` counts the header, which is row 1, and an empty grid reports -1
-     (unknown) rather than an invalid 0. -->
+     `aria-rowcount` counts the header, which is row 1, so an empty grid has one row: it
+     said -1, "unknown", about a list that was known to be empty (D-291). -->
 <!-- One element for the host's grid. The table and its empty-state message were two, and
      with the details pane open the message took the pane's column and pushed the pane
      into a second row under the table (D-256). -->
@@ -210,8 +301,9 @@
 <div
   class="table"
   role="grid"
-  aria-rowcount={rows.length === 0 ? -1 : rows.length + 1}
-  aria-label="Servers"
+  aria-rowcount={rows.length + 1}
+  aria-label={label}
+  aria-describedby={rows.length === 0 && empty ? `${uid}-keys ${uid}-empty` : `${uid}-keys`}
   aria-activedescendant={selectedId ? `row-${selectedId}` : undefined}
   tabindex="0"
   onkeydown={onKey}
@@ -222,11 +314,14 @@
     if (e.target !== e.currentTarget) (e.currentTarget as HTMLElement).focus({ preventScroll: true });
   }}
 >
+  <!-- A column header holding a button: a button cannot take the columnheader role and
+       keep being a button (D-291). Still out of the tab order; the grid sorts from the
+       keyboard (D-198). -->
   <div class="head" role="row" aria-rowindex="1">
     {#each columns as c (c.key)}
-      <button class="th {c.cls}" role="columnheader" tabindex="-1" aria-sort={sort.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : "none"} onclick={() => onSort(c.key)}>
-        {c.label}<span aria-hidden="true">{sortMark(c.key)}</span>
-      </button>
+      <div class="th {c.cls}" role="columnheader" aria-sort={sort.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : "none"}>
+        <button tabindex="-1" onclick={() => onSort(c.key)}>{c.label}<span aria-hidden="true">{sortMark(c.key)}</span></button>
+      </div>
     {/each}
   </div>
 
@@ -255,6 +350,7 @@
             id="row-{r.id}"
             aria-rowindex={start + i + 2}
             aria-selected={r.id === selectedId}
+            aria-label={rowLabel(r, mods)}
             onclick={(e) => {
               // A click on the selected row clears the selection and collapses the
               // details pane. The second click of a double-click (detail 2) is ignored
@@ -271,7 +367,7 @@
               <button
                 class="star"
                 class:on={favourites.has(r.id)}
-                aria-label={favourites.has(r.id) ? "Remove from favourites" : "Add to favourites"}
+                aria-label="Favourite"
                 aria-pressed={favourites.has(r.id)}
                 tabindex="-1"
                 onclick={(e) => {
@@ -371,9 +467,12 @@
      only, so a bare paragraph inside was liable to be pruned from the accessibility
      tree - and then filtering everything away left a screen-reader user with an empty
      grid and no explanation, which is the failure D-189 set out to fix (D-224). -->
-{#if rows.length === 0 && empty}
-  <p class="no-rows" role="status">{empty}</p>
-{/if}
+<!-- Always in the document and filled only while the grid is empty: created together
+     with its text, a status region is often not announced at all, which is the pattern
+     D-224 removed from the toasts (D-291). Empty, it has no box. -->
+<p class="no-rows" id="{uid}-empty" role="status">{rows.length === 0 && empty ? empty : ""}</p>
+<span class="sr-only" role="status">{note}</span>
+<span class="sr-only" id="{uid}-keys">Up and Down Arrow choose a server, Enter joins it, F adds or removes a favourite, Left and Right Arrow change the sort column, Space reverses it{onSearch ? ", slash moves to the search" : ""}, Escape closes the details.</span>
 </div>
 
 <style>
@@ -387,12 +486,15 @@
   .head, .row { display: grid; grid-template-columns: minmax(200px, 1fr) 130px 52px 96px 56px 80px 76px; align-items: center; }
   .head { border-bottom: 1px solid var(--border); background: var(--bg); }
   /* Accent, like the title-bar counts (user request, D-177). */
-  .th { all: unset; cursor: pointer; padding: 0 8px; height: 30px; display: flex; align-items: center; color: var(--accent-ink); font-weight: 500; white-space: nowrap; }
-  .th:hover { filter: brightness(1.15); }
-  .th:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
+  /* The cell is the column header and the button inside fills it, so the whole cell
+     still sorts on a click and looks as it did when the button was the cell (D-291). */
+  .th { display: flex; min-width: 0; }
+  .th button { all: unset; box-sizing: border-box; flex: 1; min-width: 0; cursor: pointer; padding: 0 8px; height: 30px; display: flex; align-items: center; color: var(--accent-ink); font-weight: 500; white-space: nowrap; }
+  .th button:hover { filter: brightness(1.15); }
+  .th button:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
   /* A header is a flex box, so the column's `text-align` never reached it: Mods,
      Players and Ping sat at the left over numbers aligned right (D-256). */
-  .th.c-num { justify-content: flex-end; }
+  .th.c-num button { justify-content: flex-end; }
   /* The header is a separate grid from the body, so the body always reserves the
      scrollbar and the header matches it with padding. `scrollbar-gutter` on the header
      did nothing — it only applies to scroll containers — which left every column from

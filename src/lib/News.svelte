@@ -115,20 +115,22 @@
 
 <section class="home">
   <div class="bar">
-    <h2>{news.view === "updates" ? "Latest updates" : "Latest from DayZ"}</h2>
+    <!-- The page's heading, drawn as before (D-291). -->
+    <h1>{news.view === "updates" ? "Latest updates" : "Latest from DayZ"}</h1>
     <div class="seg" role="group" aria-label="Which posts to show">
       {#each VIEWS as v (v.id)}
         <button class="segbtn" class:on={news.view === v.id} aria-pressed={news.view === v.id} title={v.title} onclick={() => (news.view = v.id)}>{v.label}</button>
       {/each}
     </div>
-    {#if news.error}<span class="error">{news.error}</span>{/if}
+    {#if news.error}<span class="error" role="alert">{news.error}</span>{/if}
   </div>
 
   <div class="scroll">
     {#if featured}
       <article class="featured" class:update={featured.update}>
         {#if thumb(featured, true)}
-          <button class="media" onclick={() => (featured.video ? play(featured) : open(featured.url))} aria-label={featured.video ? "Play the video" : "Open the post"}>
+          <!-- Out of the Tab order: its Play and Read buttons below do the same (D-291). -->
+          <button class="media" tabindex="-1" onclick={() => (featured.video ? play(featured) : open(featured.url))} aria-label={featured.video ? `Play the video: ${featured.title}` : `Open the post: ${featured.title}`}>
             <img src={thumb(featured, true)} alt="" onerror={() => broken.add(featured.gid)} />
             {#if featured.video}<span class="play" aria-hidden="true"></span>{/if}
           </button>
@@ -156,7 +158,9 @@
         {#each rest as n (n.gid)}
           <article class="card" class:update={n.update}>
             {#if thumb(n)}
-              <button class="media" onclick={() => (n.video ? play(n) : open(n.url))} aria-label={n.video ? "Play the video" : "Open the post"}>
+              <!-- Named for its post: every card's picture was "Play the video" or "Open the
+                   post", ahead of the card's heading (D-291). -->
+              <button class="media" onclick={() => (n.video ? play(n) : open(n.url))} aria-label={n.video ? `Play the video: ${n.title}` : `Open the post: ${n.title}`}>
                 <img src={thumb(n)} alt="" loading="lazy" onerror={() => broken.add(n.gid)} />
                 {#if n.video}<span class="play small" aria-hidden="true"></span>{/if}
               </button>
@@ -216,6 +220,10 @@
         allowfullscreen
         referrerpolicy="strict-origin-when-cross-origin"
       ></iframe>
+      <!-- Keys pressed inside YouTube's frame never reach this page, so Tab past its last
+           control left the player for the page behind it; this catches it (D-291). -->
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <span tabindex="0" onfocus={() => closeBtn?.focus()}></span>
     </div>
   </div>
 {/if}
@@ -233,11 +241,13 @@
   .player iframe { width: 100%; aspect-ratio: 16 / 9; max-height: 74vh; border: 0; border-radius: 12px; background: #000; box-shadow: 0 24px 60px rgb(0 0 0 / 0.5); }
 
   .bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12.5px; }
-  .bar h2 { margin: 0 4px 0 0; font-size: 12px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .bar h1 { margin: 0 4px 0 0; font-size: 12px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.06em; }
   .seg { display: inline-flex; padding: 2px; border-radius: var(--radius); background: var(--bg-row); border: 1px solid var(--border-control); }
   .segbtn { all: unset; cursor: pointer; padding: 4px 11px; border-radius: 8px; color: var(--fg-muted); font-size: 12px; font-weight: 500; }
   .segbtn:hover { color: var(--fg); }
-  .segbtn.on { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
+  /* `--selected-edge` is set only for the light theme's lime, amber, red and green: lime's
+     fill measured 2.73:1 against the track (app.css, D-291). */
+  .segbtn.on { background: var(--accent); color: var(--accent-fg); font-weight: 600; box-shadow: inset 0 0 0 1px var(--selected-edge, transparent); }
   .segbtn:focus-visible { outline: 2px solid var(--accent-ink); }
   .segbtn.on:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 
@@ -251,6 +261,9 @@
   .media img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 150ms; }
   .media:hover img { transform: scale(1.03); }
   .media:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
+  /* A dark band inside the ring, so it holds on any picture: a lime ring on foliage
+     all but disappeared (D-291). */
+  .media:focus-visible::after { content: ""; position: absolute; inset: 2px; border: 2px solid var(--bg); pointer-events: none; }
   .play { position: absolute; inset: 0; margin: auto; width: 56px; height: 56px; border-radius: 50%; background: rgba(0, 0, 0, 0.55); border: 2px solid rgba(255, 255, 255, 0.85); backdrop-filter: blur(2px); }
   .play::after { content: ""; position: absolute; left: 21px; top: 16px; border-style: solid; border-width: 10px 0 10px 17px; border-color: transparent transparent transparent #fff; }
   .play.small { width: 40px; height: 40px; }

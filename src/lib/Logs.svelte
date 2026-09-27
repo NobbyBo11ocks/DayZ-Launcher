@@ -145,12 +145,15 @@
   }
 
   // Live while the page is open: one read every few seconds is cheaper than a
-  // subscription and the list is only 400 entries.
+  // subscription and the list is only 400 entries. Not while the keyboard is in the
+  // list: newest first, each new entry moved every line under a screen reader's cursor
+  // down by one (WCAG 2.2.2, D-291).
+  let listEl = $state<HTMLElement | null>(null);
   $effect(() => {
     void loadSettings();
     void load();
     const t = setInterval(() => {
-      if (recording) void load();
+      if (recording && !listEl?.contains(document.activeElement)) void load();
     }, 5000);
     return () => clearInterval(t);
   });
@@ -169,16 +172,19 @@
       <button class="chip" class:on={recording} onclick={() => void setRecording(!recording)} title="Keep a local record of what the launcher does">
         {recording ? "Recording" : "Paused"}
       </button>
-      <button class="chip" class:on={onlyProblems} onclick={() => (onlyProblems = !onlyProblems)} disabled={!recording || !settings}>
-        {onlyProblems ? "Problems only" : "Everything"}
+      <!-- One label and a pressed state: the label swapped between "Everything" and
+           "Problems only", which said the state only to someone who remembered the other
+           word (user-approved, D-291). -->
+      <button class="chip" class:on={onlyProblems} aria-pressed={onlyProblems} onclick={() => (onlyProblems = !onlyProblems)} disabled={!recording || !settings}>
+        Problems only
       </button>
       <button class="chip" onclick={copy} disabled={!shown.length}>{copied ? "Copied" : "Copy"}</button>
       <button class="chip" onclick={reveal} disabled={!logPath} title={logPath ?? ""}>Show the file</button>
     </div>
   </header>
 
-  {#if settingsError}<p class="note bad">{settingsError}</p>{/if}
-  {#if error}<p class="note bad">{error}</p>{/if}
+  {#if settingsError}<p class="note bad" role="alert">{settingsError}</p>{/if}
+  {#if error}<p class="note bad" role="alert">{error}</p>{/if}
 
   <!-- One chip per area; switching one off stops it being recorded at all, in the
        file as well as here (D-172). -->
@@ -191,7 +197,11 @@
     {/each}
   </div>
 
-  <div class="list">
+  <!-- A named region Tab can reach, so the entries can be scrolled and read from the
+       keyboard; not `role="log"`, which with these unkeyed rows would read out every
+       line that changes (D-176, D-291). -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <div class="list" role="region" aria-label="Log entries" tabindex="0" bind:this={listEl}>
     {#if shown.length}
       <!-- Unkeyed on purpose (D-176): newest first means one new entry shifts every
            index, so a key made Svelte destroy and rebuild all 400 rows on each poll.
@@ -234,6 +244,7 @@
   .note.bad { color: var(--danger); }
 
   .list { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); padding: 4px 0; }
+  .list:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
   .line { display: grid; grid-template-columns: 70px 46px 96px minmax(0, 1fr); gap: 10px; padding: 1px 10px; font-family: Consolas, "Cascadia Mono", monospace; font-size: 11.5px; line-height: 1.55; }
   .line:hover { background: var(--bg-row); }
   .t { color: var(--fg-muted); }

@@ -6,6 +6,7 @@
   // Every command through the logging wrapper: a failure is recorded with its
   // command name before it is rethrown (D-158/D-165).
   import { listen } from "@tauri-apps/api/event";
+  import { tick } from "svelte";
   import { invokeLogged as invoke } from "./log";
   import Flag from "./Flag.svelte";
   import Sparkline from "./Sparkline.svelte";
@@ -24,7 +25,24 @@
   function openSibling(id: string) {
     servers.selectedId = id;
     if (shows && !shows(id)) servers.navigate = "servers";
+    // The chosen sibling leaves this list (it is the selected server now) and takes the
+    // focus with it; the pane's heading, the new server's name, takes it instead (D-291).
+    else void tick().then(() => titleEl?.focus());
   }
+
+  let titleEl = $state<HTMLElement | null>(null);
+  // Every way the pane closes — its ✕, Escape, taking the star off on Favourites, a
+  // prune — removes whatever in it had focus, and focus fell to <body>, where the list's
+  // keys do nothing: the list takes it back (D-291). Svelte removes the pane's elements
+  // before this runs, so "focus was in the pane" reads as "focus is on <body>", which is
+  // also the only case where moving it takes it from nowhere; tracking focus events
+  // instead missed every change made while the window was in the background.
+  $effect(() => () => {
+    queueMicrotask(() => {
+      if (!document.activeElement || document.activeElement === document.body)
+        document.querySelector<HTMLElement>('main [role="grid"]')?.focus();
+    });
+  });
 
   // The effects below key on these primitives, never on `row` itself: every
   // verification (including the one `server_details` publishes) replaces the row
@@ -275,14 +293,17 @@
     v.verdict === "verified" && v.reason.startsWith("INFO reports 0") ? "Empty server" : verdictLabel[v.verdict];
   const fmtDur = (s: number) => (s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} m` : `${Math.floor(s / 60)} m`);
 
+  /** A refused copy said nothing at all; its button's name says so now (D-291). */
+  let copyFailed = $state(false);
   async function copyAddress() {
     if (!row) return;
     try {
       await navigator.clipboard.writeText(`${row.ip}:${row.gamePort}`);
+      copyFailed = false;
       copied = true;
       setTimeout(() => (copied = false), 1200);
     } catch {
-      /* clipboard blocked */
+      copyFailed = true;
     }
   }
 </script>
@@ -303,21 +324,23 @@
     {@const versionOk = !localVersion || row.version === localVersion}
 
     <header class="head">
-      <h2 title={row.name}>{row.name}</h2>
+      <h2 title={row.name} tabindex="-1" bind:this={titleEl}>{row.name}</h2>
       <div class="meta">
-        {#if row.country}<span class="chip"><Flag code={row.country} /> {countryName(row.country)}</span>{/if}
+        {#if row.country}<span class="chip"><Flag code={row.country} decorative /> {countryName(row.country)}</span>{/if}
         <span class="chip" title={row.map}>{mapLabel(row.map)}</span>
         <span class="chip" class:bad={!versionOk} title={versionOk ? "Server version" : `Server version differs from your DayZ_x64.exe (${localVersion})`}>v{row.version}{#if !versionOk} ≠ mine{/if}</span>
         {#if row.password}<span class="chip">🔒 password</span>{/if}
       </div>
       <div class="addr">
         <code>{row.ip}:{row.gamePort}</code>
-        <button class="link" onclick={copyAddress}>{copied ? "copied" : "copy"}</button>
+        <button class="link" onclick={copyAddress} aria-label={copied ? "Address copied" : copyFailed ? "Copy address; the clipboard refused it" : "Copy address"}>{copied ? "copied" : "copy"}</button>
         <span class="muted">· query {row.queryPort}</span>
       </div>
       <div class="actions">
         <button class="join" onclick={() => (servers.joiningId = row.id)} title="Check mods, download what is missing, and start DayZ">Join</button>
-        <button class="star" aria-label={servers.favourites.has(row.id) ? "Remove from favourites" : "Add to favourites"} class:on={servers.favourites.has(row.id)} onclick={() => servers.toggleFavourite(row.id)} aria-pressed={servers.favourites.has(row.id)} title="Favourite (F)">
+        <!-- One name and a pressed state: a name that flipped with the state read
+             "Remove from favourites, toggle button, pressed" (D-291). -->
+        <button class="star" aria-label="Favourite" class:on={servers.favourites.has(row.id)} onclick={() => servers.toggleFavourite(row.id)} aria-pressed={servers.favourites.has(row.id)} title="Favourite (F)">
           {servers.favourites.has(row.id) ? "★" : "☆"}
         </button>
         <!-- Below 1300 px the pane is an overlay; without this its only exit by mouse
@@ -391,7 +414,7 @@
       <section>
         <h3>Description</h3>
         <p class="desc" class:clamped={descLong && !fullDesc}>{description}</p>
-        {#if descLong}<button class="link" onclick={() => (fullDesc = !fullDesc)}>{fullDesc ? "less" : "more"}</button>{/if}
+        {#if descLong}<button class="link" onclick={() => (fullDesc = !fullDesc)} aria-expanded={fullDesc}>{fullDesc ? "less" : "more"}</button>{/if}
       </section>
     {/if}
 
@@ -409,7 +432,7 @@
           {/each}
         </ul>
         {#if siblings.length > SIBLINGS_SHOWN}
-          <button class="link" onclick={() => (allSiblings = !allSiblings)}>{allSiblings ? "Show fewer" : `Show all ${siblings.length}`}</button>
+          <button class="link" onclick={() => (allSiblings = !allSiblings)} aria-expanded={allSiblings}>{allSiblings ? "Show fewer" : `Show all ${siblings.length}`}</button>
         {/if}
       </section>
     {/if}
@@ -438,13 +461,15 @@
           {#each shownMods as m, i (`${m.workshopId}#${i}`)}
             <li class:missing={installed && m.workshopId > 0 && !installed.has(m.workshopId)}>
               <span class="tick" aria-hidden="true">{installed && m.workshopId > 0 ? (installed.has(m.workshopId) ? "✓" : "○") : "·"}</span>
+              <!-- The tick and the colour were the only difference (D-291). -->
+              {#if installed && m.workshopId > 0}<span class="sr-only">{installed.has(m.workshopId) ? "installed" : "missing"}, </span>{/if}
               <span class="mname" title={m.name}>{m.name}</span>
-              <a class="mid" href="https://steamcommunity.com/sharedfiles/filedetails/?id={m.workshopId}" onclick={external} title="Open in the Steam Workshop">{m.workshopId}</a>
+              <a class="mid" href="https://steamcommunity.com/sharedfiles/filedetails/?id={m.workshopId}" onclick={external} title="Open in the Steam Workshop" aria-label="{m.workshopId}, {m.name}, on the Steam Workshop">{m.workshopId}</a>
             </li>
           {/each}
         </ul>
         {#if mods.length > MODS_COLLAPSED}
-          <button class="link" onclick={() => (allMods = !allMods)}>{allMods ? "Show fewer" : `Show all ${mods.length}`}</button>
+          <button class="link" onclick={() => (allMods = !allMods)} aria-expanded={allMods}>{allMods ? "Show fewer" : `Show all ${mods.length}`}</button>
         {/if}
       {/if}
     </section>
@@ -468,7 +493,7 @@
       </section>
     {/if}
 
-    {#if error}<p class="error">{error}</p>{/if}
+    {#if error}<p class="error" role="alert">{error}</p>{/if}
   {/if}
 </aside>
 
@@ -478,6 +503,8 @@
 
   .head { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
   .head h2 { font-size: 15px; font-weight: 600; line-height: 1.3; margin: 0; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  /* Focused only from code, to hold the place (D-291). */
+  .head h2:focus { outline: none; }
   .meta { display: flex; flex-wrap: wrap; gap: 4px; }
   .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border-control); background: var(--bg-elev); color: var(--fg-muted); max-width: 100%; }
   .chip.bad { color: var(--warn); border-color: var(--warn); }

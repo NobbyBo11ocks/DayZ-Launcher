@@ -4,6 +4,7 @@
   // without page scrolling (D-094, D-180).
   // Every command through the logging wrapper: a failure is recorded with its
   // command name before it is rethrown (D-158).
+  import { tick } from "svelte";
   import { invokeLogged as invoke } from "./log";
   import { external } from "./external";
   import { ACCENTS, prefs, type Theme } from "./state/prefs.svelte";
@@ -24,6 +25,10 @@
   // progress (D-280): the update restarts only the launcher, but a player in a game or
   // waiting on a download should know before it goes. A check that fails does not block.
   let installWarning = $state<string | null>(null);
+  // The question replaces the button that was pressed, so focus goes to its safe answer,
+  // and back to "Install and restart" on No, instead of falling to <body> (D-291).
+  let installBtn = $state<HTMLButtonElement | null>(null);
+  let noBtn = $state<HTMLButtonElement | null>(null);
   async function askInstall() {
     let game = false;
     try {
@@ -42,10 +47,17 @@
         : game
           ? "DayZ is running; it keeps running while the launcher restarts."
           : "A mod download is in progress; Steam finishes it on its own.";
+    await tick();
+    noBtn?.focus();
   }
   function confirmInstall() {
     installWarning = null;
     void updates.install();
+  }
+  async function declineInstall() {
+    installWarning = null;
+    await tick();
+    installBtn?.focus();
   }
 
   let launch = $state<Settings | null>(null);
@@ -223,8 +235,8 @@
             <label class="row">
               <span class="label">Idle release</span>
               <span class="inline">
-                after <input class="text num" type="number" min="0" max="1440" step="1" bind:value={launch.steamIdleMinutes} onchange={saveIdle} aria-label="Minutes before the Steam session is released" /> min
-                <span class="muted">0 = stay connected</span>
+                after <input class="text num" type="number" min="0" max="1440" step="1" bind:value={launch.steamIdleMinutes} onchange={saveIdle} aria-label="Idle release, minutes" aria-describedby="idle-zero" /> min
+                <span class="muted" id="idle-zero">0 = stay connected</span>
               </span>
             </label>
             <p class="note">Steam counts playtime while connected. Releasing stops that; it reconnects by itself when needed.</p>
@@ -249,14 +261,17 @@
               {#if updates.state === "available"}
                 <span>Version {updates.version} is available.</span>
                 {#if installWarning}
-                  <span class="warn">{installWarning} Install and restart now?</span>
-                  <button class="chip accent" onclick={confirmInstall}>Yes</button>
-                  <button class="chip" onclick={() => (installWarning = null)}>No</button>
+                  <span class="warn" id="install-q">{installWarning} Install and restart now?</span>
+                  <button class="chip accent" onclick={confirmInstall} aria-describedby="install-q">Yes</button>
+                  <button class="chip" bind:this={noBtn} onclick={declineInstall} aria-describedby="install-q">No</button>
                 {:else}
-                  <button class="chip accent" onclick={askInstall}>Install and restart</button>
+                  <button class="chip accent" bind:this={installBtn} onclick={askInstall}>Install and restart</button>
                 {/if}
               {/if}
-              {#if updates.state === "downloading"}<span class="muted">Downloading… {updates.progress}%</span>{/if}
+              <!-- The figure changes on every downloaded chunk, and inside this live region
+                   it was read out about a hundred times an update; the words are enough
+                   (D-291). -->
+              {#if updates.state === "downloading"}<span class="muted">Downloading…<span aria-hidden="true"> {updates.progress}%</span></span>{/if}
               {#if updates.state === "ready"}<span class="ok">Installed, restarting…</span>{/if}
               {#if updates.error}<span class="error" role="alert">{updates.error}</span>{/if}
             </span>
@@ -285,7 +300,7 @@
             <label class="check"><input type="checkbox" bind:checked={launch.noPause} onchange={scheduleSave} /> <span>Keep running when unfocused <code>-noPause</code></span></label>
             <label class="row">
               <span class="label">Extra args</span>
-              <input class="text mono" type="text" bind:value={launch.extraArgs} oninput={scheduleSave} placeholder="-profiles=&quot;D:\Profiles&quot; -limitFPS=144" aria-label="Extra launch arguments" />
+              <input class="text mono" type="text" bind:value={launch.extraArgs} oninput={scheduleSave} placeholder="-profiles=&quot;D:\Profiles&quot; -limitFPS=144" />
             </label>
 
             <h3>Saved profiles</h3>
@@ -360,7 +375,9 @@
 
   .chip { all: unset; cursor: pointer; padding: 5px 11px; border-radius: var(--radius); border: 1px solid var(--border-control); color: var(--fg-muted); font-size: 12.5px; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
   .chip:hover { border-color: var(--accent); color: var(--fg); }
-  .chip.on { background: color-mix(in srgb, var(--accent) 22%, var(--bg-row)); color: var(--fg); border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
+  /* `--selected-edge` is set only for the light theme's lime, amber, red and green, whose
+     mixed edge fell under 3:1 against the page (app.css, D-291). */
+  .chip.on { background: color-mix(in srgb, var(--accent) 22%, var(--bg-row)); color: var(--fg); border-color: var(--selected-edge, color-mix(in srgb, var(--accent) 60%, var(--border))); }
   /* The primary action of its card, so it wears the accent (user request, D-180). */
   .chip.accent { background: var(--accent); color: var(--accent-fg); border-color: transparent; font-weight: 600; }
   .chip.accent:hover { filter: brightness(1.08); color: var(--accent-fg); }
@@ -374,7 +391,10 @@
   .dot { all: unset; box-sizing: border-box; cursor: pointer; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.25); transition: transform 120ms ease; }
   .dot:hover { transform: scale(1.15); }
   .dot.on { box-shadow: 0 0 0 2px var(--bg-elev), 0 0 0 4px var(--accent); }
-  .dot:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 3px; }
+  /* In the text colour and outside the selection ring: focus only ever sits on the
+     selected dot (roving tabindex), and an accent ring 1 px past an accent ring was the
+     same colour, so the only sign of focus was a ring a pixel wider (D-291). */
+  .dot:focus-visible { outline: 2px solid var(--fg); outline-offset: 5px; }
 
   .check { display: flex; align-items: center; gap: 9px; cursor: pointer; font-size: 12.5px; }
   .check input { accent-color: var(--accent); flex: none; }

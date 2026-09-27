@@ -1,6 +1,6 @@
 <script lang="ts">
   import { listen } from "@tauri-apps/api/event";
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
   import { describe, installErrorHooks, logError } from "./lib/log";
   import Favourites from "./lib/Favourites.svelte";
   import FilterPanel from "./lib/FilterPanel.svelte";
@@ -92,6 +92,9 @@
     } catch {
       /* ignore */
     }
+    // The overlay took the focused button with it, and the next Tab started at the
+    // title bar's window buttons: the open section takes the focus instead (D-291).
+    void tick().then(() => document.querySelector<HTMLElement>('.rail-item[aria-current="page"]')?.focus());
   }
 
   // Theme/accent to <html> and storage whenever they change.
@@ -137,11 +140,19 @@
   const listViews: ReadonlySet<Section> = new Set<Section>(["servers", "lan", "favourites", "friends"]);
 
   // A view can ask for a section switch (Mods → Servers with a mod filter, D-080).
+  // The switch takes that view, and the focus in it, away: focus goes to the new page's
+  // list, or to its section in the rail, rather than to <body> (D-291).
+  let mainEl = $state<HTMLElement | null>(null);
   $effect(() => {
     const want = servers.navigate;
     if (want && sections.some((s: { id: string }) => s.id === want)) {
+      const hadFocus = untrack(() => mainEl)?.contains(document.activeElement) ?? false;
       active = want as Section;
       servers.navigate = null;
+      if (hadFocus)
+        void tick().then(() =>
+          (untrack(() => mainEl)?.querySelector<HTMLElement>('[role="grid"]') ?? document.querySelector<HTMLElement>('.rail-item[aria-current="page"]'))?.focus(),
+        );
     }
   });
 </script>
@@ -190,7 +201,7 @@
         class="rail-item update"
         onclick={() => (active = "settings")}
         title="Version {updates.version} is ready to install — opens Settings"
-        aria-label="Update {updates.version} is available; open Settings to install it"
+        aria-label="Update Available: version {updates.version}, opens Settings"
       >
         <RailIcon name="update" />
         <span class="text">Update Available</span>
@@ -198,7 +209,7 @@
     {/if}
   </div>
 
-  <main class="content" class:padded={!listViews.has(active)}>
+  <main class="content" class:padded={!listViews.has(active)} bind:this={mainEl}>
     <!-- One page failing must not blank the whole window (D-165): the boundary keeps
          the title bar and the sidebar alive so the user can switch away, and the
          error reaches launcher.log like any other. Keyed on the section, because a

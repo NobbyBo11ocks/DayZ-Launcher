@@ -77,17 +77,15 @@
     // The join dialog is modal; the page behind it must not act on keys (D-184).
     if (servers.joiningId) return;
     const target = e.target;
-    // Only a field that takes text keeps "/" and Escape. The Status filters became
-    // checkboxes in D-249, and a click on one left both keys dead while it had focus
-    // (D-256).
+    // Only a field that takes text keeps Escape. The Status filters became checkboxes
+    // in D-249, and a click on one left the key dead while it had focus (D-256). "/"
+    // is the list's own key now: pressed anywhere on the page it could not be switched
+    // off (WCAG 2.1.4, D-291).
     const typing =
       target instanceof HTMLTextAreaElement ||
       target instanceof HTMLSelectElement ||
       (target instanceof HTMLInputElement && !NON_TEXT_INPUTS.has(target.type));
-    if (e.key === "/" && !typing) {
-      e.preventDefault();
-      focusSearch();
-    } else if (e.key === "Escape" && connectOpen) {
+    if (e.key === "Escape" && connectOpen) {
       closeConnect();
     } else if (e.key === "Escape" && !typing && servers.selectedId) {
       // The grid closes the pane on Escape only while it has focus; after a click on
@@ -131,6 +129,8 @@
   // what must not be announced (D-224).
   const announcement = $derived.by(() => {
     if (servers.error) return servers.error;
+    // The header's notice, said once when it appears (D-291).
+    if (servers.steam && !servers.steam.initialized) return "Steam is not running; the launcher connects as soon as it starts.";
     const v = servers.verifySummary;
     if (v?.skipped) return "Verification deferred; a pass is already running.";
     if (v) return `${fmt.format(v.verified)} verified, ${fmt.format(v.inflated + v.unverifiable + v.synthetic)} fake, ${v.offline} offline.`;
@@ -143,6 +143,8 @@
 <svelte:window onkeydown={onKey} />
 
 <div class="servers">
+  <!-- The page's name for the headings list; the rail shows it (D-291). -->
+  <h1 class="sr-only">Servers</h1>
   <div class="top">
     <div class="row">
       <label class="searchwrap">
@@ -153,14 +155,16 @@
           placeholder="Search name, map or IP"
           value={typed}
           bind:this={searchEl}
-          aria-label="Search servers (press / to focus)"
+          aria-label="Search servers (/ in the list comes here)"
           spellcheck="false"
           oninput={(e) => ((typed = e.currentTarget.value), box.set(typed))}
           onkeydown={(e) => {
             if (e.key === "Escape") {
               typed = "";
               box.set("");
-              e.currentTarget.blur();
+              // To the list rather than nowhere: `blur()` left focus on <body>, where the
+              // list's keys do nothing until Tab finds it again (D-291).
+              e.currentTarget.closest(".servers")?.querySelector<HTMLElement>('[role="grid"]')?.focus();
             }
           }}
         />
@@ -226,6 +230,7 @@
       modsByServer={servers.modsByServer}
       inert={servers.joiningId !== null}
       empty={emptyText}
+      onSearch={focusSearch}
     />
     {#if servers.selected}
       <DetailsPane row={servers.selected} localVersion={servers.localVersion} />
@@ -234,8 +239,6 @@
 </div>
 
 <style>
-  /* Read by assistive technology, never drawn. */
-  .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
   .servers { display: flex; flex-direction: column; height: 100%; min-height: 0; }
   .top { padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--bg-elev); }
   /* One row: search, Direct connect beside it, any notice in the free middle, Refresh

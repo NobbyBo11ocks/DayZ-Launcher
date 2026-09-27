@@ -22,6 +22,11 @@
   let syncInfo = $state<SyncProgress | null>(null);
   let launched = $state<Launched | null>(null);
   let exit = $state<LaunchExited | null>(null);
+  /** What the dialog says out loud, in one region that is always there. Each phase had
+   *  a `role="status"` paragraph of its own, created together with its text, which is
+   *  the pattern that often goes unannounced (D-224); a download that finished without
+   *  launching said nothing at all (D-291). */
+  let announce = $state("");
   let autoLaunch = false;
   const job = Date.now();
   const exited = new Map<number, LaunchExited>();
@@ -68,6 +73,8 @@
   const toSync = $derived(plan ? plan.mods.filter((m) => !m.installed || m.needsUpdate) : []);
   const canLaunch = $derived(!!plan && plan.gameFound && plan.steamRunning && plan.battleyePresent && toSync.length === 0 && (!plan.passwordRequired || password.length > 0));
   const canSync = $derived(!!plan && plan.steamRunning && toSync.length > 0);
+  /** The warnings, as the description of the footer's buttons (D-291). */
+  const warned = $derived(plan?.warnings.length ? "join-warnings" : undefined);
   const downloadedBytes = $derived([...progress.values()].reduce((a, p) => a + (p.state === "installed" ? p.total : p.downloaded), 0));
   const totalBytes = $derived([...progress.values()].reduce((a, p) => a + p.total, 0));
   // The median server in the cached list needs 25 mods and the worst needs 139, so
@@ -137,10 +144,12 @@
           if (plan) plan = { ...plan, mods: plan.mods.map((m) => ({ ...m, installed: true, needsUpdate: false })), missing: 0, updates: 0 };
           phase = "ready";
           if (autoLaunch) void joinNow();
+          else announce = "All mods are installed.";
         } else if (ev.payload.superseded) {
           // Not a failure: a newer download took over, and this one can be started
           // again from here (D-277).
           note = "Replaced by a newer download.";
+          announce = note;
           phase = "ready";
         } else {
           // Led by the mod it failed on (D-277).
@@ -157,25 +166,46 @@
         if (launched && ev.payload.pid === launched.pid) {
           exit = ev.payload;
           phase = "exited";
+          announce = exitText(ev.payload);
         }
       }),
     ];
     (async () => {
       void refreshSlots();
       try {
-        plan = await invoke<JoinPlan>("join_plan", { id: serverId });
+        const p = await invoke<JoinPlan>("join_plan", { id: serverId });
+        plan = p;
         plannedAt = Date.now();
         phase = "ready";
+        // What stands in the way first, then what the join will do (D-291).
+        const toGet = p.mods.filter((m) => !m.installed || m.needsUpdate).length;
+        announce = [
+          ...p.warnings,
+          toGet ? `${toGet} mod${toGet === 1 ? "" : "s"} to download.` : p.mods.length ? "All mods are installed." : "",
+        ].join(" ");
       } catch (e) {
         error = String(e);
         phase = "error";
       }
     })();
     return () => {
+      // Taken down without `close()` — a prune cleared the server under it — so the
+      // focus it held goes back to where the dialog was opened from (D-291).
+      const wasClosed = closed;
       closed = true;
       pending.forEach((p) => void p.then((u) => u()));
       stopWaiting();
+      if (!wasClosed)
+        queueMicrotask(() => {
+          if (opener?.isConnected && (!document.activeElement || document.activeElement === document.body)) opener.focus();
+        });
     };
+  });
+
+  const exitText = (e: LaunchExited) => `DayZ exited${e.code != null ? ` with code ${e.code}` : ""}.`;
+  // The server stopped answering while the dialog waited: said once, when it happens.
+  $effect(() => {
+    if (phase === "waiting" && slotMisses === 3) announce = "The server has stopped answering. Still trying.";
   });
 
   async function sync(thenLaunch: boolean) {
@@ -184,6 +214,7 @@
     error = null;
     note = null;
     phase = "syncing";
+    announce = `Downloading ${toSync.length} mod${toSync.length === 1 ? "" : "s"} through Steam.`;
     try {
       await invoke("mods_sync", { job, ids: toSync.map((m) => m.id) });
     } catch (e) {
@@ -201,6 +232,7 @@
   function startWaiting() {
     stopWaiting();
     phase = "waiting";
+    announce = "Waiting for a free slot. DayZ starts as soon as one opens.";
     error = null;
     note = null;
     checks = 0;
@@ -245,6 +277,7 @@
     error = null;
     note = null;
     phase = "launching";
+    announce = "Starting DayZ through BattlEye.";
     // The plan was never made again, so a mod the server added or updated while this
     // dialog waited for a slot sent the launch into "not installed; sync mods first",
     // with only Join — the same failure — on offer (D-240).
@@ -262,8 +295,10 @@
       if (early) {
         exit = early;
         phase = "exited";
+        announce = exitText(early);
       } else {
         phase = "running";
+        announce = "DayZ is running. You can close this window.";
       }
     } catch (e) {
       error = String(e);
@@ -335,15 +370,17 @@
       dialogEl?.querySelector<HTMLElement>('input[type="password"]:not([disabled])') ??
       dialogEl?.querySelector<HTMLElement>("button.btn:not(.secondary):not([disabled])") ??
       dialogEl?.querySelector<HTMLElement>(
-        'input:not([disabled]), select:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+        'input:not([disabled]), select:not([disabled]), button:not([disabled]), summary, [href], [tabindex]:not([tabindex="-1"])',
       );
     (first ?? dialogEl)?.focus();
   });
 
-  /** Keeps Tab inside the dialog while it is open. */
+  /** Keeps Tab inside the dialog while it is open. `summary` and the scrolling mod list
+   *  are in it too: without them the command line could not be opened from the keyboard
+   *  and a long mod list could not be scrolled (D-291). */
   function trap(e: KeyboardEvent) {
     if (e.key !== "Tab" || !dialogEl) return;
-    const items = [...dialogEl.querySelectorAll<HTMLElement>('input:not([disabled]), select:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')].filter(
+    const items = [...dialogEl.querySelectorAll<HTMLElement>('input:not([disabled]), select:not([disabled]), button:not([disabled]), summary, [href], [tabindex]:not([tabindex="-1"])')].filter(
       (el) => el.offsetParent !== null,
     );
     if (items.length === 0) return;
@@ -383,7 +420,9 @@
       <p class="muted">Reading the server's mod list and checking your Workshop…</p>
     {:else if plan}
       {#if plan.warnings.length}
-        <ul class="warnings">
+        <!-- Read with the footer's buttons, which name them as their description: a
+             warning that disables Join was never said when focus landed there (D-291). -->
+        <ul class="warnings" id="join-warnings">
           {#each plan.warnings as w (w)}<li>{w}</li>{/each}
         </ul>
       {/if}
@@ -394,7 +433,9 @@
             Mods ({plan.mods.length})
             {#if toSync.length}<span class="warn"> · {toSync.length} to download{#if plan.downloadBytes} ({fmtBytes(plan.downloadBytes)}){/if}</span>{:else}<span class="ok"> · all installed</span>{/if}
           </h3>
-          <ul>
+          <!-- Focusable, so a list longer than its box scrolls from the keyboard (D-291). -->
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+          <ul tabindex="0" aria-label="Mods">
             {#each plan.mods as m, i (`${m.id}#${i}`)}
               {@const p = progress.get(m.id)}
               <li class:missing={!m.installed} class:update={m.installed && m.needsUpdate}>
@@ -437,7 +478,7 @@
         Profile name: <strong>{shownProfileName || "(Steam persona)"}</strong> · change it in Settings
         {#if profiles.length}
           · launch with
-          <select class="pick" bind:value={profile} disabled={busy || phase === "waiting" || phase === "running"} aria-label="Launch profile">
+          <select class="pick" bind:value={profile} disabled={busy || phase === "waiting" || phase === "running"} aria-label="Launch with profile">
             <option value="">current settings</option>
             {#each profiles as p (p.name)}<option value={p.name}>{p.name}</option>{/each}
           </select>
@@ -445,15 +486,24 @@
       </p>
 
       {#if phase === "syncing" && syncInfo}
-        <p class="status" role="status" aria-live="polite">
+        <!-- A progress bar a screen reader can ask about, rather than a hidden line: the
+             overall figures were `aria-hidden` and nothing said how far a download of up
+             to 139 mods had got (D-291). Not live; the region below says the steps. -->
+        <p class="status">
           Downloading via Steam…
-          <span aria-hidden="true"
+          <span
+            role="progressbar"
+            aria-label="Mod download"
+            aria-valuemin={0}
+            aria-valuemax={syncInfo.total}
+            aria-valuenow={syncInfo.installed}
+            aria-valuetext="{syncInfo.installed} of {syncInfo.total} installed{totalBytes > 0 ? `, ${fmtBytes(downloadedBytes)} of ${fmtBytes(totalBytes)}` : ''}{etaText ? `, about ${etaText} left` : ''}"
             >{syncInfo.installed}/{syncInfo.total} installed{#if totalBytes > 0} · {fmtBytes(downloadedBytes)} of {fmtBytes(totalBytes)}{/if}{#if rate >
               0} · {fmtBytes(rate)}/s{#if etaText} · about {etaText} left{/if}{/if}</span
           >
         </p>
       {:else if phase === "waiting"}
-        <p class="status" role="status" aria-live="polite">
+        <p class="status">
           {#if slotMisses >= 3}
             The server has stopped answering.
             <span aria-hidden="true">{slotMisses} checks in a row. Still trying · {mmss(waitedSecs)}</span>
@@ -466,31 +516,32 @@
         </p>
         <p class="muted small">DayZ starts as soon as the server reports a free slot; the window will flash in the taskbar.</p>
       {:else if phase === "launching"}
-        <p class="status" role="status" aria-live="polite">Starting DayZ through BattlEye…</p>
+        <p class="status">Starting DayZ through BattlEye…</p>
       {:else if phase === "running" && launched}
-        <p class="status ok" role="status" aria-live="polite">DayZ is running. You can close this window.</p>
+        <p class="status ok">DayZ is running. You can close this window.</p>
         <details class="cmd"><summary class="muted small">Command line · process {launched.pid}</summary><code>{launched.commandLine}</code></details>
       {:else if phase === "exited" && exit}
-        <p class="status" role="status" aria-live="polite" class:warn={exit.code !== 0}>DayZ exited{exit.code != null ? ` with code ${exit.code}` : ""}.</p>
+        <p class="status" class:warn={exit.code !== 0}>DayZ exited{exit.code != null ? ` with code ${exit.code}` : ""}.</p>
       {/if}
     {/if}
 
-    {#if error}<p class="error" role="alert">{error}</p>{:else if note}<p class="muted small" role="status">{note}</p>{/if}
+    {#if error}<p class="error" role="alert">{error}</p>{:else if note}<p class="muted small">{note}</p>{/if}
+    <p class="sr-only" role="status">{announce}</p>
 
     <footer>
       {#if phase === "waiting"}
         <button class="btn secondary" onclick={cancelWaiting}>Stop waiting</button>
         <button class="btn" onclick={() => { stopWaiting(); void launch(); }} disabled={!canLaunch}>Join now anyway</button>
       {:else}
-        <button class="btn secondary" onclick={close} disabled={busy} title={phase === "syncing" ? "Steam keeps downloading in the background; watch it on the Mods page" : undefined}>
+        <button class="btn secondary" onclick={close} disabled={busy} title={phase === "syncing" ? "Steam keeps downloading in the background; watch it on the Mods page" : undefined} aria-describedby={warned}>
           {phase === "running" || phase === "exited" ? "Close" : phase === "syncing" ? "Close (keeps downloading)" : "Cancel"}
         </button>
         {#if phase === "ready" || phase === "error" || phase === "exited"}
           {#if toSync.length}
-            <button class="btn" onclick={() => sync(true)} disabled={!canSync || (plan?.passwordRequired && !password)}>Download {toSync.length} mod{toSync.length === 1 ? "" : "s"} and join</button>
-            <button class="btn secondary" onclick={() => sync(false)} disabled={!canSync}>Download only</button>
+            <button class="btn" onclick={() => sync(true)} disabled={!canSync || (plan?.passwordRequired && !password)} aria-describedby={warned}>Download {toSync.length} mod{toSync.length === 1 ? "" : "s"} and join</button>
+            <button class="btn secondary" onclick={() => sync(false)} disabled={!canSync} aria-describedby={warned}>Download only</button>
           {:else}
-            <button class="btn" onclick={joinNow} disabled={!canLaunch}>{waitForSlot && full ? "Wait and join" : "Join"}</button>
+            <button class="btn" onclick={joinNow} disabled={!canLaunch} aria-describedby={warned}>{waitForSlot && full ? "Wait and join" : "Join"}</button>
           {/if}
         {/if}
       {/if}
@@ -505,6 +556,8 @@
   h3 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em; }
   .warnings { margin: 0; padding-left: 18px; color: var(--warn); font-size: 12.5px; }
   .mods ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 40vh; overflow: auto; font-size: 12.5px; }
+  .mods ul:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; border-radius: 4px; }
+  .cmd summary:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; border-radius: 3px; }
   .mods li { display: grid; grid-template-columns: 16px 1fr auto 110px; grid-template-areas: "tick name size state" "tick bar bar bar"; gap: 2px 8px; align-items: center; }
   .tick { grid-area: tick; color: var(--ok); }
   .missing .tick, .update .tick { color: var(--warn); }
@@ -519,7 +572,9 @@
   .wait input { margin-top: 2px; }
   .wait strong { color: var(--fg); }
   .small { font-size: 12px; margin: 0; }
-  .pick { padding: 2px 6px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-row); color: var(--fg); font-size: 12px; }
+  /* The control border, which D-226 gave every other control: `--border` measured 1.75
+     and 1.86:1 against this surface, under 1.4.11's 3:1 (D-291). */
+  .pick { padding: 2px 6px; border-radius: var(--radius); border: 1px solid var(--border-control); background: var(--bg-row); color: var(--fg); font-size: 12px; }
   .status { margin: 0; font-size: 12.5px; }
   .cmd code { display: block; font-size: 11px; white-space: pre-wrap; word-break: break-all; color: var(--fg-muted); margin-top: 4px; }
   .ok { color: var(--ok); }

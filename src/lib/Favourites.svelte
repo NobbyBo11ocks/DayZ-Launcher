@@ -32,6 +32,11 @@
 
   let importing = $state(false);
   let imported = $state<ImportResult | null>(null);
+  /** The import's outcome for screen readers: the visible line also carries the count,
+   *  which changes with every star (D-291). */
+  let importNote = $state("");
+  let searchEl = $state<HTMLInputElement | null>(null);
+  let emptyEl = $state<HTMLElement | null>(null);
   /** The pane follows the selection only while it is one of these rows — and so do the
    *  grid's highlight and keys: given the global one, Enter and F acted on a server from
    *  the Servers page this grid does not show (D-240). */
@@ -41,13 +46,34 @@
     importing = true;
     imported = await servers.importOfficial();
     importing = false;
+    if (imported)
+      importNote = `Imported ${imported.imported}, ${imported.already} already there${imported.unreachable ? `, ${imported.unreachable} offline right now` : ""}.`;
+  }
+
+  // F on the last favourite takes the grid, and the focus in it, away with it: focus
+  // goes to the message that replaces it rather than to nowhere (D-291).
+  $effect(() => {
+    if (emptyEl && document.activeElement === document.body) emptyEl.focus();
+  });
+
+  /** Escape closes the pane from anywhere on the page, as it does on Servers: the
+   *  pane's own close button says "Close (Esc)" (D-247, D-291). */
+  function onKey(e: KeyboardEvent) {
+    if (e.key !== "Escape" || servers.joiningId || !selected) return;
+    const t = e.target;
+    if (t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement) return;
+    servers.select(null);
   }
 </script>
 
+<svelte:window onkeydown={onKey} />
+
 <div class="favs">
+  <h1 class="sr-only">Favourites</h1>
+  <span class="sr-only" role="status">{importNote}</span>
   <div class="top">
     <div class="bar">
-      <input class="search" type="search" placeholder="Search favourites…" value={typed} oninput={(e) => (typed = e.currentTarget.value, box.set(typed))} aria-label="Search favourites" />
+      <input class="search" type="search" placeholder="Search favourites…" value={typed} bind:this={searchEl} oninput={(e) => (typed = e.currentTarget.value, box.set(typed))} aria-label="Search favourites" />
       <button class="btn secondary" onclick={importOfficial} disabled={importing} title="Reads %LOCALAPPDATA%\DayZ Launcher\FavouriteServers.xml">
         {importing ? "Importing…" : "Import from the official launcher"}
       </button>
@@ -55,12 +81,12 @@
         {servers.favouriteRows.length} favourite{servers.favouriteRows.length === 1 ? "" : "s"}
         {#if imported}· imported {imported.imported}, {imported.already} already there{#if imported.unreachable}, {imported.unreachable} offline right now{/if}{/if}
       </span>
-      {#if servers.error}<span class="error">{servers.error}</span>{/if}
+      {#if servers.error}<span class="error" role="alert">{servers.error}</span>{/if}
     </div>
   </div>
   {#if servers.favourites.size === 0}
     <div class="empty">
-      <p>No favourites yet.</p>
+      <p tabindex="-1" bind:this={emptyEl}>No favourites yet.</p>
       <p class="muted">Press <kbd>F</kbd> on a server or click its star. The official launcher's favourites can be imported with the button above.</p>
     </div>
   {:else}
@@ -83,6 +109,11 @@
         empty={servers.filters.search.trim()
           ? `No favourite matches "${servers.filters.search.trim()}". The search box is shared with the Servers page.`
           : "These favourites are not in the list yet. They appear after the next refresh, or once Steam answers."}
+        label="Favourites"
+        onSearch={() => {
+          searchEl?.focus();
+          searchEl?.select();
+        }}
       />
       {#if selected}
         <DetailsPane row={selected} localVersion={servers.localVersion} shows={(id) => servers.favouriteRows.some((r) => r.id === id)} />
@@ -99,6 +130,7 @@
   .search:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
   .empty { margin: auto; text-align: center; max-width: 520px; }
   .empty p { margin: 4px 0; }
+  .empty p:focus { outline: none; }
   kbd { padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-row); font-size: 11px; }
   /* The details pane only exists while a row is selected; the table takes the full width otherwise. */
   .main { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr; }

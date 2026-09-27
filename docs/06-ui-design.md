@@ -49,7 +49,7 @@ Goal: the fastest way from "open launcher" to "in game", in a dark, quiet, infor
 
 The favourite star lives in the name cell, not a separate Actions column, drawn at 18 px since D-254: outlined, and filled in the accent for a favourite; there is no per-row join button — Enter or a double-click opens the join dialog. The alert bell that sat beside it was removed with the feature (D-182).
 
-Row height 36 px, hover highlight, keyboard navigation (↑/↓, Enter = join, F = favourite, / = focus search).
+Row height 36 px, hover highlight, keyboard navigation (↑/↓, Enter = join, F = favourite, ←/→ = sort column and Space = reverse it (D-198), / = the search, from the list (D-291)). A screen reader hears each row as one sentence, with the words the cells only show as colour, glyph or tooltip (D-291).
 
 ## 3. Details pane
 
@@ -82,4 +82,4 @@ The banner with "Open Steam", the "Locate DayZ_x64.exe" card, the bar inside the
 
 ## 7. Accessibility
 
-Contrast ≥ 4.5:1 for text on all themes, visible focus rings, full keyboard operation of table and filters, `aria-sort` on headers, a live region that announces outcomes only ("N verified, M fake, K offline.", "N servers listed.", D-224), no information conveyed by colour alone (ping band carries its quality in a tooltip (D-198), not a glyph).
+Contrast ≥ 4.5:1 for text on all themes, visible focus rings, full keyboard operation of table and filters, `aria-sort` on headers, a live region that announces outcomes only ("N verified, M fake, K offline.", "N servers listed.", D-224), no information conveyed by colour alone (ping band carries its quality in a tooltip (D-198), not a glyph). Since D-291: keyboard sorts, favourites and filter results are announced; focus is handed on whenever the element holding it goes (the pane, confirmations, Reset, dialogs); the filters' single-choice rows are radio groups; the join dialog says each step from one region; Windows contrast themes keep a selection visible.

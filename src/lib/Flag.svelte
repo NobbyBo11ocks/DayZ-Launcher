@@ -6,7 +6,9 @@
   import codes from "./flags.json";
   import { countryName } from "./types";
 
-  let { code, size = 16 }: { code: string | null | undefined; size?: number } = $props();
+  /** `decorative`: the country's name is already written beside the flag, so a screen
+   *  reader heard it twice ("Germany Germany", D-291). */
+  let { code, size = 16, decorative = false }: { code: string | null | undefined; size?: number; decorative?: boolean } = $props();
 
   const index = $derived(code ? codes.indexOf(code.toLowerCase()) : -1);
   const name = $derived(countryName(code));
@@ -15,8 +17,9 @@
 {#if index >= 0}
   <span
     class="flag"
-    role="img"
-    aria-label={name}
+    role={decorative ? undefined : "img"}
+    aria-label={decorative ? undefined : name}
+    aria-hidden={decorative ? "true" : undefined}
     title={name}
     style="width: {size}px; height: {(size * 3) / 4}px; background-image: url({flagsUrl}); background-size: auto {(size * 3) / 4}px; background-position: -{index * size}px 0"
   ></span>

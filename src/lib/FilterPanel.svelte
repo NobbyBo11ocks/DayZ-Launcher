@@ -53,6 +53,44 @@
     servers.saveFilters();
   };
 
+  /** Arrow keys inside a one-choice row choose and focus the next choice, as in a radio
+   *  group: the four rows were thirteen buttons and as many Tab stops (D-291). */
+  function segKeys(e: KeyboardEvent, values: string[], current: string, set: (v: string) => void) {
+    const i = Math.max(0, values.indexOf(current));
+    let n = -1;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") n = (i + 1) % values.length;
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") n = (i - 1 + values.length) % values.length;
+    else if (e.key === "Home") n = 0;
+    else if (e.key === "End") n = values.length - 1;
+    const v = values[n];
+    if (v === undefined) return;
+    e.preventDefault();
+    set(v);
+    (e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role="radio"]')[n]?.focus();
+  }
+
+  let titleEl = $state<HTMLElement | null>(null);
+  let modSelectEl = $state<HTMLSelectElement | null>(null);
+  /** Reset removes itself, and focus went with it to <body>: the heading keeps it (D-291). */
+  function reset() {
+    servers.resetFilters();
+    titleEl?.focus();
+  }
+  /** "Scan now" is replaced by "Reading mod lists…", so focus moves on to the mod pick,
+   *  and the scan's start and end are said (D-291). */
+  let scanNote = $state("");
+  let wasScanning = false;
+  $effect(() => {
+    const scanning = servers.modScanning;
+    if (scanning && !wasScanning && f.mod) scanNote = "Reading mod lists…";
+    else if (!scanning && wasScanning && scanNote) scanNote = "Mod lists read.";
+    wasScanning = scanning;
+  });
+  function scanNow() {
+    void servers.scanMods();
+    modSelectEl?.focus();
+  }
+
   // Mod filter (D-080): the catalogue can hold thousands of names, so a text box
   // narrows the select; the chosen mod always stays listed.
   let modQuery = $state("");
@@ -69,18 +107,19 @@
 
 <section class="panel" aria-labelledby="{uid}-title">
   <div class="head">
-    <h2 id="{uid}-title">Filters</h2>
+    <h2 id="{uid}-title" tabindex="-1" bind:this={titleEl}>Filters</h2>
     {#if servers.activeFilterCount > 0}
-      <button class="reset" onclick={() => servers.resetFilters()} title="Back to the default filters">Reset · {servers.activeFilterCount}</button>
+      <button class="reset" onclick={reset} title="Back to the default filters" aria-label="Reset {servers.activeFilterCount} filter{servers.activeFilterCount === 1 ? '' : 's'}">Reset · {servers.activeFilterCount}</button>
     {/if}
+    <span class="sr-only" role="status">{scanNote}</span>
   </div>
 
   <div class="body">
-    <div class="row" role="group" aria-labelledby="{uid}-perspective">
+    <div class="row">
       <span class="tag" id="{uid}-perspective">Perspective</span>
-      <div class="seg">
+      <div class="seg" role="radiogroup" aria-labelledby="{uid}-perspective" tabindex="-1" onkeydown={(e) => segKeys(e, ["any", "1pp", "3pp"], f.perspective, (v) => setPerspective(v as Perspective))}>
         {#each [["any", "Any"], ["1pp", "1PP"], ["3pp", "3PP"]] as [v, label] (v)}
-          <button class="segbtn" class:on={f.perspective === v} aria-pressed={f.perspective === v} onclick={() => setPerspective(v as Perspective)}>{label}</button>
+          <button class="segbtn" class:on={f.perspective === v} role="radio" aria-checked={f.perspective === v} tabindex={f.perspective === v ? 0 : -1} onclick={() => setPerspective(v as Perspective)}>{label}</button>
         {/each}
       </div>
     </div>
@@ -88,11 +127,11 @@
     <!-- What the server says it is, read out of its own name and description. Nobody
          verifies a ruleset, so the tooltips say "says" — and a server that claims both
          shows under both. 41.6 % of the list says PVE (D-211). -->
-    <div class="row" role="group" aria-labelledby="{uid}-style">
+    <div class="row">
       <span class="tag" id="{uid}-style">Playstyle</span>
-      <div class="seg">
+      <div class="seg" role="radiogroup" aria-labelledby="{uid}-style" tabindex="-1" onkeydown={(e) => segKeys(e, ["any", "pve", "pvp", "rp"], f.style, (v) => setStyle(v as StyleFilter))}>
         {#each [["any", "Any", "Every playstyle"], ["pve", "PVE", "The name or description says PVE"], ["pvp", "PVP", "The name or description says PVP"], ["rp", "RP", "The name or description says RP or roleplay"]] as [v, label, hint] (v)}
-          <button class="segbtn" class:on={f.style === v} aria-pressed={f.style === v} title={hint} onclick={() => setStyle(v as StyleFilter)}>{label}</button>
+          <button class="segbtn" class:on={f.style === v} role="radio" aria-checked={f.style === v} tabindex={f.style === v ? 0 : -1} title={hint} onclick={() => setStyle(v as StyleFilter)}>{label}</button>
         {/each}
       </div>
     </div>
@@ -108,11 +147,13 @@
       <label class="check"><input type="checkbox" checked={f.hasQueue} onchange={() => toggle("hasQueue")} />Has queue</label>
       <label class="check"><input type="checkbox" checked={f.noPassword} onchange={() => toggle("noPassword")} />No password</label>
       <label class="check"><input type="checkbox" checked={f.dayOnly} onchange={() => toggle("dayOnly")} />Daytime</label>
+      <!-- The explanations sit on the controls as well as their labels: on the label
+           alone, no screen reader heard them (D-291). -->
       <label class="check" class:off={!servers.localVersion} title={servers.localVersion ? `Only ${servers.localVersion}` : "DayZ not found"}>
-        <input type="checkbox" checked={f.versionMine} disabled={!servers.localVersion} onchange={() => toggle("versionMine")} />My version
+        <input type="checkbox" checked={f.versionMine} disabled={!servers.localVersion} onchange={() => toggle("versionMine")} title={servers.localVersion ? `Only ${servers.localVersion}` : "DayZ not found"} />My version
       </label>
       <label class="check wide" title="Only servers a Steam friend is playing on right now">
-        <input type="checkbox" checked={f.friendsOnly} onchange={() => toggle("friendsOnly")} />Friends playing <span class="num">{servers.friendsOn.size}</span>
+        <input type="checkbox" checked={f.friendsOnly} onchange={() => toggle("friendsOnly")} title="Only servers a Steam friend is playing on right now" />Friends playing <span class="num">{servers.friendsOn.size}</span>
       </label>
     </div>
 
@@ -121,17 +162,17 @@
          height to spare leaves it where it was, under the checkboxes. -->
     <div class="foot">
       <label class="check" title="Hide servers whose player count cannot be trusted: inflated, fabricated, not answering, or a copy of another server's name">
-        <input type="checkbox" checked={f.hideUntrusted} onchange={() => toggle("hideUntrusted")} />Hide inflated <span class="num">{fmt.format(servers.untrustedCount)}</span>
+        <input type="checkbox" checked={f.hideUntrusted} onchange={() => toggle("hideUntrusted")} title="Hide servers whose player count cannot be trusted: inflated, fabricated, not answering, or a copy of another server's name" />Hide inflated <span class="num">{fmt.format(servers.untrustedCount)}</span>
       </label>
 
       <!-- Official is Bohemia's public hive, where your character follows you between
            servers; Community is a private shard, where it does not. The in-game browser
            makes this a top-level tab, and the tag is already on every row (D-195). -->
-      <div class="row" role="group" aria-labelledby="{uid}-hive">
+      <div class="row">
         <span class="tag" id="{uid}-hive">Hive</span>
-        <div class="seg">
+        <div class="seg" role="radiogroup" aria-labelledby="{uid}-hive" tabindex="-1" onkeydown={(e) => segKeys(e, ["any", "official", "community"], f.hive, (v) => setHive(v as HiveFilter))}>
           {#each [["any", "Any", "Both hives"], ["official", "Official", "Bohemia's public hive: your character follows you between these"], ["community", "Community", "Private shards: your character lives on that one server"]] as [v, label, hint] (v)}
-            <button class="segbtn" class:on={f.hive === v} aria-pressed={f.hive === v} title={hint} onclick={() => setHive(v as HiveFilter)}>{label}</button>
+            <button class="segbtn" class:on={f.hive === v} role="radio" aria-checked={f.hive === v} tabindex={f.hive === v ? 0 : -1} title={hint} onclick={() => setHive(v as HiveFilter)}>{label}</button>
           {/each}
         </div>
       </div>
@@ -169,7 +210,7 @@
            A value saved before this, or set some other way, keeps its own option. -->
       <label class="row" class:on={f.maxPing > 0} title="Hide servers slower than this">
         <span class="tag">Max ping</span>
-        <select bind:value={servers.filters.maxPing} onchange={() => servers.saveFilters()}>
+        <select bind:value={servers.filters.maxPing} onchange={() => servers.saveFilters()} title="Hide servers slower than this">
           <option value={0}>Any</option>
           {#each PING_PRESETS as ms (ms)}
             <option value={ms}>{ms} ms</option>
@@ -180,18 +221,18 @@
         </select>
       </label>
 
-      <div class="row" role="group" aria-labelledby="{uid}-mods">
+      <div class="row">
         <span class="tag" id="{uid}-mods">Mods</span>
-        <div class="seg">
+        <div class="seg" role="radiogroup" aria-labelledby="{uid}-mods" tabindex="-1" onkeydown={(e) => segKeys(e, ["any", "modded", "vanilla"], f.mods, (v) => setMods(v as ModFilter))}>
           {#each [["any", "Any"], ["modded", "Modded"], ["vanilla", "Vanilla"]] as [v, label] (v)}
-            <button class="segbtn" class:on={f.mods === v} aria-pressed={f.mods === v} onclick={() => setMods(v as ModFilter)}>{label}</button>
+            <button class="segbtn" class:on={f.mods === v} role="radio" aria-checked={f.mods === v} tabindex={f.mods === v ? 0 : -1} onclick={() => setMods(v as ModFilter)}>{label}</button>
           {/each}
         </div>
       </div>
       {#if servers.modCatalog.size > 0 || f.mod}
         <div class="modf" role="group" aria-label="Running a specific mod">
-          <input class="modsearch" type="search" placeholder="Find a mod" bind:value={modQuery} aria-label="Search the mod list" spellcheck="false" />
-          <select class="modselect" class:on={f.mod !== 0} bind:value={servers.filters.mod} onchange={() => servers.saveFilters()} aria-label="Servers running this mod" title="Servers whose mod list includes this Workshop item">
+          <input class="modsearch" type="search" placeholder="Find a mod" bind:value={modQuery} aria-label="Find a mod" spellcheck="false" />
+          <select class="modselect" class:on={f.mod !== 0} bind:value={servers.filters.mod} bind:this={modSelectEl} onchange={() => servers.saveFilters()} aria-label="Servers running this mod" title="Servers whose mod list includes this Workshop item">
             <option value={0}>Any mod</option>
             {#each modOptions as m (m.id)}
               <option value={m.id}>{m.name} ({m.servers})</option>
@@ -209,7 +250,7 @@
             Reading mod lists…
           {:else}
             {fmt.format(servers.unscannedModded)} not scanned yet ·
-            <button class="link" onclick={() => void servers.scanMods()} title="Read the mod list of every populated modded server that has not been scanned">Scan now</button>
+            <button class="link" onclick={scanNow} title="Read the mod list of every populated modded server that has not been scanned">Scan now</button>
           {/if}
         </p>
       {/if}
@@ -225,6 +266,8 @@
      down. */
   .head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 24px; padding-bottom: 4px; }
   h2 { margin: 0; font-size: 10.5px; font-weight: 600; color: var(--accent-ink); text-transform: uppercase; letter-spacing: 0.07em; }
+  /* Focused only from code, after Reset (D-291). */
+  h2:focus { outline: none; }
   .reset { all: unset; cursor: pointer; box-sizing: border-box; height: 20px; padding: 0 8px; display: inline-flex; align-items: center; border-radius: var(--radius); border: 1px dashed var(--border-control); color: var(--fg-muted); font-size: 11px; white-space: nowrap; }
   .reset:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg) 25%, var(--border)); }
   .reset:focus-visible { outline: 2px solid var(--accent-ink); }

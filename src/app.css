@@ -92,6 +92,15 @@
 :root[data-theme="light"][data-accent="green"],
 :root[data-theme="light"] [data-accent="green"] { --accent-ink: #166534; }
 
+/* The edge of a selected chip or News tab, for the same four: their accent-mixed edge
+   measured 2.38 (lime) and 2.62 (amber) against the page and lime's tab 2.73 against its
+   track, under WCAG 1.4.11's 3:1, so they take the ink as their edge. Everywhere else the
+   variable is unset and each component keeps its own edge (D-291). */
+:root[data-theme="light"][data-accent="lime"],
+:root[data-theme="light"][data-accent="amber"],
+:root[data-theme="light"][data-accent="red"],
+:root[data-theme="light"][data-accent="green"] { --selected-edge: var(--accent-ink); }
+
 *,
 *::before,
 *::after {
@@ -290,6 +299,20 @@ select optgroup {
   color: var(--fg-muted);
 }
 
+/* Read by screen readers, never drawn: live regions that must exist before their text
+   does, headings a page shows in other ways, and words a glyph stands for (D-291). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .error {
   color: var(--danger);
 }
@@ -476,9 +499,10 @@ h1 {
 .btn:disabled { opacity: 0.5; cursor: default; filter: none; }
 ::placeholder { color: var(--fg-muted); opacity: 1; }
 
-/* Same story as the `.btn` ring below, for the buttons that are not `.btn`: the Mods
-   page's filter tabs and sort headers and the toast's close button all open with
-   `all: unset`, which clears `outline`, and no component rule puts one back (D-198). */
+/* The ring for buttons that are not `.btn` and have no rule of their own (D-198). It is
+   (0,1,1), so a component's scoped rule that opens with `all: unset` — (0,2,0) — clears
+   it: the Mods page's filter chips and sort headers and the toast's close had no ring at
+   all until they put one back themselves (D-291). */
 button:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
 
 /* Deliberately more specific than a component's scoped `.btn.svelte-hash` (0,2,0):
@@ -499,6 +523,26 @@ button.btn.ghost:hover { color: var(--fg); filter: none; }
 button.btn.danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); font-weight: 600; }
 button.btn.danger:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); filter: none; }
 .btn.small { height: 24px; padding: 0 10px; font-size: 12px; }
+
+/* Windows contrast themes replace backgrounds with system colours and drop box-shadows,
+   so a selected tab, chip, radio or section looked like its neighbours and a primary
+   button lost its edge. Selection takes the system highlight, and the accent dots keep
+   their own colours and ring (D-291). */
+@media (forced-colors: active) {
+  .btn {
+    border: 1px solid ButtonText;
+  }
+  [aria-pressed="true"],
+  [role="radio"][aria-checked="true"],
+  .rail-item[aria-current="page"] {
+    forced-color-adjust: none;
+    background: Highlight !important;
+    color: HighlightText !important;
+  }
+  .dot {
+    forced-color-adjust: none;
+  }
+}
 
 /* `user-select: none` on the body keeps the chrome from highlighting on a drag, but an
    error, a log line, the join dialog's command line and a server address are things

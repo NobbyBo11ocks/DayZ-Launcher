@@ -8,6 +8,7 @@
   import { invokeLogged as invoke } from "./log";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { revealItemInDir } from "@tauri-apps/plugin-opener";
+  import { tick } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { external } from "./external";
   import { modUpdates } from "./state/mods.svelte";
@@ -193,6 +194,21 @@
   const pickedStale = $derived(pickedItems.filter((i) => i.needsUpdate));
   const pickedSize = $derived(pickedItems.reduce((a, i) => a + i.size, 0));
   const allShownPicked = $derived(items.length > 0 && items.every((i) => selected.has(i.id)));
+  /** Some shown mods picked but not all: the header checkbox shows its dash (D-291). */
+  const someShownPicked = $derived(!allShownPicked && items.some((i) => selected.has(i.id)));
+  let allBox = $state<HTMLInputElement | null>(null);
+  $effect(() => {
+    if (allBox) allBox.indeterminate = someShownPicked;
+  });
+
+  let headingEl = $state<HTMLElement | null>(null);
+  /** The inline confirmations replace the button that was pressed, so focus goes to their
+   *  "No", back to that button on No, and to the page's heading when what it acted on is
+   *  gone; it fell to <body> each time, and the question was never read (D-291). */
+  async function focusSoon(selector: string) {
+    await tick();
+    (document.querySelector<HTMLElement>(selector) ?? headingEl)?.focus();
+  }
 
   function toggleAllShown() {
     if (allShownPicked) for (const i of items) selected.delete(i.id);
@@ -207,6 +223,8 @@
     sort = sort.key === key ? { key, dir: sort.dir === 1 ? -1 : 1 } : { key, dir: key === "name" ? 1 : -1 };
   }
   const mark = (key: SortKey) => (sort.key === key ? (sort.dir === 1 ? " ▲" : " ▼") : "");
+  /** The sort for screen readers; the arrow is only drawn (D-291). */
+  const ariaSort = (key: SortKey) => (sort.key === key ? (sort.dir === 1 ? "ascending" : "descending") : "none");
 
   async function update(ids: number[]) {
     if (!ids.length || updating) return;
@@ -266,18 +284,18 @@
 
 <section class="mods">
   <header class="bar">
-    <h1>Mods</h1>
+    <h1 tabindex="-1" bind:this={headingEl}>Mods</h1>
     {#if data?.workshop}
       <span class="muted">{all.length} installed · {fmtBytes(totalSize)}{#if dangling} · {dangling} stale junction{dangling === 1 ? "" : "s"}{/if}</span>
     {/if}
     <span class="spacer"></span>
     {#if dangling}
       {#if confirmClean}
-        <span class="muted">Remove {dangling} stale junction{dangling === 1 ? "" : "s"}? Only ones whose target folder is gone.</span>
-        <button class="btn danger" onclick={cleanJunctions}>Yes</button>
-        <button class="btn secondary" onclick={() => (confirmClean = false)}>No</button>
+        <span class="muted" id="clean-q">Remove {dangling} stale junction{dangling === 1 ? "" : "s"}? Only ones whose target folder is gone.</span>
+        <button class="btn danger" aria-describedby="clean-q" onclick={async () => { await cleanJunctions(); void focusSoon('[data-ask="clean"]'); }}>Yes</button>
+        <button class="btn secondary" data-no="clean" aria-describedby="clean-q" onclick={() => { confirmClean = false; void focusSoon('[data-ask="clean"]'); }}>No</button>
       {:else}
-        <button class="btn secondary" onclick={() => (confirmClean = true)} disabled={cleaning || !!updating} title="Delete the !Workshop junctions whose target folder no longer exists">
+        <button class="btn secondary" data-ask="clean" onclick={() => { confirmClean = true; void focusSoon('[data-no="clean"]'); }} disabled={cleaning || !!updating} title="Delete the !Workshop junctions whose target folder no longer exists">
           {cleaning ? "Removing…" : `Clean ${dangling} stale`}
         </button>
       {/if}
@@ -311,14 +329,14 @@
       {#if selected.size}
         <span class="picked">{selected.size} selected · {fmtBytes(pickedSize)}</span>
         {#if confirming?.kind === "bulk"}
-          <span class="muted">Unsubscribe {selected.size}?</span>
-          <button class="btn danger" onclick={() => unsubscribe(pickedItems.map((i) => ({ id: i.id, name: nameOf(i) })))}>Yes</button>
-          <button class="btn secondary" onclick={() => (confirming = null)}>No</button>
+          <span class="muted" id="bulk-q">Unsubscribe {selected.size}?</span>
+          <button class="btn danger" aria-describedby="bulk-q" onclick={async () => { await unsubscribe(pickedItems.map((i) => ({ id: i.id, name: nameOf(i) }))); void focusSoon('[data-ask="bulk"]'); }}>Yes</button>
+          <button class="btn secondary" data-no="bulk" aria-describedby="bulk-q" onclick={() => { confirming = null; void focusSoon('[data-ask="bulk"]'); }}>No</button>
         {:else}
           {#if pickedStale.length}
             <button class="btn secondary" onclick={() => update(pickedStale.map((i) => i.id))} disabled={!!updating}>Update {pickedStale.length}</button>
           {/if}
-          <button class="btn danger" onclick={() => (confirming = { kind: "bulk" })}>Unsubscribe</button>
+          <button class="btn danger" data-ask="bulk" onclick={() => { confirming = { kind: "bulk" }; void focusSoon('[data-no="bulk"]'); }}>Unsubscribe</button>
           <button class="btn ghost" onclick={() => selected.clear()}>Clear</button>
         {/if}
       {:else}
@@ -328,7 +346,10 @@
   {/if}
 
   {#if error}<p class="error" role="alert">{error}</p>{/if}
-  {#if notice}<p class="ok small" role="status" aria-live="polite">{notice}</p>{/if}
+  {#if notice}<p class="ok small">{notice}</p>{/if}
+  <!-- Created together with its text, the notice's own region was often not announced;
+       this one is always there (D-224, D-291). -->
+  <span class="sr-only" role="status">{notice ?? ""}</span>
 
   {#if data && !data.workshop}
     <!-- The inventory could not be read: saying "no mods installed" here sent the user
@@ -353,15 +374,15 @@
       <table>
         <thead>
           <tr>
-            <th class="pick"><input type="checkbox" checked={allShownPicked} onchange={toggleAllShown} aria-label="Select all shown" /></th>
-            <th><button class="th" onclick={() => setSort("name")}>Mod{mark("name")}</button></th>
-            <th class="num"><button class="th" onclick={() => setSort("size")}>Size{mark("size")}</button></th>
-            <th><button class="th" onclick={() => setSort("updated")}>Updated{mark("updated")}</button></th>
+            <th class="pick"><input type="checkbox" bind:this={allBox} checked={allShownPicked} onchange={toggleAllShown} aria-label="Select all shown" /></th>
+            <th aria-sort={ariaSort("name")}><button class="th" onclick={() => setSort("name")}>Mod<span aria-hidden="true">{mark("name")}</span></button></th>
+            <th class="num" aria-sort={ariaSort("size")}><button class="th" onclick={() => setSort("size")}>Size<span aria-hidden="true">{mark("size")}</span></button></th>
+            <th aria-sort={ariaSort("updated")}><button class="th" onclick={() => setSort("updated")}>Updated<span aria-hidden="true">{mark("updated")}</span></button></th>
             <th>Junction</th>
-            <th class="num" title="Servers whose scanned mod list includes this item">
-              <button class="th" onclick={() => setSort("servers")}>Servers{mark("servers")}</button>
+            <th class="num" title="Servers whose scanned mod list includes this item" aria-sort={ariaSort("servers")}>
+              <button class="th" onclick={() => setSort("servers")}>Servers<span aria-hidden="true">{mark("servers")}</span></button>
             </th>
-            <th></th>
+            <th><span class="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody>
@@ -380,19 +401,19 @@
               <td>{new Date(it.timeUpdated * 1000).toLocaleDateString()}{it.needsUpdate ? " ⚠ update" : ""}</td>
               <td class={j ? (j.targetExists ? "ok" : "warn") : "muted"}>{j ? (j.targetExists ? j.name : `${j.name} (target gone)`) : "none (created on first join)"}</td>
               <td class="num">
-                {#if !servers.modsIndexLoaded}<span class="muted" title="The server list's mod lists have not loaded yet">—</span>{:else if running}<button class="btn slim" onclick={() => showServers(it.id)} title="Show these servers">{running}</button>{:else}<span class="muted">0</span>{/if}
+                {#if !servers.modsIndexLoaded}<span class="muted" title="The server list's mod lists have not loaded yet">—</span>{:else if running}<button class="btn slim" onclick={() => showServers(it.id)} title="Show these servers" aria-label="{running} server{running === 1 ? '' : 's'} running {name}, show them">{running}</button>{:else}<span class="muted">0</span>{/if}
               </td>
               <td class="act">
                 {#if busyIds.has(it.id)}
                   <span class="muted">…</span>
                 {:else if confirming?.kind === "one" && confirming.id === it.id}
-                  <span class="muted">Unsubscribe?</span>
-                  <button class="btn danger" onclick={() => unsubscribe([{ id: it.id, name }])}>Yes</button>
-                  <button class="btn secondary" onclick={() => (confirming = null)}>No</button>
+                  <span class="muted" id="row-q">Unsubscribe<span class="sr-only"> from {name}</span>?</span>
+                  <button class="btn danger" aria-describedby="row-q" onclick={async () => { await unsubscribe([{ id: it.id, name }]); void focusSoon(`[data-ask="row-${it.id}"]`); }}>Yes</button>
+                  <button class="btn secondary" data-no="row" aria-describedby="row-q" onclick={() => { confirming = null; void focusSoon(`[data-ask="row-${it.id}"]`); }}>No</button>
                 {:else}
                   {#if it.needsUpdate}<button class="btn secondary" onclick={() => update([it.id])} disabled={!!updating} title="Download the new version through Steam">Update</button>{/if}
                   {#if it.folder}<button class="btn ghost" onclick={() => openFolder(it.folder as string)} title="Show the mod folder">Folder</button>{/if}
-                  <button class="btn ghost" onclick={() => (confirming = { kind: "one", id: it.id, name })} title="Unsubscribe on Steam; the files are removed by Steam">Unsubscribe</button>
+                  <button class="btn ghost" data-ask="row-{it.id}" onclick={() => { confirming = { kind: "one", id: it.id, name }; void focusSoon('[data-no="row"]'); }} title="Unsubscribe on Steam; the files are removed by Steam">Unsubscribe</button>
                 {/if}
               </td>
             </tr>
@@ -417,14 +438,22 @@
   .tools { gap: 8px; flex-wrap: wrap; }
   .spacer { flex: 1; }
   h1 { margin: 0; }
-  .scroll { flex: 1; min-height: 0; overflow: auto; }
+  /* Focused only from code, when what a confirmation acted on is gone (D-291). */
+  h1:focus { outline: none; }
+  /* A row that Shift+Tab reaches scrolls clear of the sticky header (D-291). */
+  .scroll { flex: 1; min-height: 0; overflow: auto; scroll-padding-top: 32px; }
 
   .search { flex: 0 1 240px; min-width: 120px; box-sizing: border-box; height: 26px; padding: 0 9px; border-radius: var(--radius); border: 1px solid var(--border-control); background: var(--bg-row); color: var(--fg); font-size: 12.5px; }
   .search:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
 
   .chips { display: inline-flex; gap: 5px; }
   .chip { all: unset; cursor: pointer; box-sizing: border-box; height: 26px; padding: 0 10px; display: inline-flex; align-items: center; gap: 5px; border-radius: var(--radius); border: 1px solid var(--border-control); color: var(--fg-muted); font-size: 12.5px; white-space: nowrap; }
-  .chip.on { background: color-mix(in srgb, var(--accent) 22%, var(--bg-row)); color: var(--fg); border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
+  /* `--selected-edge` is set only for the light theme's lime, amber, red and green, whose
+     mixed edge fell under 3:1 against the page (app.css, D-291). */
+  .chip.on { background: color-mix(in srgb, var(--accent) 22%, var(--bg-row)); color: var(--fg); border-color: var(--selected-edge, color-mix(in srgb, var(--accent) 60%, var(--border))); }
+  /* `all: unset` outranks app.css's `button:focus-visible`, so these had no focus ring at
+     all; the same ring as the other chips (D-291). */
+  .chip:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
   .chip:disabled { opacity: 0.45; cursor: default; }
   .chip .n { color: var(--fg-muted); font-variant-numeric: tabular-nums; }
   .chip.on .n { color: var(--fg); }
@@ -433,6 +462,7 @@
 
   .th { all: unset; cursor: pointer; }
   .th:hover { color: var(--fg); }
+  .th:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; border-radius: 3px; }
 
   table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
   th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }

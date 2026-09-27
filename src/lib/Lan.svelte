@@ -44,21 +44,34 @@
   const lastScan = $derived(servers.done?.source === "lan" ? servers.done : null);
   /** Only a selection this page shows drives the grid and the pane (D-240), as on Favourites. */
   const selected = $derived(servers.lanRows.find((r) => r.id === servers.selectedId) ?? null);
+  let searchEl = $state<HTMLInputElement | null>(null);
+
+  /** Escape closes the pane from anywhere on the page, as it does on Servers (D-291). */
+  function onKey(e: KeyboardEvent) {
+    if (e.key !== "Escape" || servers.joiningId || !selected) return;
+    const t = e.target;
+    if (t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement) return;
+    servers.select(null);
+  }
 </script>
 
+<svelte:window onkeydown={onKey} />
+
 <div class="lan">
+  <h1 class="sr-only">LAN</h1>
   <div class="top">
     <div class="bar">
       <button class="btn" onclick={scan} disabled={!servers.steam?.initialized || busy} title="Ask Steam's LAN discovery for DayZ servers on your network">
         {busy ? "Scanning…" : "Scan LAN"}
       </button>
-      <input class="search" type="search" placeholder="Search…" value={typed} oninput={(e) => (typed = e.currentTarget.value, box.set(typed))} aria-label="Search LAN servers" />
-      <span class="muted">
+      <input class="search" type="search" placeholder="Search…" value={typed} bind:this={searchEl} oninput={(e) => (typed = e.currentTarget.value, box.set(typed))} aria-label="Search LAN servers" />
+      <!-- A scan's result is said when it lands (D-291). -->
+      <span class="muted" role="status">
         {servers.lanRows.length}{#if servers.lanRows.length !== servers.lanTotal} of {servers.lanTotal}{/if} server{servers.lanTotal === 1 ? "" : "s"} on your network
         {#if lastScan}· scan answered {lastScan.responded} in {(lastScan.elapsedMs / 1000).toFixed(1)} s{#if scannedAt} at {scannedAt}{/if}{/if}
       </span>
       {#if servers.steam && !servers.steam.initialized}<span class="warn">Steam is not running; LAN discovery needs it and works once it is up.</span>{/if}
-      {#if servers.error}<span class="error">{servers.error}</span>{/if}
+      {#if servers.error}<span class="error" role="alert">{servers.error}</span>{/if}
     </div>
   </div>
   <!-- The unfiltered count: with a search typed on the Servers page (the box is shared),
@@ -86,6 +99,11 @@
         friendsOn={servers.friendsOn}
         modsByServer={servers.modsByServer}
         empty={`No LAN server matches "${servers.filters.search.trim()}". The search box is shared with the Servers page.`}
+        label="LAN servers"
+        onSearch={() => {
+          searchEl?.focus();
+          searchEl?.select();
+        }}
       />
       {#if selected}
         <DetailsPane row={selected} localVersion={servers.localVersion} shows={(id) => servers.lanRows.some((r) => r.id === id)} />

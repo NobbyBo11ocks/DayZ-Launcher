@@ -167,6 +167,7 @@
 </script>
 
 <div class="friends">
+  <h1 class="sr-only">Friends</h1>
   <div class="top">
     <div class="bar">
       <button class="btn" onclick={() => void load()} disabled={loading || !steamOk}>{loading ? "Refreshing…" : "Refresh"}</button>
@@ -192,7 +193,7 @@
   {:else}
     <div class="scroll">
       <table>
-        <thead><tr><th>Name</th><th>Status</th><th>Server</th><th></th></tr></thead>
+        <thead><tr><th>Name</th><th>Status</th><th>Server</th><th><span class="sr-only">Join</span></th></tr></thead>
         <tbody>
           {#each visible as f (f.steamId)}
             {@const row = serverOf(f)}
@@ -224,7 +225,8 @@
               </td>
               <td class="act">
                 {#if f.server}
-                  <button class="btn" onclick={() => join(f)} disabled={joining !== null} title="Join the same server">{joining === f.steamId ? "…" : "Join"}</button>
+                  <!-- Named for the friend, and for what it is doing while it looks (D-291). -->
+                  <button class="btn" onclick={() => join(f)} disabled={joining !== null} title="Join the same server" aria-label={joining === f.steamId ? `Looking for ${f.name}'s server` : `Join ${f.name}'s server`}>{joining === f.steamId ? "…" : "Join"}</button>
                 {/if}
               </td>
             </tr>
@@ -243,7 +245,8 @@
   .check input { accent-color: var(--accent-ink); }
   .empty { margin: auto; text-align: center; max-width: 480px; }
   .empty p { margin: 4px 0; }
-  .scroll { flex: 1; min-height: 0; overflow: auto; padding: 0 16px; }
+  /* A row that Shift+Tab reaches scrolls clear of the sticky header (D-291). */
+  .scroll { flex: 1; min-height: 0; overflow: auto; padding: 0 16px; scroll-padding-top: 30px; }
   table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
   th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
   th { position: sticky; top: 0; background: var(--bg); color: var(--fg-muted); font-weight: 500; }

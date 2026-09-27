@@ -47,10 +47,12 @@
 </script>
 
 <div class="backdrop" role="presentation">
-  <div class="card" role="dialog" aria-modal="true" aria-labelledby="welcome-title" bind:this={cardEl} tabindex="-1" onkeydown={trap}>
+  <!-- The three points are the dialog's description, so they are read with its name:
+       they were never read at all (D-291). -->
+  <div class="card" role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-describedby="welcome-points" bind:this={cardEl} tabindex="-1" onkeydown={trap}>
     <img class="logo" src={logoUrl} alt="" width="132" height="132" draggable="false" />
     <h2 id="welcome-title">Welcome to DZSA CrayZ Launcher</h2>
-    <ol>
+    <ol id="welcome-points">
       <li><strong>Steam stays in charge.</strong> The server list comes from Steam, mods download through the Workshop, and the game starts through BattlEye exactly like the official launcher. Keep Steam running.</li>
       <li><strong>Player counts are verified.</strong> More than half of the servers on Steam fake their population. Every number you see is checked directly with the server; fakes are hidden by default ("Hide inflated" in the Servers filters).</li>
       <li><strong>Join in one click.</strong> Pick a server, press Join. Missing mods download with progress and DayZ launches connected.</li>
@@ -58,6 +60,8 @@
     <div class="row">
       <button class="btn secondary" onclick={importFavourites} disabled={importing}>{importing ? "Importing…" : "Import favourites from the official launcher"}</button>
       {#if imported}<span class="muted">{imported}</span>{/if}
+      <!-- The result, said from a region that exists before it does (D-291). -->
+      <span class="sr-only" role="status">{imported ?? ""}</span>
     </div>
     <footer>
       <span class="muted small">Keys: <kbd>/</kbd> search · <kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> join · <kbd>F</kbd> favourite</span>
