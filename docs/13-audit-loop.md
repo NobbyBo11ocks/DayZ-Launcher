@@ -32,4 +32,5 @@ Mark a row `IN PROGRESS` before starting it, and leave notes there if work stops
 
 ## Waiting for a check on the reference PC
 
-- ~~v0.1.54 (D-264)~~ Seen 2026-09-25: the in-app updater took 0.1.52 to 0.1.54 by itself, and afterwards the desktop shortcut showed the bigger mask and the taskbar button was bigger and crisp (host-side captures before and after, compared side by side). Nothing waiting here now.
+- Q28 (D-290): the whole app read 358–364 MB against the 330 MB budget on v0.1.70, with the page on screen unknown. Read it again 9 minutes after a cold start with the window at 1280×800, once on Servers and once on News, and note the cache's row count from the start-up log line (Logs page), to tell the row store from the pictures before deciding between a smaller renderer and a new budget.
+- ~~v0.1.54 (D-264)~~ Seen 2026-09-25: the in-app updater took 0.1.52 to 0.1.54 by itself, and afterwards the desktop shortcut showed the bigger mask and the taskbar button was bigger and crisp (host-side captures before and after, compared side by side).
