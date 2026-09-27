@@ -1,5 +1,6 @@
 //! One-shot inventory of Steam, libraries, the DayZ install, Workshop items and
-//! `!Workshop` junctions. Serialised to the join plan and the Mods page; the Diagnostics view it was written for went in D-168.
+//! `!Workshop` junctions. Serialised for the Mods page and read in-process by the join
+//! plan; the Diagnostics view it was written for went in D-168.
 
 use std::path::Path;
 use std::time::Instant;
@@ -246,7 +247,7 @@ pub fn collect() -> AppResult<Diagnostics> {
         }
     } else if steam.path.is_some() {
         // A library on a disconnected drive is skipped by `find_dayz`, and "not
-        // installed" is then untrue (D-160). The Mods page shows this line (D-256).
+        // installed" is then untrue (D-165). The Mods page shows this line (D-256).
         warnings.push(match locate::unreachable_dayz_libraries(&libs).first() {
             Some(p) => format!(
                 "Steam has DayZ in {}, but that folder is not reachable; connect the drive and try again.",

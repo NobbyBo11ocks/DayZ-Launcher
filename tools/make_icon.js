@@ -8,8 +8,8 @@
 // dark outline and a green halo go under it, so it holds on a light taskbar as well as
 // a dark one, and a light on each eye.
 //
-// Writes docs/art/emblem.png (the cut-out, reused by the installer art, the README and
-// the site), in src-tauri/icons a multi-size .ico plus the PNG sizes Tauri bundles, and
+// Writes docs/art/emblem.png (the cut-out, which tools/nsis_art.js reuses for the
+// installer art), in src-tauri/icons a multi-size .ico plus the PNG sizes Tauri bundles, and
 // the app's own two marks in src/assets: the emblem for the title bar, where a framed
 // window shows its icon, and the logo for the welcome dialog, both at 2x.
 //

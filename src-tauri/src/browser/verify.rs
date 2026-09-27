@@ -1,7 +1,8 @@
 //! Population trust: rules R2–R5, the continuity rule R11 and R12 from docs/11-fake-population-detection.md.
 //!
-//! For each server: one A2S_INFO (fresh reported count, ping, clock) and one
-//! A2S_PLAYER (real head-count). The verdict compares the two and inspects the
+//! For each server: one A2S_PLAYER (the real head-count), preceded by an A2S_INFO
+//! (fresh reported count, ping, clock) when the check is on demand or the stored count
+//! is over `INFO_FRESH_SECS` old. The verdict compares the two and inspects the
 //! player entries for synthetic patterns.
 
 use std::collections::{HashMap, HashSet};
@@ -21,12 +22,14 @@ use super::ServerRow;
 pub enum Verdict {
     /// R2: PLAYER agrees with INFO (difference ≤ 4, D-233).
     Verified,
-    /// R3: INFO exceeds PLAYER by ≥ 5 or ≥ 20 % of max; R12: the list carries entries
-    /// no clock produced (D-238).
+    /// R3: INFO exceeds PLAYER by ≥ 5, or by ≥ 20 % of max with at least three missing
+    /// (D-233); R12: the list carries entries no clock produced (D-238).
     Inflated,
     /// R4: INFO answers with players > 0 but PLAYER never answers.
     Unverifiable,
-    /// R5: PLAYER list looks fabricated (identical durations, all young, or named).
+    /// R5: the PLAYER list looks fabricated (at most two distinct durations on a list
+    /// that is not all young, all young and repetitive, or any name); R11: its sessions
+    /// did not carry over between two checks.
     Synthetic,
     /// Neither INFO nor PLAYER answered.
     Offline,
@@ -54,7 +57,7 @@ pub struct Target {
     /// Unix seconds at which `reported` was read. The automatic pass skips INFO
     /// because Steam's is "a minute old at most" (D-047) — true of the default
     /// refresh, not of the full one D-141 made every Refresh, which takes minutes;
-    /// an older count is re-read (D-236). 0 when the age is unknown.
+    /// an older count is re-read (D-237). 0 when the age is unknown.
     pub reported_at: i64,
     /// The cached verdict was "synthetic", which R11 must not forget at a restart.
     pub was_synthetic: bool,
@@ -78,7 +81,7 @@ impl Target {
 /// Steam's own list is at most a minute old when the default refresh completes; a
 /// full refresh reaches its verification pass minutes after the populated partition
 /// was listed, and a restart or ordinary churn in between read as "INFO 60 vs PLAYER
-/// 4" — Inflated, and hidden until the next Refresh (D-236).
+/// 4" — Inflated, and hidden until the next Refresh (D-237).
 pub(crate) const INFO_FRESH_SECS: i64 = 60;
 
 #[derive(Debug, Clone, Serialize)]
@@ -188,7 +191,7 @@ pub fn judge(
                 let named = p.players.iter().any(|x| !x.name.is_empty());
                 // "Everyone joined in the last minute" is what an honest server looks
                 // like just after its scheduled restart, so on its own it no longer
-                // flags (D-160): it was hiding real servers every few hours. What gives
+                // flags (D-288): it was hiding real servers every few hours. What gives
                 // a fabricated list away is repetition — many players sharing very few
                 // distinct durations — so young sessions only count when they also
                 // repeat.
@@ -221,12 +224,12 @@ pub fn judge(
             let diff = reported - v;
             // Four ghosts of tolerance on every path, and deliberately so. It looked
             // like a fresh INFO could only differ from PLAYER by the joins and leaves
-            // in the 50 ms between the datagrams, and a slack of three was shipped
+            // in the 50 ms between the datagrams, and a tolerance of two was shipped
             // briefly on that reasoning; a 245-address live probe then found ~70
             // honest servers on one hosting provider whose INFO comes from an edge
             // cache and whose PLAYER is a 100-second snapshot. Around every restart
-            // the two disagree by a few for ~15 minutes, and three would have flagged
-            // them every three hours. The 20 % clause needs three ghosts: one or two
+            // the two disagree by a few for ~15 minutes, and that tolerance would have
+            // flagged them every three hours. The 20 % clause needs three ghosts: one or two
             // connecting players on a ten-slot server tripped it four times in 102
             // verdicts (D-233).
             if diff >= 5 || (max > 0 && diff * 5 >= max && diff >= 3) {
@@ -330,7 +333,7 @@ const CONTINUITY_STRIKES: u8 = 2;
 /// Checks further apart than this are not compared. Churn alone takes a steady,
 /// honest server under the one-in-five floor over an hour or two — sessions average
 /// about 58 minutes on docs/11's figure (91 % still there after 5½ minutes) — so two
-/// refreshes 90 minutes apart could strike it twice. At 30 minutes ~60 % remain (D-236).
+/// refreshes 90 minutes apart could strike it twice. At 30 minutes ~60 % remain (D-237).
 const CONTINUITY_MAX_GAP_SECS: f32 = 1800.0;
 /// The reason given while a standing R11 verdict waits for a check it can compare.
 pub const CONTINUITY_STANDING: &str =
@@ -384,9 +387,11 @@ pub fn best_carried_over(prev: &[f32], now: &[f32], dt: f32, window: f32, slack:
 /// Rule R11: real sessions carry over between checks, advanced by the time elapsed;
 /// a fabricated list is re-drawn on every query.
 ///
-/// The one tool found that fakes A2S_PLAYER (docs/11, T2) appends entries whose
-/// durations are `random() × 10 000` on each query, after the real ones. R2 passes it
-/// (INFO matches the list) and R5 passes it (distinct, not young, unnamed). Between
+/// The one tool found that fakes A2S_PLAYER (docs/11, T2) appended, in its first
+/// commit, entries whose durations are `random() × 10 000` on each query, after the
+/// real ones; the version it shipped writes zero-length entries instead, which R12
+/// catches (D-238). A faker that re-draws its list on every query passes R2 (INFO
+/// matches the list) and R5 (distinct, not young, unnamed). Between
 /// two checks a minute or more apart every real duration reappears advanced by the
 /// gap; the fakes never do. Two consecutive checks in which at most one session — or
 /// a fifth of them, on a busy server — carried over, and the list is synthetic. A
@@ -394,7 +399,7 @@ pub fn best_carried_over(prev: &[f32], now: &[f32], dt: f32, window: f32, slack:
 /// halved, which is a wipe or a mass leave and not a lie. A later check that carries
 /// over clears the strikes, so the verdict heals itself (D-233).
 ///
-/// A verdict stands until a comparison overturns it (D-236). The first sample after a
+/// A verdict stands until a comparison overturns it (D-237). The first sample after a
 /// restart, a check inside the minimum gap and a check beyond the maximum one all used
 /// to answer "no opinion", which the caller published as Verified: a farm got its
 /// fabricated count back at every launch and every time its row was opened. A cached
@@ -462,7 +467,7 @@ fn continuity_at(id: &str, durations: &[f32], was_synthetic: bool, now: Instant)
 
 /// `judge` plus the continuity rule, for every caller that publishes a verdict. The
 /// details pane called `judge` alone, so opening a row wrote "verified" over a
-/// standing R11 verdict, in the UI and in the cache (D-236).
+/// standing R11 verdict, in the UI and in the cache (D-237).
 pub fn judge_with_continuity(
     id: &str,
     info: Option<&Info>,
@@ -595,8 +600,8 @@ mod tests {
 
     #[test]
     fn continuity_redrawn_list_does_not_carry_over() {
-        // docs/11 T2: `random() × 10 000` on every query. One real player at 2 000 s
-        // carries over; nineteen fakes do not.
+        // A list re-drawn as `random() × 10 000` on every query, as T2's first commit
+        // did (docs/11). One real player at 2 000 s carries over; nineteen fakes do not.
         let mut a: Vec<f32> = (1..20).map(|i| (i * 7919 % 10_000) as f32).collect();
         a.push(2000.0);
         let mut b: Vec<f32> = (1..20).map(|i| (i * 104_729 % 10_000) as f32).collect();
@@ -620,12 +625,13 @@ mod tests {
 
     /// A re-drawn list is struck twice in a row; the verdict then survives a check too
     /// soon to compare, a check too far apart and an exempt one, and only a list that
-    /// carries over clears it (D-236).
+    /// carries over clears it (D-237).
     #[test]
     fn continuity_verdict_stands_until_a_comparison_clears_it() {
         let t0 = Instant::now();
         let at = |secs: u64| t0 + std::time::Duration::from_secs(secs);
-        // docs/11 T2: a fresh `random() × 10 000` list on every query (xorshift64).
+        // A fresh `random() × 10 000` list on every query, as T2's first commit did
+        // (docs/11; xorshift64).
         let fake = |seed: u64, n: usize| -> Vec<f32> {
             let mut x = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
             (0..n)
@@ -660,7 +666,7 @@ mod tests {
     }
 
     /// Churn on an honest server over a long gap is not evidence: two checks 90
-    /// minutes apart that share almost no sessions are not compared (D-236).
+    /// minutes apart that share almost no sessions are not compared (D-237).
     #[test]
     fn continuity_does_not_compare_across_long_gaps() {
         let t0 = Instant::now();
@@ -814,7 +820,7 @@ mod tests {
             )
             .0,
             Verdict::Verified,
-            "young but varied: what an honest server looks like just after a restart (D-160)"
+            "young but varied: what an honest server looks like just after a restart (D-288)"
         );
         assert_eq!(
             judge(

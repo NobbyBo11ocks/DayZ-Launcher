@@ -111,7 +111,7 @@
 
   /** The host's `log::area`, mirrored (D-256): heads without a chip of their own count
    *  under the chip that covers them, which is also what muting that chip silences. */
-  const FOLDED: Record<string, string> = { ui: "app", news: "app", junctions: "mods" };
+  const FOLDED: Record<string, string> = { ui: "app", news: "app", update: "app", junctions: "mods" };
   const area = (t: string) => {
     const head = t.split(":")[0] ?? t;
     return FOLDED[head] ?? head;

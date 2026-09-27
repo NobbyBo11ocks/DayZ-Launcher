@@ -48,14 +48,14 @@ export type Filters = {
 
 const FILTERS_KEY = "dayz-launcher.filters.v1";
 
-/** How long incoming rows are pooled before one merge into `rows` (D-160). */
+/** How long incoming rows are pooled before one merge into `rows` (D-164). */
 const ROW_FLUSH_MS = 350;
 
 /**
  * A pass that never reports back leaves its spinner on screen for ever, because the
  * matching `done` event is the only thing that clears it. These are deliberately far
  * above the measured times — a full verification of 2 600 servers took 39 s and a mod
- * scan of 2 400 a few minutes — so a slow machine is never cut short (D-160).
+ * scan of 2 400 a few minutes — so a slow machine is never cut short (D-162).
  */
 const VERIFY_DEADLINE_MS = 5 * 60_000;
 /** The worker's `MIN_REFRESH_INTERVAL` (sdk.rs): an automatic refresh inside it is declined. */
@@ -378,7 +378,7 @@ class ServersStore {
    * every write invalidates the whole derived chain — filter, sort, maps, countries,
    * counts — which measures ~13 ms at 19 000 rows, so applying each batch on arrival
    * spent ~130 ms of every second on the main thread for the length of a refresh and
-   * dropped frames while scrolling (D-160). Folding them into one flush costs at most
+   * dropped frames while scrolling (D-164). Folding them into one flush costs at most
    * `ROW_FLUSH_MS` of freshness on a list that already takes ~40 s to arrive.
    * Each row carries whether it came from the DZSA list, whose placeholders must not
    * replace measured values (D-242). That used to be guessed from a missing Steam
@@ -395,7 +395,7 @@ class ServersStore {
    *  its visibility effect on it: a search term with the list scrolled to the top
    *  leaves both viewport bounds at 0:25, so the effect never re-ran and the rows the
    *  search had just brought on screen waited up to 60 s to be verified (D-209).
-   *  Keeping data out of the key is the whole point of D-060 and D-160. */
+   *  Keeping data out of the key is the whole point of D-060 and D-288. */
   filterKey = $derived(JSON.stringify(this.filters));
 
   /** Lower-cased name + description per row, with the playstyle it claims and its map.
@@ -429,7 +429,7 @@ class ServersStore {
   #verifyingSince = 0;
   #scanningSince = 0;
   favourites = new SvelteSet<string>();
-  /** Servers joined before, newest first (D-076). */
+  /** Servers joined before, newest first (D-054). */
   history = $state<HistoryEntry[]>([]);
   /** Server the join dialog is open for. */
   joiningId = $state<string | null>(null);
@@ -651,11 +651,6 @@ class ServersStore {
     return out;
   });
 
-  /** Sorts rows in place by the chosen column. Shared so that the sort arrows the
-   *  Favourites and LAN tabs draw actually move their rows: both passed `servers.sort`
-   *  and `setSort` into the table while keeping a hard-coded busiest-first order, so
-   *  clicking a header moved the arrow, reordered nothing, and silently changed the
-   *  Servers page behind your back (D-209). */
   /** A map's display label, lower-cased, once per distinct raw map name (D-284). */
   #mapLabelLower = new Map<string, string>();
   #labelOf(map: string): string {
@@ -667,6 +662,11 @@ class ServersStore {
     return v;
   }
 
+  /** Sorts rows in place by the chosen column. Shared so that the sort arrows the
+   *  Favourites and LAN tabs draw actually move their rows: both passed `servers.sort`
+   *  and `setSort` into the table while keeping a hard-coded busiest-first order, so
+   *  clicking a header moved the arrow, reordered nothing, and silently changed the
+   *  Servers page behind your back (D-209). */
   #sortInPlace(out: ServerRow[]) {
     const { key, dir } = this.sort;
     const n = out.length;
@@ -998,7 +998,7 @@ class ServersStore {
       await listen<ServerRow[]>("servers:batch", (ev) => this.#enqueue(ev.payload, false)),
       await listen<ServerRow[]>("servers:dzsa-batch", (ev) => this.#enqueue(ev.payload, true)),
       await listen<RefreshDone>("servers:done", (ev) => {
-        // A rejected refresh never reached Steam (D-160). It is sent so the UI stops
+        // A rejected refresh never reached Steam (D-161). It is sent so the UI stops
         // waiting, not as a result: keeping it would replace a real summary with
         // "0 of 0 shown · 0 from Steam in 0 s" and read as a success.
         this.flushRows();
@@ -1103,7 +1103,7 @@ class ServersStore {
   /**
    * Clears a pass whose `done` event never arrived. Without this the status line
    * read "verifying player counts…" or "scanning mod lists…" until the app was
-   * restarted, and the user had no way to tell a slow pass from a dead one (D-160).
+   * restarted, and the user had no way to tell a slow pass from a dead one (D-162).
    */
   #watchdog() {
     const now = Date.now();
@@ -1149,7 +1149,7 @@ class ServersStore {
         let id = direct && this.rows.has(direct) ? direct : null;
         // Without a query port, the servers at that address are few: the one on this
         // game port is it. A map of every row by game port was rebuilt each minute for
-        // this, 11 ms at 40 000 rows and 19 ms at 71 000 (D-160, D-284).
+        // this, 11 ms at 40 000 rows and 19 ms at 71 000 (D-164, D-284).
         if (!id) {
           for (const sid of this.idsAt(f.server.ip)) {
             if (this.rows.get(sid)?.gamePort === f.server.gamePort) {
@@ -1164,7 +1164,7 @@ class ServersStore {
       for (const [key, names] of on) this.friendsOn.set(key, names);
     } catch (e) {
       // Keep the last value on screen, but a friends list that keeps failing is the
-      // first visible sign that the Steam session has gone (D-160).
+      // first visible sign that the Steam session has gone (D-288).
       logWarn("friends", `poll failed: ${describe(e)}`);
     }
   }
@@ -1353,8 +1353,9 @@ class ServersStore {
   }
 
   /**
-   * Drops the rows the cache pruned after a completed refresh (30 days unseen, never a
-   * favourite). The map is otherwise only ever added to, so a long-lived session kept
+   * Drops the rows the cache pruned after a completed refresh (unseen for 30 days; never
+   * counted and unseen for 3; or a fake or DZSA-only row that a whole listing of the
+   * empty servers left out; never a favourite, D-245, D-271). The map is otherwise only ever added to, so a long-lived session kept
    * in the WebView every server it had been sent since start-up (Q24, D-235).
    */
   dropRows(ids: string[]) {
@@ -1424,7 +1425,7 @@ class ServersStore {
       this.#pending.delete(v.id);
       this.#checkedAt.set(v.id, v.verifiedAt);
       this.#cloneTouched.add(v.id);
-      // Mirrors `apply_verifications` (cache.rs), rule for rule (D-236).
+      // Mirrors `apply_verifications` (cache.rs), rule for rule (D-237).
       const infoAnswered = v.pingMs != null;
       const synthetic = v.verdict === "synthetic";
       this.rows.set(v.id, {
@@ -1437,7 +1438,7 @@ class ServersStore {
         // above keeps reading `pingMs` alone, as the cache does.
         pingMs: v.pingMs ?? (r.pingMs === 0 && !isLanIp(r.ip) && v.playerRttMs != null ? v.playerRttMs : r.pingMs),
         tags: v.tags ?? r.tags,
-        // Keep the last real count when this check could not produce one (D-160) —
+        // Keep the last real count when this check could not produce one (D-288) —
         // but a list judged synthetic is not a count, and must not become the "last
         // head-count" R6 trusts.
         verifiedPlayers: synthetic ? null : (v.verified ?? r.verifiedPlayers),

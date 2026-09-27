@@ -40,7 +40,7 @@
     onFavourite: (id: string) => void;
     /** Friend names by server id (D-128): rows get a marker with the names in its tooltip. */
     friendsOn?: Map<string, string[]>;
-    /** What to say when there are no rows at all, instead of an empty grid (D-160). */
+    /** What to say when there are no rows at all, instead of an empty grid (D-165). */
     empty?: string;
     /** Scanned mod lists by server id (D-146): the Mods column counts them. */
     modsByServer?: Map<string, number[]>;
@@ -87,7 +87,7 @@
   $effect(() => {
     // Only the viewport window, never the data: `rows.length` changes on most
     // batches during a refresh, so it re-armed the timer before it could fire and
-    // on-demand verification fell back to the 60 s cadence below (D-160).
+    // on-demand verification fell back to the 60 s cadence below (D-288).
     // The sort belongs in the key. It never changes `rows.length`, so both bounds
     // came out equal, Svelte stopped the propagation and the rows now on screen were
     // not reported — they waited up to 60 s for the tick below. It is already a prop,
@@ -332,7 +332,7 @@
                           ? `Verified head-count (${clock(r.tags.timeMinutes)} in game)`
                           : "Reported by the server, not yet verified"}
             >
-              <!-- An unchecked count is dimmed and marked "?" (D-160). Steam vouching
+              <!-- An unchecked count is dimmed and marked "?" (D-288). Steam vouching
                    for a server keeps it in the list, but the number is still the
                    server's own, and showing it like a verified one is the gap a
                    server that answers INFO and firewalls PLAYER relies on. -->

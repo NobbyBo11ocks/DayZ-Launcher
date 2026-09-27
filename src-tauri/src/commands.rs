@@ -152,7 +152,8 @@ pub fn settings_set(state: State<'_, AppState>, settings: Settings) -> AppResult
 }
 
 /// Merges a partial UI-preferences object (theme, accent, filters, onboarded,
-/// lastUpdateCheckMs) into the settings file and returns the stored result (D-070).
+/// lastUpdateCheckMs, news, newsSeen) into the settings file and returns the stored
+/// result (D-070).
 /// Off the main thread for the same reason as `settings_set` (D-239).
 #[tauri::command(async)]
 pub fn ui_prefs_set(state: State<'_, AppState>, patch: serde_json::Value) -> AppResult<UiPrefs> {
@@ -231,7 +232,7 @@ pub fn servers_refresh(
 }
 
 /// Loads the DZSA list as a fallback when Steam is unavailable (D-089). Rows stream as
-/// `servers:batch`, the mod lists go into the cache, a `servers:done` with source
+/// `servers:dzsa-batch` (D-271), the mod lists go into the cache, a `servers:done` with source
 /// `dzsa` closes the import, and populated rows get the usual verification pass.
 /// Returns the number of servers imported.
 #[tauri::command]
@@ -252,13 +253,13 @@ pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResu
     let mut with_mods = 0usize;
     // Steam's own batch size: 500 DZSA rows came to ~229 KB an event, over docs/05 §4's
     // ~200 KB, where Steam's 358 are 207 KB (D-284).
-    for chunk in rows.chunks(358) {
+    for chunk in rows.chunks(crate::steam::sdk::BATCH_MAX_ROWS) {
         let batch: Vec<ServerRow> = chunk.iter().map(|r| r.row.clone()).collect();
         for r in &batch {
             if r.players > 0 {
                 if let Some(mut t) = Target::from_row(r) {
                     // DZSA's own count, of an age nobody knows: judged against a fresh
-                    // INFO, not against itself (D-236).
+                    // INFO, not against itself (D-237).
                     t.reported_at = 0;
                     targets.push(t);
                 }
@@ -313,7 +314,7 @@ pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResu
     }
     // `last_refresh` deliberately not written here. It seeds the Steam worker's 60 s
     // throttle across restarts (lib.rs), so a DZSA import used to make the *next*
-    // start skip its automatic Steam refresh without saying so - and D-160 already
+    // start skip its automatic Steam refresh without saying so - and D-096 already
     // says a non-Steam source must not claim the Steam refresh timestamp (D-220).
     let done = crate::steam::sdk::RefreshDone {
         total: n,
@@ -366,7 +367,7 @@ pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResu
             }
         }
     } else {
-        // Nothing to verify still has to close the pass (D-160): the UI sets
+        // Nothing to verify still has to close the pass (D-162): the UI sets
         // "verifying" as soon as the fallback is asked for, and only this event
         // clears it. An empty or all-empty DZSA list left it spinning for ever.
         let _ = app.emit("servers:verify-done", &VerifySummary::default());
@@ -391,16 +392,13 @@ pub struct VerifySummary {
     pub skipped: bool,
 }
 
-/// Verifies targets as a stream (D-193); only the events are batched: emits `servers:verified` (Vec<Verification>) per
-/// chunk and persists. With `announce`, also emits `servers:verify-done`
-/// (VerifySummary); only the automatic post-refresh pass announces, so on-demand
-/// checks of visible rows never masquerade as the full pass.
 /// The verification pass's own permit pool, kept at the interactive client's size —
 /// the pass is not being made gentler, it is being taken out of the queue the join
 /// dialog and the details pane share (D-193).
 pub const VERIFY_CONCURRENCY: usize = 128;
-/// Rows per `servers:verified` event. docs/05 §4 caps an event at ~200 KB and a row
-/// measures 558 B, so 128 rows is ~71 KB — small enough that the front end's derived
+/// Rows per `servers:verified` event. docs/05 §4 caps an event at ~200 KB and a
+/// `Verification` measures ~314 B (157 KB for 500, D-188), so 128 rows is ~40 KB —
+/// small enough that the front end's derived
 /// chain shrugs at it, large enough that a pass is not thousands of events.
 const VERIFY_FLUSH_ROWS: usize = 128;
 /// …and a partial batch goes out anyway once this long has passed, so the last few
@@ -410,9 +408,14 @@ const VERIFY_FLUSH_EVERY: std::time::Duration = std::time::Duration::from_millis
 /// long enough for a scheduled restart to come back (D-268).
 const OFFLINE_REREAD_AFTER: std::time::Duration = std::time::Duration::from_secs(240);
 /// The second look a server that answered nothing gets, before it is called offline:
-/// a longer wait than the first, INFO included (D-160).
+/// a longer wait than the first, INFO included (D-047).
 const PATIENT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(2500);
 
+/// Verifies targets as a stream (D-193); only the events are batched: emits
+/// `servers:verified` (Vec<Verification>) per chunk and persists. With `announce`, also
+/// emits `servers:verify-done` (VerifySummary); only the pass after a Steam refresh or
+/// a DZSA import announces, so on-demand checks of visible rows never masquerade as a
+/// full pass.
 pub async fn run_verification(
     app: AppHandle,
     cache: Arc<Mutex<Cache>>,
@@ -423,9 +426,9 @@ pub async fn run_verification(
     let t0 = Instant::now();
     // The automatic pass (announce) relies on Steam's fresh INFO and sends PLAYER only;
     // on-demand checks of visible rows also refresh ping and clock. A target whose INFO
-    // is over a minute old is re-read either way (`verify_one`, D-236).
+    // is over a minute old is re-read either way (`verify_one`, D-237).
     let with_info = !announce;
-    // A standing R11 verdict survives a restart (D-236). Only the automatic pass needs
+    // A standing R11 verdict survives a restart (D-237). Only the automatic pass needs
     // the lookup: its targets come from Steam's batch rows, which carry no verdict; an
     // on-demand check builds its targets from cached rows that already carry it, and
     // ran this full scan — 9.9 ms at 71 000 rows — on every visible-row change. A
@@ -472,7 +475,7 @@ pub async fn run_verification(
     let mut pending = verify::verify_stream(&client, targets, with_info);
     let mut batch: Vec<Verification> = Vec::with_capacity(VERIFY_FLUSH_ROWS);
     let mut last_flush = Instant::now();
-    // Standing R11 verdicts this pass could not compare (D-236): they get a second
+    // Standing R11 verdicts this pass could not compare (D-237): they get a second
     // PLAYER read once the minimum gap has passed, below.
     let mut standing: Vec<Target> = Vec::new();
     while let Some(v) = pending.next().await {
@@ -810,7 +813,7 @@ pub async fn run_mod_scan(
         // The same handful of popular mods appears on most servers in a chunk, so
         // sending every occurrence made this event ~10x larger than it needs to be
         // (200 servers x ~30 mods vs a few hundred distinct ids) — docs/05 §4 caps
-        // an event at ~200 KB (D-160).
+        // an event at ~200 KB (D-164).
         let mut seen: HashSet<u64> = HashSet::with_capacity(256);
         let mut names: Vec<(u64, String)> = Vec::with_capacity(256);
         for (_, mods) in &batch {
@@ -830,7 +833,7 @@ pub async fn run_mod_scan(
         let _ = tauri::async_runtime::spawn_blocking(move || {
             if let Ok(mut c) = c.lock() {
                 // One transaction for the chunk, not one per server: measured
-                // 43-51 ms against 8-10 ms for 200 servers (D-160).
+                // 43-51 ms against 8-10 ms for 200 servers (D-164).
                 if let Err(e) = c.replace_server_mods_many(&batch, now) {
                     crate::log_error!(
                         "cache",
@@ -909,7 +912,8 @@ pub async fn mods_scan(app: AppHandle, state: State<'_, AppState>) -> AppResult<
     // two scans at 200 pps over the same chunks (D-204).
     // …but a button press that lands on a running scan has to say so. Without this the
     // command returned Ok, the spawned task logged "ignored" and gave up, and the only
-    // thing the user saw was a watchdog clearing the flag ~2 min later (D-209).
+    // thing the user saw was the store's watchdog clearing the flag once its 20-minute
+    // deadline passed (D-209).
     if state.scanning.load(Ordering::Acquire) {
         return Err(AppError::Internal("A mod scan is already running.".into()));
     }
@@ -1152,9 +1156,10 @@ pub fn logs_path() -> Option<String> {
 }
 
 /// The WebView's own diagnostics: unhandled errors, failed commands, view timings.
-/// Frontend levels are clamped to the same four, and the target is prefixed so the
-/// origin is never ambiguous in the file.
-#[tauri::command]
+/// Frontend levels are clamped to the same three, and the target is prefixed so the
+/// origin is never ambiguous in the file. `async` because the entry is appended to
+/// launcher.log, and a plain command runs on the main thread (D-239).
+#[tauri::command(async)]
 pub fn log_ui(level: String, target: String, message: String) {
     let lvl = match level.as_str() {
         "error" => crate::log::Level::Error,
@@ -1162,7 +1167,7 @@ pub fn log_ui(level: String, target: String, message: String) {
         _ => crate::log::Level::Info,
     };
     // One entry is one line in launcher.log, so a message carrying newlines could
-    // forge entries and make the log untrustworthy to read back (D-160).
+    // forge entries and make the log untrustworthy to read back (D-163).
     let flatten = |s: &str, n: usize| -> String {
         s.chars()
             .take(n)
@@ -1237,7 +1242,7 @@ pub async fn server_details(
     let (mut info, mut rules, mut players) =
         tokio::join!(client.info(addr), client.rules(addr), client.players(addr));
     // A server that answered nothing gets the second, patient look every other check
-    // gives one (the pass and the visible rows, D-160). Without it one timed-out click
+    // gives one (the pass and the visible rows, D-047). Without it one timed-out click
     // published "offline" and hid a server verified a minute before, and a hidden row
     // is checked again only when something else looks at it (D-272).
     if info.is_err() && players.is_err() {
@@ -1268,7 +1273,7 @@ pub async fn server_details(
     });
     let judged_against = if stale && info.is_err() { -1 } else { reported };
     // With R11, like every other check: `judge` alone published "verified" over a
-    // standing "synthetic" verdict each time the row was opened (D-236).
+    // standing "synthetic" verdict each time the row was opened (D-237).
     let (verdict, verified, reason) = verify::judge_with_continuity(
         &id,
         info.as_ref().ok().map(|r| &r.value),
@@ -1397,8 +1402,8 @@ pub struct JoinPlan {
     pub warnings: Vec<String>,
 }
 
-/// Everything the join dialog needs: required mods (live RULES), local state, Steam
-/// titles/sizes for anything missing, and preconditions.
+/// Everything the join dialog needs: required mods (live RULES, else the stored list),
+/// local state, Steam titles/sizes for every required mod, and preconditions.
 #[tauri::command]
 pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<JoinPlan> {
     let row = cached_row(&state.cache, &id)
@@ -1581,7 +1586,7 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
     if !diag.steam.running {
         warnings.push("Steam is not running; DayZ cannot start without it.".into());
     }
-    // Re-checked here, not taken from start-up (D-159): the launcher often starts before
+    // Re-checked here, not taken from start-up (D-288): the launcher often starts before
     // Steam, and a missing Steam pid reads as "matched", so the start-up answer was
     // usually the wrong one by the time anybody pressed Join. `diag` already has the
     // live pid from this call.
@@ -1609,7 +1614,7 @@ pub async fn join_plan(state: State<'_, AppState>, id: String) -> AppResult<Join
         crate::proc::ElevationState::Matched => {}
     }
     // Two of the three conditions that grey the Join button out had nothing to say
-    // for themselves, so the dialog showed a disabled button and no reason (D-160).
+    // for themselves, so the dialog showed a disabled button and no reason (D-165).
     let game_found = diag.dayz.is_some();
     let battleye_present = diag.dayz.as_ref().is_some_and(|g| g.has_battleye_exe);
     if !game_found {
@@ -1679,8 +1684,9 @@ fn worker_persona(state: &State<'_, AppState>) -> Option<String> {
 }
 
 /// Subscribe + download the given Workshop items; progress via `mods:progress`,
-/// completion via `mods:done` (both carry `job`).
-#[tauri::command]
+/// completion via `mods:done` (both carry `job`). `async`: the request is logged to
+/// the file first, which a plain command would do on the main thread (D-239).
+#[tauri::command(async)]
 pub fn mods_sync(
     state: State<'_, AppState>,
     job: u64,
@@ -1704,8 +1710,9 @@ pub fn mods_sync(
         .map_err(AppError::Internal)
 }
 
-/// Builds junctions and the argument line, then starts `DayZ_BE.exe`. Emits
-/// `launch:started` (Launched) now and `launch:exited` ({pid, code}) later.
+/// Builds junctions and the argument line, then starts `DayZ_BE.exe`. Returns
+/// `Launched` once it has started, and emits `launch:exited` ({pid, code}) when it
+/// ends (the `launch:started` event went in D-229).
 #[tauri::command]
 pub async fn launch_game(
     app: AppHandle,
@@ -1847,7 +1854,7 @@ pub async fn launch_game(
             // own launches passed CF last. Passing RULES as it came ran every modded
             // server's load order backwards on the client; reversed, it matches what the
             // server's admin wrote and what the official launcher does (RPT logs,
-            // S-41; D-008 corrected by D-265).
+            // S-89; D-008 corrected by D-265).
             mod_paths: links.iter().rev().map(|l| l.junction.clone()).collect(),
             ip: row.ip.clone(),
             game_port,
@@ -1878,7 +1885,7 @@ pub async fn launch_game(
     // handed DayZ itself a below-normal priority — the opposite of the intent.
     // A second DayZ would fight the first for the game's own single-instance lock,
     // and its immediate exit used to restore the launcher's priority while the real
-    // game was still playing (D-119, D-160).
+    // game was still playing (D-119, D-165).
     if let Some(pid) = crate::steam::registry::process::find_named("DayZ_x64.exe")
         .or_else(|| crate::steam::registry::process::find_named("DayZ_BE.exe"))
     {
@@ -1923,7 +1930,7 @@ pub async fn launch_game(
         let _ = tauri::async_runtime::spawn_blocking(move || {
             if let Ok(c) = c.lock() {
                 // Q22: a join that is not recorded is exactly the reported symptom,
-                // so the failure has to leave a trace (D-160).
+                // so the failure has to leave a trace (D-162).
                 if let Err(e) = c.history_add(&row_for_history, mods) {
                     crate::log_error!("cache", "history_add failed: {e}");
                 }
@@ -2198,7 +2205,7 @@ pub async fn direct_connect(
     // log to explain why. Every other cache write on this path reports (D-220).
     // The upsert keeps a stored verdict; the probe's row has none, and a check built
     // from it alone published "verified" over a standing "synthetic" whenever R11 had
-    // no sample yet, as the details pane once did (D-236, D-268).
+    // no sample yet, as the details pane once did (D-237, D-268).
     let was_synthetic = tauri::async_runtime::spawn_blocking(move || match c.lock() {
         Ok(mut c) => {
             c.upsert(&stored)
@@ -2347,7 +2354,7 @@ pub async fn import_official_favourites(
         let c = Arc::clone(&state.cache);
         let n = new_rows.len();
         // The count was already tallied above, so swallowing these writes reported a
-        // successful import that saved nothing (D-160). Fail loudly instead.
+        // successful import that saved nothing (D-162). Fail loudly instead.
         type Stored = (Vec<ServerRow>, HashSet<String>);
         let stored = tauri::async_runtime::spawn_blocking(move || -> Result<Stored, String> {
             let mut c = c
@@ -2395,7 +2402,11 @@ pub async fn import_official_favourites(
         for t in &mut targets {
             t.was_synthetic |= synthetic.contains(&t.id);
         }
-        let _ = app.emit("servers:batch", &shown);
+        // In Steam's batch size, like the DZSA import: a long favourites file sent as
+        // one event went over docs/05 §4's ~200 KB from about 360 rows (D-287).
+        for chunk in shown.chunks(crate::steam::sdk::BATCH_MAX_ROWS) {
+            let _ = app.emit("servers:batch", chunk);
+        }
         tauri::async_runtime::spawn(run_verification(
             app.clone(),
             Arc::clone(&state.cache),

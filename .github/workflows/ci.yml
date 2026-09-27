@@ -1,5 +1,6 @@
-# Continuous checks on every push and pull request (D-071): the same gates that run
-# locally before a commit. Windows only, like the app.
+# Continuous checks on every push to main (tags excluded), every pull request and on
+# demand (D-071): the same gates that run locally before a commit. Windows only, like
+# the app.
 name: CI
 
 on:

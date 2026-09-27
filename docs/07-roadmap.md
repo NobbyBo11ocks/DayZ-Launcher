@@ -15,7 +15,7 @@ Each milestone ends with its verification steps run and recorded in [09-decision
 
 Out of scope for v1: Linux, server-owner listing/boosts, accounts, telemetry. (The LAN browser, once listed here, shipped in v0.1.6 via `lan_server_list`.)
 
-## After v0.1.0 (all 2026-09-21, released as v0.1.1–v0.1.5)
+## After v0.1.0 (one row per release, from 2026-09-21)
 
 | Release | Added | Decisions |
 |---|---|---|
@@ -81,6 +81,7 @@ Out of scope for v1: Linux, server-owner listing/boosts, accounts, telemetry. (T
 | v0.1.67 | Security and privacy, audited: mod junction names in plain ASCII, so a Workshop name cannot add game arguments; the News player cannot open windows outside its sandbox; deleted rows are zeroed in the cache | D-283 |
 | v0.1.68 | Performance at 40 000–71 000 servers, audited: name order kept up to date instead of rebuilt, packed-key sorts, the clone check limited to changed rows, the start-up list in columns (36 → 16 MB at 71 000), no mod index before the landing page, SQL-side scan rules and small prunes deleted by id; plus a sound on five quick clicks on the title bar's mark | D-284, D-285 |
 | v0.1.69 | The sound on five clicks of the title bar's mark removed again; the mark drags the window as before | D-286 |
+| v0.1.70 | Docs against code, audited: two log writes off the main thread, the updater and notification permissions narrowed to the commands used, updater log entries under App, favourites imported in 358-row batches, the RULES sampling tool fixed; docs/02, 03, 05, 06 and 11, the README and the site brought in line with the code, and 99 comment citations re-pointed | D-287, D-288 |
 | infra | GitHub Actions CI and tag-driven release workflow, release tools (`make_latest.js`, `verify_update_sig.js`, `nsis_template_check.js`, `workflow_check.js`) | D-063, D-071 |
 
 Candidates, not scheduled: code signing (Q11). The "friends on this server" marker listed here is **shipped** (v0.1.18, D-128) and Q21 is closed. Still unbuilt from the improvements audit, each with the measurement that would justify it: letting the user choose which page opens (the news feed has a median 7 days between posts, so six launches in seven land on nothing new), their own join history in the details pane, and probing favourites that have left the list at start-up. Rejected there with numbers: a "fresh wipe" chip (the median dated claim is 26 days old), a language filter (18 % of names carry a token), and a daily-update-check toggle on the installer page (one request a day against the news page's ~48).

@@ -258,7 +258,7 @@ pub fn run() {
             let cache = Arc::new(Mutex::new(match Cache::open(&db_path) {
                 Ok(c) => c,
                 Err(e) => {
-                    // D-160 moved a database aside when it would not open, so a corrupt
+                    // D-162 moved a database aside when it would not open, so a corrupt
                     // file could not stop the app starting with no window and no message.
                     // It then deleted the -wal and -shm unconditionally, and that is a way
                     // to destroy data rather than recover it (D-187): when the file is
@@ -321,8 +321,9 @@ pub fn run() {
 
             // Q22 and Q25 are both "the user's own rows are gone and nothing says when".
             // One line per start, before anything can write, is the before-and-after the
-            // investigation has never had — and it costs three counting queries against
-            // indexes on tables that hold tens of rows (D-193).
+            // investigation has never had — and it costs four counting queries, each under
+            // a tenth of a millisecond on a 71 000-server cache with 78 000 population
+            // samples (D-193, D-287).
             if let Ok(c) = cache.lock() {
                 match c.row_counts() {
                     Ok(n) => log_info!(
@@ -379,7 +380,7 @@ pub fn run() {
                                 if let Ok(mut c) = c.lock() {
                                     if let Err(e) = c.upsert(&rows) {
                                         // Release builds have no console, so this used to
-                                        // vanish entirely (D-160): a full disk lost the
+                                        // vanish entirely (D-162): a full disk lost the
                                         // whole cached list without a trace.
                                         log_error!("cache", "upsert of {} row(s) failed: {e}", rows.len());
                                     }
@@ -421,8 +422,8 @@ pub fn run() {
                             );
                             let _ = handle.emit("servers:done", &d);
                             // A LAN scan is not a list refresh: it must not push the
-                            // automatic refresh's throttle or age out cached rows, and a
-                            // rejected one fetched nothing at all (D-160): treating it as
+                            // automatic refresh's throttle or age out cached rows (D-096),
+                            // and a rejected one fetched nothing at all (D-161): treating it as
                             // real wrote last_refresh, pruned rows the list never renewed
                             // and reported "0 of 0 shown" as a success.
                             let full_list = d.source == "steam" && !d.rejected;
@@ -492,12 +493,13 @@ pub fn run() {
                                         let _ = c.population_prune(POPULATION_MAX_AGE_SECS);
                                         // A refresh writes thousands of rows and never
                                         // checkpointed, so the WAL reached 4.5 MB and every
-                                        // later start paid recovery over it (D-160).
+                                        // later start paid recovery over it (D-164).
                                         c.checkpoint();
                                     } else {
-                                        // A LAN scan still adds population samples;
-                                        // without this they grew for the whole session
-                                        // (D-160). The DZSA fallback never comes this
+                                        // No list refresh comes this way, but checks of
+                                        // the rows on screen still add population
+                                        // samples; without this they grew for the whole session
+                                        // (D-288). The DZSA fallback never comes this
                                         // way: `servers_dzsa` sends its own `servers:done`.
                                         let _ = c.population_prune(POPULATION_MAX_AGE_SECS);
                                     }
@@ -516,7 +518,7 @@ pub fn run() {
                                 let _ = handle.emit("servers:pruned", chunk);
                             }
                             // A rejected `Done` is an answer, not a result: the refresh
-                            // it refers to either never reached Steam (D-160) or is still
+                            // it refers to either never reached Steam (D-161) or is still
                             // running (D-197's busy reply). Taking `populated` there stole
                             // the live refresh's partial rows and spent the one-pass guard
                             // on them, so the real completion a minute later found the

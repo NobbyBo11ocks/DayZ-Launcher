@@ -64,7 +64,8 @@ pub struct DzsaRow {
 /// Downloads and converts the whole list. Blocking network work happens inside
 /// reqwest's own runtime; the JSON is deserialised once into the typed structs.
 pub async fn fetch() -> Result<Vec<DzsaRow>, String> {
-    // No redirects and https only, like the news client (D-160): reqwest would otherwise
+    // No redirects and https only (the news pictures' client refuses redirects the
+    // same way, D-163): reqwest would otherwise
     // follow a redirect from this third party to any host, plain http included, and
     // seed the cache from it (D-245).
     let client = reqwest::Client::builder()
@@ -82,7 +83,7 @@ pub async fn fetch() -> Result<Vec<DzsaRow>, String> {
     if !resp.status().is_success() {
         return Err(format!("DZSA answered HTTP {}", resp.status()));
     }
-    // The live list is ~24 MB; the cap is generous but finite (D-160).
+    // The live list is ~24 MB; the cap is generous but finite (D-163).
     let bytes = crate::http::body_capped(resp, 64 * 1024 * 1024, "DZSA server list").await?;
     let doc: Document = serde_json::from_slice(&bytes).map_err(|e| format!("DZSA JSON: {e}"))?;
     let now = ServerRow::now_unix();

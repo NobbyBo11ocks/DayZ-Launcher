@@ -200,7 +200,7 @@
         </div>
       {/if}
       <!-- A mod filter only matches servers whose mod list has been read. The scan runs
-           after every refresh; this asks for it now (D-160). It sat on the status line
+           after every refresh; this asks for it now (D-165). It sat on the status line
            under the search until that went, and it matters only with a mod chosen (D-250).
            One line, so it costs the column 21 px rather than a wrapped paragraph. -->
       {#if f.mod && (servers.modScanning || servers.unscannedModded > 0)}

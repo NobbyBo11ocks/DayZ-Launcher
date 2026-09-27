@@ -17,8 +17,10 @@
     <meta name="twitter:card" content="summary_large_image" />
 
     <style>
-      /* The launcher's own tokens (src/app.css), so the site and the app read as one
-         thing. No frameworks, no web fonts, no trackers — same rule as the app. */
+      /* After the launcher's tokens (src/app.css), so the site and the app read as one
+         thing. Three differ: --ok and --warn are brighter here than the app's, and
+         --border is the app's value from before D-197 changed it there. No frameworks,
+         no web fonts, no trackers — same rule as the app. */
       :root {
         --bg: #0f1216;
         --bg-elev: #161b22;
@@ -393,7 +395,7 @@
           <a class="btn" href="https://github.com/NobbyBo11ocks/DayZ-Launcher/releases/latest">Download for Windows</a>
           <a class="btn ghost" href="https://github.com/NobbyBo11ocks/DayZ-Launcher">Source on GitHub</a>
         </div>
-        <p class="under">Free · Windows 10 and 11 · 7.5 MB installer · no account, no telemetry</p>
+        <p class="under">Free · Windows 10 and 11 · 7.7 MB installer · no account, no telemetry</p>
 
         <div class="shot"><img src="servers.png" alt="The server browser: country flags, verified player counts, filters, and a details pane showing the server's mods and population history." /></div>
       </div>
@@ -427,13 +429,13 @@
       <section class="wrap">
         <h2>Measured, not claimed</h2>
         <p class="sub">
-          Taken on the reference machine — cold start and memory at v0.1.19 and v0.1.23 with the whole cached list loaded, the refresh as the median of five passes at v0.1.37. Every release is measured
-          against a written budget before it ships, and the numbers are in the repository.
+          Taken on the reference machine — cold start and memory at v0.1.19 and v0.1.23 with the whole cached list loaded, the refresh as the median of five passes at v0.1.37, the installer at v0.1.69. Each number
+          has a written budget, and every measurement so far is recorded in the repository.
         </p>
         <div class="stats">
           <div class="stat"><div class="v">0.43 s</div><div class="k">cold start to first frame</div></div>
           <div class="stat"><div class="v">0.20 %</div><div class="k">of one core, idle</div></div>
-          <div class="stat"><div class="v">4.7 MB</div><div class="k">installer</div></div>
+          <div class="stat"><div class="v">7.7 MB</div><div class="k">installer</div></div>
           <div class="stat"><div class="v">≈35 s</div><div class="k">populated-server refresh, then ≈25 s to verify</div></div>
           <div class="stat"><div class="v">~306 MB</div><div class="k">memory, whole app</div></div>
         </div>
@@ -462,7 +464,7 @@
               <li><strong>Launch profiles</strong>: saved sets of launch options, picked per join.</li>
               <li><strong>Friends</strong>: who is in DayZ, on which server, with a Join button.</li>
               <li><strong>Mod manager</strong>: update, unsubscribe, and clean up stale Workshop links.</li>
-              <li><strong>Signed automatic updates</strong>, verified before anything is installed.</li>
+              <li><strong>Signed one-click updates</strong>, verified before anything is installed.</li>
             </ul>
           </div>
         </div>
@@ -478,8 +480,9 @@
               <li><strong>The game servers</strong>, directly, to check ping, mods and who is really on them.</li>
               <li><strong>GitHub</strong>, for the update manifest and the installer.</li>
               <li><strong>Steam's news feed and its picture CDN</strong>, for the home page — with that page switched off, never.</li>
-              <li><strong>YouTube</strong>, only for the previews on that same page, and only while a video is playing.</li>
-              <li><strong>DZSA's public server list</strong>, only when Steam is unavailable and you ask for it.</li>
+              <li><strong>YouTube</strong>, for the preview pictures of video posts on that same page, and its no-cookie player only while a video plays.</li>
+              <li><strong>DZSA's public server list</strong>, when Steam will not start: once by itself if the last Steam refresh is over an hour old, and whenever you ask.</li>
+              <li><strong>Microsoft</strong>, once, for the WebView2 runtime if the installer finds none.</li>
             </ul>
           </div>
           <div>

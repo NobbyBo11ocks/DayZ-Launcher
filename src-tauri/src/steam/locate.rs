@@ -128,11 +128,9 @@ impl GameInstall {
     }
 }
 
-/// Finds DayZ by reading `appmanifest_221100.acf` in each library. Libraries whose
-/// `apps` map claims 221100 are checked first, then all others.
 /// Library folders Steam still lists as holding DayZ whose drive is not mounted
 /// right now. `find_dayz` skips them, and the resulting "DayZ is not installed" is
-/// simply untrue when the game sits on a disconnected drive (D-160).
+/// simply untrue when the game sits on a disconnected drive (D-165).
 pub fn unreachable_dayz_libraries(libs: &[Library]) -> Vec<PathBuf> {
     libs.iter()
         .filter(|l| l.has(DAYZ_APP_ID) && !l.steamapps().is_dir())
@@ -140,6 +138,8 @@ pub fn unreachable_dayz_libraries(libs: &[Library]) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Finds DayZ by reading `appmanifest_221100.acf` in each library. Libraries whose
+/// `apps` map claims 221100 are checked first, then all others.
 pub fn find_dayz(libs: &[Library]) -> AppResult<Option<GameInstall>> {
     let ordered = libs
         .iter()

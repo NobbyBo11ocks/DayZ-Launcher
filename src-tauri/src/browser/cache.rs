@@ -1,7 +1,8 @@
 //! SQLite cache of the last known server list so the UI renders instantly on
-//! start (docs/05 §3, budget "cold start to first painted list < 1 s").
+//! start (docs/05 §3; budget "cold start to first painted view < 1.0 s", docs/05 §6).
 //! rusqlite 0.40 with the bundled SQLite; WAL journal; one connection behind a mutex.
-//! Pre-release schema policy: a version mismatch drops and recreates the table.
+//! Pre-release schema policy: a version mismatch drops and recreates the server table
+//! and the three mod tables keyed on it.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -426,8 +427,8 @@ impl Cache {
     /// `(busy 0, log 12, checkpointed 0)` with one reader on an older snapshot — and
     /// then the row exists only in the write-ahead log, which is exactly the state
     /// Q22 kept producing. FULL waits for the readers instead of stepping around
-    /// them, bounded by the connection's busy timeout so a stuck reader costs a few
-    /// seconds and a log line rather than the thread (D-194).
+    /// them, bounded by a 250 ms busy timeout so a stuck reader costs a quarter of a
+    /// second and a log line rather than the thread (D-194, D-197).
     pub fn checkpoint_durable(&self) {
         if self.checkpoint() {
             return;
@@ -539,7 +540,7 @@ impl Cache {
     }
 
     /// Every cached row, unordered: the browser puts them in a map and sorts by the
-    /// column the user picked, so sorting here only cost a temp b-tree (D-160).
+    /// column the user picked, so sorting here only cost a temp b-tree (D-164).
     pub fn load_all(&self) -> rusqlite::Result<Vec<ServerRow>> {
         let mut stmt = self
             .conn
@@ -550,8 +551,9 @@ impl Cache {
 
     /// Addresses a mod scan should query. Building a full `ServerRow` for all ~19 000
     /// cached servers to keep the 13 % that qualify measured 19 ms and ~7 MB of
-    /// strings that were thrown away immediately (D-175); this reads the eight
-    /// columns the rules actually use and joins the last scan time in one pass.
+    /// strings that were thrown away immediately (D-175); this applies the population
+    /// rules in SQL and reads out only the four columns a target needs, with the last
+    /// scan and the last failure joined in the same pass (D-284).
     ///
     /// The rules match the browser exactly: modded, not rule-R0 inflated, with real
     /// players (a verified head-count, or Steam's own `hasplayers` answer when it has
@@ -637,7 +639,7 @@ impl Cache {
 
     pub fn get(&self, id: &str) -> rusqlite::Result<Option<ServerRow>> {
         // Called up to 120 times per on-demand verification, so the SQL is compiled
-        // once rather than per row (D-160).
+        // once rather than per row (D-164).
         let mut stmt = self.conn.prepare_cached(GET_SQL.as_str())?;
         stmt.query_row(params![id], Self::row_from).optional()
     }
@@ -693,14 +695,15 @@ impl Cache {
     pub fn apply_verifications(&mut self, results: &[Verification]) -> rusqlite::Result<()> {
         let tx = self.conn.transaction()?;
         {
-            // A check that could not count keeps the last count it did (D-160): a single
+            // A check that could not count keeps the last count it did (D-288): a single
             // dropped PLAYER datagram used to write NULL over a good head-count, after
             // which the UI fell back to the server's own — possibly inflated — number
             // with no marking at all. The verdict still records why it could not be
             // refreshed, and `verified_at` only advances when there is a fresh count.
             //
-            // Three more rules, all D-236; every expression reads the row as it was
-            // before this UPDATE, which is how SQLite evaluates SET.
+            // Four more rules, the first three D-237 and the ping D-247; every
+            // expression reads the row as it was before this UPDATE, which is how
+            // SQLite evaluates SET.
             // * A list judged synthetic is not a head-count: keeping it as one let R6's
             //   "counted before" exemption trust a farm again at its fabricated number
             //   the first time its PLAYER timed out.
@@ -759,7 +762,7 @@ impl Cache {
 
     /// Servers whose last verdict was "synthetic". Steam's batch rows carry no verdict,
     /// so without this the first check after a launch judged every farm afresh and
-    /// published it as verified (R11 remembers only for the life of the process, D-236).
+    /// published it as verified (R11 remembers only for the life of the process, D-237).
     pub fn synthetic_ids(&self) -> rusqlite::Result<std::collections::HashSet<String>> {
         let mut stmt = self
             .conn
@@ -930,7 +933,8 @@ impl Cache {
 
     // ----- mod lists (D-080) ---------------------------------------------------
 
-    /// Replaces the stored mod lists of many servers in one transaction (DZSA import).
+    /// Replaces the stored mod lists of many servers in one transaction (the DZSA import,
+    /// the mod scan, and the join plan's live RULES read).
     pub fn replace_server_mods_many(
         &mut self,
         list: &[(String, Vec<(u64, String)>)],
@@ -984,9 +988,10 @@ impl Cache {
         // Two things the live RULES path already did, which this fallback did not (D-239):
         // Workshop id 0 is a server-side mod nobody can download, which left a join
         // dialog offering a download that could never succeed and a launch that refused
-        // with "mod (0) is not installed" (D-221); and `-mod=` goes in the order the
-        // server reports (D-008), where the primary key's index returned them by id.
-        // Each list is deleted before it is written again, so rowid is that order.
+        // with "mod (0) is not installed" (D-221); and the list comes back in the order
+        // the server reports it (D-008), which the launch reverses for `-mod=` (D-265),
+        // where the primary key's index returned them by id. Each list is deleted before
+        // it is written again, so rowid is that order.
         let mut stmt = self.conn.prepare_cached(
             "SELECT mod_id, name FROM server_mods WHERE server_id = ?1 AND mod_id > 0 ORDER BY rowid",
         )?;
@@ -1460,7 +1465,7 @@ mod tests {
         );
         // Offline verification (no INFO): keeps ping and keywords, records the verdict,
         // and — since it produced no count — keeps the last count and the time it was
-        // taken (D-160). Overwriting them with NULL made the UI fall back to the
+        // taken (D-288). Overwriting them with NULL made the UI fall back to the
         // server's own number with nothing to say it was unverified.
         c.apply_verifications(&[Verification {
             id: id.clone(),
@@ -1591,7 +1596,7 @@ mod tests {
         );
     }
 
-    /// D-236: a stale fallback never moves the claim; a list judged synthetic is not a
+    /// D-237: a stale fallback never moves the claim; a list judged synthetic is not a
     /// head-count; our own count of real players clears a listing's "empty" only when
     /// that listing said 0 too.
     #[test]

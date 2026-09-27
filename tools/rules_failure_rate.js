@@ -20,11 +20,20 @@ const DB = `${process.env.LOCALAPPDATA}\\com.dayzlauncher.desktop\\cache.db`;
 const { DatabaseSync } = require("node:sqlite");
 const db = new DatabaseSync(DB, { readOnly: true });
 
-// Populated, not flagged as inflated, seen recently: the rows a user actually browses.
+// Populated by the rules the app's own mod scan uses (`scan_targets`: not rule R0, and a
+// head-count above zero or, not counted yet, Steam's own "populated"), listed within a
+// day of the cache's newest listing (so an older copy of the cache still samples),
+// public addresses only: the rows a user actually browses. Without these rules 70 % of
+// the sample pool was farm rows that Steam lists as empty (D-245, D-287).
 const rows = db
   .prepare(
     `SELECT ip, query_port, players, name FROM servers
-     WHERE players > 0 AND ip NOT LIKE '10.%' AND ip NOT LIKE '192.168.%'
+     WHERE NOT (steam_empty IS 1 AND players > 0)
+       AND (verified_players > 0
+            OR (verified_players IS NULL AND steam_empty IS 0 AND players > 0))
+       AND last_seen >= (SELECT MAX(last_seen) FROM servers) - 86400
+       AND NOT (ip LIKE '10.%' OR ip LIKE '192.168.%' OR ip LIKE '127.%'
+                OR ip GLOB '172.1[6-9].*' OR ip GLOB '172.2[0-9].*' OR ip GLOB '172.3[01].*')
      ORDER BY RANDOM() LIMIT ?`,
   )
   .all(SAMPLE);

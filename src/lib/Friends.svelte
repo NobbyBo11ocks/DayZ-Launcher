@@ -105,11 +105,11 @@
 
   $effect(() => {
     if (!steamOk) return;
-    // Same rule as the poll below (D-159): opening this page must not re-open an
+    // Same rule as the poll below (D-165): opening this page must not re-open an
     // idle-released session either, or simply looking at it restarts Steam's
-    // playtime clock. Refresh does it deliberately when the user asks (D-160).
+    // playtime clock. Refresh does it deliberately when the user asks (D-165).
     if (!steamIdle) untrack(() => void load());
-    // Skip the poll while the Steam session is idle-released (D-159): asking for
+    // Skip the poll while the Steam session is idle-released (D-165): asking for
     // friends re-opens it, which puts the user back to "Playing DayZ" in Steam and
     // restarts playtime — exactly what the idle release (D-077) exists to stop.
     const t = setInterval(() => {
@@ -155,7 +155,7 @@
     const row = await servers.directConnect(`${f.server.ip}:${port}`, false);
     joining = null;
     // The store records the reason, but this page shows its own error line, so a
-    // friend on an unreachable server looked like a button that does nothing (D-160).
+    // friend on an unreachable server looked like a button that does nothing (D-165).
     if (!row) error = servers.error ?? `${f.name}'s server did not answer; it may block queries or be behind a firewall.`;
     // A probe that answers late must not replace a dialog opened meanwhile, which could
     // be mid-download or mid-launch (D-265), nor be reported as silent (D-281).

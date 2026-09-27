@@ -1,5 +1,5 @@
 <script lang="ts">
-  // First-run overlay (docs/06 §6). Shown once; the flag lives in settings.json (localStorage is only the legacy migration).
+  // First-run overlay (M7, D-055). Shown once; the flag lives in settings.json since D-070 (localStorage is only the legacy migration).
   import { servers } from "./state/servers.svelte";
   import logoUrl from "../assets/logo.png";
 

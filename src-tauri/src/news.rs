@@ -19,7 +19,7 @@ const SUMMARY_CHARS: usize = 320;
 const CLAN_IMAGE_BASE: &str = "https://clan.akamai.steamstatic.com/images";
 /// Hosts a post picture may be fetched from for a thumbnail: Steam's clan-image CDN only.
 const IMAGE_HOSTS: [&str; 2] = ["clan.akamai.steamstatic.com", "clan.fastly.steamstatic.com"];
-/// Longest side of a cached thumbnail; a card is at most about 640 px wide.
+/// Longest side of a cached thumbnail: the featured post's size. Cards ask for 360 px.
 const THUMB_MAX: u32 = 640;
 /// A source picture above this size is refused (the CDN serves 4–5 MB JPEGs, S-72).
 const IMAGE_MAX_BYTES: usize = 16 * 1024 * 1024;
@@ -293,7 +293,7 @@ pub fn image_allowed(url: &str) -> bool {
 /// the long side (aspect kept). CPU-bound: call from a blocking task.
 pub fn shrink(data: &[u8], max: u32) -> Result<Vec<u8>, String> {
     // Without limits a small file declaring huge dimensions allocates the whole
-    // raster before `thumbnail` ever downscales it (D-160).
+    // raster before `thumbnail` ever downscales it (D-163).
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(8192);
     limits.max_image_height = Some(8192);
@@ -315,7 +315,7 @@ pub fn shrink(data: &[u8], max: u32) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-/// A JPEG thumbnail of a post's picture, cached as `dir/<key>.jpg` (D-111). The
+/// A JPEG thumbnail of a post's picture, cached as `dir/<key>-<max>.jpg` (D-111). The
 /// source is typically 3840×2160 and 4.6 MB (S-72); the WebView would decode that
 /// to 33 MB per card, so it is shrunk once here and the small file is served after.
 pub async fn thumbnail(
@@ -333,7 +333,7 @@ pub async fn thumbnail(
     }
     // A card is ~340 px wide and the featured picture ~2x that, so the two sizes
     // are cached separately: one 640 px file per card decoded to 920 KB in the
-    // WebView, ~22 MB for a full page (D-160).
+    // WebView, ~22 MB for a full page (D-164).
     let max = max.clamp(160, THUMB_MAX);
     let path = dir.join(format!("{safe}-{max}.jpg"));
     if let Ok(bytes) = std::fs::read(&path) {
@@ -357,7 +357,7 @@ pub async fn thumbnail(
         .user_agent(USER_AGENT)
         .timeout(std::time::Duration::from_secs(30))
         // `image_allowed` vetted the host, so following a redirect off it would
-        // undo that check and turn this into a blind request to anywhere (D-160).
+        // undo that check and turn this into a blind request to anywhere (D-163).
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| e.to_string())?;
@@ -369,7 +369,7 @@ pub async fn thumbnail(
         .error_for_status()
         .map_err(|e| format!("picture request failed: {e}"))?;
     // The size was checked after the whole body was already in memory, so it
-    // bounded nothing; the cap now applies while it downloads (D-160).
+    // bounded nothing; the cap now applies while it downloads (D-163).
     let body = crate::http::body_capped(resp, IMAGE_MAX_BYTES, "picture").await?;
     tokio::task::spawn_blocking(move || {
         let bytes = shrink(&body, max)?;
@@ -394,7 +394,7 @@ pub fn prune_thumbnails(dir: &std::path::Path, keep: &std::collections::HashSet<
         let Some(stem) = full.strip_suffix(".jpg") else {
             continue;
         };
-        // "<gid>-<max>.jpg" since D-160. A file with no suffix predates that and can
+        // "<gid>-<max>.jpg" since D-164. A file with no suffix predates that and can
         // never be found again whatever its gid, but `rsplit_once` returning `None`
         // left the whole stem in place — a live gid — so the sweep kept precisely the
         // files it was written to remove: 18 of 37 here, 1 031 165 of 1 540 316 bytes
@@ -431,7 +431,7 @@ pub async fn fetch(count: u32) -> Result<Vec<NewsItem>, String> {
         .map_err(|e| format!("news request failed: {e}"))?
         .error_for_status()
         .map_err(|e| format!("news request failed: {e}"))?;
-    // 60 posts are well under 100 KB gzipped; 8 MB is far above any honest reply (D-160).
+    // 60 posts are well under 100 KB gzipped; 8 MB is far above any honest reply (D-163).
     let body = crate::http::body_capped(resp, 8 * 1024 * 1024, "news reply").await?;
     let doc: Document =
         serde_json::from_slice(&body).map_err(|e| format!("news reply unreadable: {e}"))?;

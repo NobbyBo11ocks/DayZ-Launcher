@@ -1,4 +1,4 @@
-//! Shared HTTP helpers (D-160).
+//! Shared HTTP helpers (D-163).
 //!
 //! `reqwest` is built with `gzip`, so a few hundred kilobytes on the wire can
 //! decompress to gigabytes. `Response::bytes()` buffers all of it, and with

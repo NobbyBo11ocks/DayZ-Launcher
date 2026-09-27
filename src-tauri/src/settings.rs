@@ -1,6 +1,7 @@
 //! Settings persisted as JSON in the app config directory (docs/05 §2): launch
 //! options plus the UI preferences (theme, accent, filters, onboarding, last update
-//! check). The UI ones used to live only in the WebView's localStorage, which can be
+//! check, the News page's switch and its last-seen post). The UI ones used to live
+//! only in the WebView's localStorage, which can be
 //! reset or detached from the app; the file is the source of truth and localStorage
 //! is an instant-start cache (D-070).
 
@@ -12,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Where the installer leaves its one-shot choices: `${MANUPRODUCTKEY}` in the NSIS
-/// template, which is `HKCUSoftware<manufacturer><product name>` (D-206).
+/// template, which is `HKCU\Software\<manufacturer>\<product name>` (D-206).
 const INSTALL_CHOICES_KEY: &str = r"Software\dayzlauncher\DZSA CrayZ Launcher";
 
 const THEMES: [&str; 2] = ["slate", "light"];
@@ -206,7 +207,7 @@ impl SettingsStore {
     pub fn load(path: &Path) -> Self {
         // Defaults are the right answer for a first run, but silently defaulting on an
         // unreadable file meant the next preference change wrote them over the user's
-        // launch profiles for good (D-160). Keep a copy and say so.
+        // launch profiles for good (D-162). Keep a copy and say so.
         let mut unread = false;
         let mut current = match std::fs::read(path) {
             Ok(bytes) => match parse_settings(&bytes) {
@@ -217,7 +218,7 @@ impl SettingsStore {
                 }
             },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Settings::default(),
-            // D-160 covered the file that reads but does not parse. A file that does not
+            // D-162 covered the file that reads but does not parse. A file that does not
             // read at all — held open by a scanner, a permission — kept no copy, and the
             // front end's first preference patch, a second after start, wrote the
             // defaults over it (D-239).

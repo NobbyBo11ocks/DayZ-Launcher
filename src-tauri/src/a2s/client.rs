@@ -163,7 +163,7 @@ impl Client {
             .map_err(|_| A2sError::Timeout)?;
         // One socket for the attempt and its retry: binding inside `query_once`
         // opened a second NAT flow for the same target on every retry, and burst
-        // size is exactly what D-037 measured as the cause of answer loss (D-160).
+        // size is exactly what D-037 measured as the cause of answer loss (D-164).
         let sock = UdpSocket::bind(if addr.is_ipv4() {
             "0.0.0.0:0"
         } else {

@@ -22,8 +22,9 @@ impl Kind {
     /// Receive-buffer size for one datagram of this kind. DayZ answers RULES in a
     /// single unsplit 5.3 KB datagram and a hostile server may send far more, so
     /// RULES keeps the full 64 KiB; INFO is a few hundred bytes and PLAYER for a
-    /// full 255-slot server is ~10 KB, so a 16 KiB buffer covers both with room to
-    /// spare and stops the verification pass zeroing 64 KiB per query (D-160).
+    /// full 255-slot server is 2.5 KB with DayZ's empty names (6 + 10 per entry) and
+    /// ~11 KB even with 32-character ones, so a 16 KiB buffer covers both with room to
+    /// spare and stops the verification pass zeroing 64 KiB per query (D-164).
     pub fn max_datagram(self) -> usize {
         match self {
             Kind::Rules => MAX_DATAGRAM,

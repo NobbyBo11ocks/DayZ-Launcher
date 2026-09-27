@@ -14,7 +14,8 @@ pub const BE_PREFIX: [&str; 5] = ["0", "1", "1", "-exe", "DayZ_x64.exe"];
 
 #[derive(Debug, Clone, Default)]
 pub struct LaunchSpec {
-    /// Absolute junction paths in server-reported order.
+    /// Absolute junction paths in load order: the server's RULES list reversed by
+    /// `launch_game` (D-265).
     pub mod_paths: Vec<PathBuf>,
     pub ip: String,
     pub game_port: u16,
@@ -123,7 +124,7 @@ pub fn split_extra(s: &str) -> Vec<String> {
 /// Windows-style rendering for logs and the UI: arguments containing spaces are
 /// quoted, and the server password is masked. The real argument still carries it
 /// (the game needs it, D-010), but this string is shown in the join dialog and
-/// copied into support reports, where a screenshot would leak it (D-160).
+/// copied into support reports, where a screenshot would leak it (D-163).
 pub fn display_command_line(exe: &str, args: &[String]) -> String {
     let mut s = String::new();
     s.push('"');

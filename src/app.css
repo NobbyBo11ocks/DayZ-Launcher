@@ -444,13 +444,13 @@ h1 {
   }
 }
 
-/* A view caught by the error boundary in App.svelte (D-160). */
+/* A view caught by the error boundary in App.svelte (D-165). */
 .crashed { margin: auto; padding: 32px; max-width: 46ch; text-align: center; display: grid; gap: 10px; justify-items: center; }
 .crashed-why { color: var(--fg-muted); font-size: 12.5px; overflow-wrap: anywhere; }
 .crashed-retry { cursor: pointer; padding: 6px 14px; border-radius: var(--radius); background: var(--bg-row); border: 1px solid var(--border-control); color: var(--fg); font: inherit; }
 .crashed-retry:hover { border-color: var(--accent); }
 
-/* Shared button base (D-160). Components override with their own scoped rules,
+/* Shared button base (D-226). Components override with their own scoped rules,
    which are more specific because Svelte adds a scoping class to them. */
 /* One base and three modifiers, and no fourth. Every component used to redeclare `.btn` with its own
    padding, which produced eight heights across the app; the local blocks are gone

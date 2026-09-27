@@ -29,7 +29,7 @@ All paths and values below were read from **this machine** on 2026-09-21 (S-41) 
 3. Install dir: `<lib>\steamapps\appmanifest_221100.acf` → `installdir` (`DayZ`), so the game folder is `<lib>\steamapps\common\DayZ`. `StateFlags` 4 = fully installed. Also `LastUpdated`, `SizeOnDisk`, `buildid`.
 4. Game folder contents (live): `Addons\`, `BattlEye\`, `dta\`, `Launcher\`, `MainMenu.ChernarusPlus`, `MainMenu.Sakhal`, `sakhal\`, `!Workshop\`, `DayZ_x64.exe`, `DayZ_BE.exe`, `DayZDiag_x64.exe`, `DayZLauncher.exe` (+ `.config`: WPF, .NET Framework 4.5.1, log4net), `CrashReporter.exe`, `DayZUninstaller.exe`, `steam_api64.dll`, `steam_appid.txt`, `installscript.vdf`, `dayz.gproj`, `amd_ags_x64.dll`.
 
-Fallback when the registry is missing: let the user pick `DayZ_x64.exe` in a file dialog and derive everything from that path.
+Without either registry key there is no fallback (a file picker was planned and never built): Steam counts as not installed, and the Mods page and the join say so (`steam/diagnostics.rs`, `launch_game`).
 
 ## 3. Workshop layout
 
@@ -53,7 +53,7 @@ timestamp = 5250757174595880000;
   "WorkshopItemDetails" { … } }
 ```
 
-  This file is the cheapest "what is installed and is it current" signal: read it on startup, watch it for changes (`notify` crate) while Steam downloads.
+  This file is the cheapest "what is installed and is it current" signal. The inventory (`steam/diagnostics.rs`) reads it; the Mods page's update badge asks Steamworks (`mods_stale`) five seconds after start and every 15 minutes, and uses this file's `NeedsUpdate` when Steam cannot be asked (D-191, D-275). Nothing watches the file for changes.
 
 - **Three different names exist for one mod.** Match by ID only.
 
@@ -81,7 +81,7 @@ Junctions need no admin rights (unlike symlinks), which is why the official laun
 
 - `-mod=` takes **absolute paths** to the junctions, `;`-separated, the whole `-mod=…` as **one quoted argument** (spaces inside are fine because of the quotes).
 - **Order: the reverse of RULES.** The official launcher put `@CF` first, and the engine then processed the list back to front (Dabs Framework before CF in the same RPT). A server's RULES lists its mods frameworks last — the reverse of the `-mod=` its admin wrote — so a client that passes RULES as it comes runs the server's load order backwards. The launcher reverses RULES (D-265, S-89); the engine still sorts declared dependencies, so the difference shows only among mods that do not declare each other: `modded class` chains, file overrides.
-- Load order matters: dependencies (CF, Dabs Framework) first. Use the order the server reports in A2S_RULES.
+- Load order matters, so the launcher passes the server's RULES list reversed, as above. Passing it in RULES order was D-008's rule, which D-265 corrected.
 
 ### 5.2 BattlEye wrapper
 
@@ -105,13 +105,14 @@ Get-CimInstance Win32_Process -Filter "Name='DayZ_BE.exe' OR Name='DayZ_x64.exe'
 Working directory = game folder. Spawn `DayZ_BE.exe` with:
 
 ```text
-0 1 1 -exe DayZ_x64.exe "-mod=<abs>;<abs>;…" -connect=<ip> -port=<gamePort> -name=<profileName> [-password=<pw>] [-nosplash -skipintro -noPause] [user extras]
+0 1 1 -exe DayZ_x64.exe "-mod=<abs>;<abs>;…" -connect=<ip> -port=<gamePort> [-password=<pw>] [-name=<name>] [-skipintro] [-nosplash] [-noPause] [-cpuCount=<n>] [-maxMem=<MB>] [-maxVRAM=<MB>] [extras]
 ```
 
 - `<gamePort>` is the A2S_INFO EDF port (2402 in the live example), **not** the query port (27017).
+- `-mod=` is the server's RULES list reversed (5.1). `-password` only when there is one; `-name` is the name from Settings or the chosen launch profile, else the Steam persona, and is left out when both are empty (D-052). The performance keys are sized to the PC unless the extras set them (D-267, 5.4). Extras that set `-connect`, `-port`, `-mod`, `-password` or `-name` are dropped, because the join sets those and DayZ could take the later one (D-265). The password is masked wherever the line is shown (D-163).
 - Steam must be running and logged in (`ActiveProcess\ActiveUser != 0`); the game loads `steam_api64.dll` and refuses to start otherwise.
 - Do not launch through `steam://run/221100//…`: Steam's launch config for DayZ starts `DayZLauncher.exe` (Q2), and the Linux scripts only get away with `-applaunch … -nolauncher` under Proton.
-- Windows `CreateProcess` command lines are limited to 32 767 characters; 40 mods × ~90 chars ≈ 3.6 KB, so absolute paths are safe. Relative `-mod=!Workshop\@CF` is unverified on Windows (Q7); stay with absolute.
+- Windows `CreateProcess` command lines are limited to 32 767 characters. The heaviest cached mod list, 121 mods, spells out to ≈ 8 100 characters of `-mod=`, a quarter of that, so absolute paths are safe and relative `!Workshop\@…` paths are unnecessary (Q7 closed, D-140, S-76).
 
 ### 5.4 Client parameters (S-44, S-07, S-05; B unless marked)
 
@@ -122,12 +123,12 @@ Working directory = game folder. Spawn `DayZ_BE.exe` with:
 | `-name=<name>` | profile/character name shown in game; some servers require it. Official launcher exposes `name` (its `Parameters.json` favourites: `["window","name"]`) |
 | `-mod=<a>;<b>` | client mods (absolute paths, see 5.1) **[A]** |
 | `-nolauncher` | skip the official launcher when Steam starts the game |
-| `-nosplash`, `-skipintro` | skip splash/intro |
+| `-nosplash`, `-skipintro` | skip splash/intro; `skipintro` is not in the 1.29 executable at all (S-90), though the game's scripts may still read it, so the launcher passes it when the setting is on |
 | `-noPause` | keep running when unfocused |
 | `-window` | windowed mode (official launcher exposes `window`) |
 | `-profiles=<dir>` | profile folder (default `%USERPROFILE%\Documents\DayZ`) |
 | `-cpuCount=<n>`, `-maxMem=<MB>`, `-maxVRAM=<MB>` | performance limits the 1.29 client still parses (S-90): threads to use, and the physical-memory and video-memory ceilings. The launcher adds all three sized to the PC it runs on — every active thread, physical RAM less 2 GB (above 4 GB), the largest GPU's dedicated memory from 2 GB up — and leaves out any key the extra arguments set themselves (D-267, S-91) |
-| `-exThreads=<n>`, `-enableHT`, `-malloc=`, `-high` | Arma-era options **the DayZ 1.29 executable does not contain** (S-90): passing them does nothing. Process priority is set by the launcher itself (D-118) |
+| `-exThreads=<n>`, `-enableHT`, `-malloc=`, `-high` | Arma-era options **the DayZ 1.29 executable does not contain** (S-90): passing them does nothing. The launcher never changes DayZ's priority: it runs itself at High and drops to Below normal from the spawn until the game exits (D-119, D-151) |
 | `-world=empty` | Linux launcher passes it to skip loading the menu world (C); `world=` is not in the 1.29 executable's option table (S-90), so its effect is unconfirmed |
 | `-filePatching`, `-doLogs`, `-BEpath=` | server/diag oriented, not exposed |
 
@@ -139,14 +140,14 @@ The official launcher does exactly this: `Launcher.log` shows `Launcher.Steam.La
 
 Flow for "Join" on a server with missing mods:
 
-1. `Client::init_app(221100)` once at startup on a dedicated thread; `run_callbacks()` every ~50 ms on that thread.
+1. `Client::init_app(221100)` on a dedicated thread, retried every 10 s while Steam is not running (D-125), released after the idle timeout and opened again on use (D-077, D-275). `run_callbacks()` runs every 10 ms while a download, refresh or unsubscribe is in progress and every 100 ms otherwise (D-164); nothing is pumped while the session is released.
 2. For each required Workshop ID: `ugc.item_state(id)` → bitflags `Subscribed`, `Installed`, `NeedsUpdate`, `Downloading`, `DownloadPending`.
-3. If not subscribed: `ugc.subscribe_item(id)` (async result callback). Then `ugc.download_item(id, high_priority = true)` to start immediately instead of waiting for Steam's scheduler.
-4. Progress: `ugc.item_download_info(id)` → `(bytes_downloaded, bytes_total)`; completion via the `DownloadItemResult` callback.
-5. Path: `ugc.item_install_info(id)` → `{ folder, size_on_disk, timestamp }`; read `meta.cpp` `name`, create `!Workshop\@<name>` junction if missing.
-6. Only then build the `-mod=` line.
+3. If not subscribed: `ugc.subscribe_item(id)` (async result callback). A join subscribes; the Mods page's Update only updates what is still subscribed (D-276). Then `ugc.download_item(id, high_priority = true)` to start immediately instead of waiting for Steam's scheduler, issued again every 5 s until Steam starts it.
+4. Progress: `ugc.item_download_info(id)` → `(bytes_downloaded, bytes_total)`, sent to the UI every 250 ms. Completion is polled: an item is done when `item_state` says Installed and `item_install_info(id)` names a folder that is on disk. The `DownloadItemResult` callback only reports errors, and an item fails on Steam's second error report for it (D-242).
+5. Limits: an item Steam calls installed whose folder is missing fails a minute after its kick, with the remedy (Q30, D-265); a download fails when Steam has moved nothing for 15 minutes, and in any case after 8 hours (D-240).
+6. The junctions are made at launch, not by the sync: `launch_game` reads `appworkshop_221100.acf` (or the `content\221100\<id>` folders when it is missing), takes each mod's `meta.cpp` name and creates `!Workshop\@<name>` if missing (`launch/mods.rs`), then builds the `-mod=` line.
 
-Without Steamworks (fallback/diagnostics only): `appworkshop_221100.acf` + folder existence, and open `https://steamcommunity.com/sharedfiles/filedetails/?id=<id>` for manual subscribe. Mod titles/sizes for not-yet-installed items: `POST https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/` with `itemcount` and `publishedfileids[i]` (no key, S-39).
+Without Steamworks: `appworkshop_221100.acf` and folder existence tell what is installed, and the Workshop page (`https://steamcommunity.com/sharedfiles/filedetails/?id=<id>`) is the manual way to subscribe. Titles and sizes come from Steamworks (`query_items`, 50 ids a request, D-052); the Web API's `GetPublishedFileDetails` (no key, S-39) was the planned fallback and is not implemented.
 
 ## 7. Official launcher local data (for an import feature)
 
@@ -159,4 +160,4 @@ Without Steamworks (fallback/diagnostics only): `appworkshop_221100.acf` + folde
 
 Game data: `%LOCALAPPDATA%\DayZ\` (RPT and crash logs), `%USERPROFILE%\Documents\DayZ\` (`<user>.core.xml`, `chars.DayZProfile`, `DayZ.cfg`, `profile.vars.DayZProfile`).
 
-Default `-name`: Steam persona from `<SteamPath>\config\loginusers.vdf` (`PersonaName` of the entry with `MostRecent 1`) — confidence B, verify when implementing.
+Default `-name`: the Steam persona from the running Steamworks session (`friends().name()`), used when Settings and the chosen launch profile leave the name empty; with no name at all, `-name` is left out (D-052, Q13 closed; `loginusers.vdf` is not read).

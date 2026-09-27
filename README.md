@@ -231,7 +231,7 @@ Star any server and it lands in **Favourites** with the same verified counts. Yo
 - Launch profiles: saved sets of options, picked in the join dialog
 - **DayZ's performance limits sized to your PC**, unless you set your own
 - Workshop updates read from the running Steam client
-- Joins that would be rejected are stopped before the game starts
+- Joins that are sure to fail — missing mods, a modded server whose mod list cannot be read, Steam or DayZ missing, DayZ already running — are stopped before the game starts; a version mismatch is flagged in the join dialog
 
 </td></tr>
 <tr><th align="left">👥 Stay in touch</th><th align="left">🛡️ Stay in control</th></tr>
@@ -246,7 +246,7 @@ Star any server and it lands in **Favourites** with the same verified counts. Yo
 
 - Signed one-click updates
 - A per-user installer; the launcher runs at the same elevation as Steam
-- **Steam idle release**, so an open launcher does not count as playtime
+- **Steam idle release**, so a launcher left open stops counting as playtime after 15 idle minutes (adjustable in Settings)
 - A Logs page with per-area mutes and an off switch
 - Confirmed clean-up of dangling `!Workshop` junctions, and never one you did not confirm
 - A slim window that remembers where it was
@@ -287,13 +287,13 @@ flowchart LR
 |:-:|:-:|:-:|:-:|:-:|
 | **7.7 MB** | **0.43 s** | **≈ 30 s + ≈ 26 s** | **0.2 %** of one core | **≈ 306 MB** |
 
-<sub>Installer measured at v0.1.59. Refresh and verify from the app's own log on 2026-09-26: 2 366 servers listed in 30.0 s, then 2 193 checked in 26.2 s. Memory and idle CPU at v0.1.23; cold start at v0.1.19. Budgets, method and history in [docs/05 §6](docs/05-architecture-and-optimisation.md).</sub>
+<sub>Installer measured at v0.1.69. Refresh and verify from the app's own log on 2026-09-26: 2 366 servers listed in 30.0 s, then 2 193 checked in 26.2 s. Memory and idle CPU at v0.1.23; cold start at v0.1.19. Budgets, method and history in [docs/05 §6](docs/05-architecture-and-optimisation.md).</sub>
 
 ---
 
 ## Install
 
-1. Download `DZSA CrayZ Launcher_<version>_x64-setup.exe` from the [latest release](https://github.com/NobbyBo11ocks/DayZ-Launcher/releases/latest).
+1. Download `DZSA.CrayZ.Launcher_<version>_x64-setup.exe` from the [latest release](https://github.com/NobbyBo11ocks/DayZ-Launcher/releases/latest).
 2. Run it. It installs per user to `%LOCALAPPDATA%\Programs\DZSA CrayZ Launcher` and adds a Start menu entry. WebView2 is installed silently if Windows does not have it.
 3. Start Steam, then the launcher. Updates are one click: the launcher checks for a new release when it starts and when you come back to its window (at most once a day) and offers it in Settings and the side rail; each release is signed with a minisign key and the app verifies the signature before installing.
 
@@ -315,7 +315,7 @@ No accounts, no telemetry, no third-party analytics. In full:
 | **GitHub** | The update manifest and the installer | Update checks |
 | **Steam's news feed and image CDN** | The home page | Only with the News page on |
 | **YouTube** | Preview images, and `youtube-nocookie.com` while a video plays | Only with the News page on |
-| **DZSA's public list** | A fallback server list | Only when Steam is unavailable and you ask |
+| **DZSA's public list** | A fallback server list | When Steam will not start: once by itself if the last Steam refresh is over an hour old, and whenever you press Load list from DZSA |
 | **Microsoft** | The WebView2 runtime, if the installer finds none | Installing, once |
 
 Your cache, favourites, history and settings stay in your own app-data folder. The Logs page shows exactly what the launcher has been doing, and you can copy it, mute it by area, or switch it off. One thing to know before pasting a report somewhere public: the join dialog's command line names your Steam profile and your library paths (the password is masked).
@@ -362,7 +362,7 @@ No. There are no ads, no accounts, no paid or sponsored placements in the list, 
 <details>
 <summary><b>Does it need Steam running?</b></summary>
 
-Yes: the server list, the Workshop downloads and your friends come from the Steam client. When Steam is not available, DZSA's public list can be loaded instead, on request.
+Yes: the server list, the Workshop downloads and your friends come from the Steam client. When Steam will not start, DZSA's public list is loaded instead: once by itself if your cached list is over an hour old, then whenever you ask.
 
 </details>
 
@@ -460,7 +460,7 @@ Bump `version` in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.co
 git tag vX.Y.Z && git push origin main vX.Y.Z
 ```
 
-The [release workflow](.github/workflows/release.yml) builds the signed installer on a clean Windows runner, creates the release as a draft with generated notes, uploads the installer, its `.sig` and `latest.json`, smoke-installs the result, publishes the draft only when that passes, and verifies the published manifest; a draft a failed run leaves is deleted. It needs **one** repository secret, set once from the machine that holds the key. In PowerShell:
+The [release workflow](.github/workflows/release.yml) releases only a commit whose CI passed (a tag pushed with main waits for that run), then builds the signed installer on a clean Windows runner, creates the release as a draft with generated notes, uploads the installer, its `.sig` and `latest.json`, smoke-installs the result, publishes the draft only when that passes, and verifies the published manifest; a draft a failed run leaves is deleted. It needs **one** repository secret, set once from the machine that holds the key. In PowerShell:
 
 ```powershell
 (Get-Content "$env:USERPROFILE\.tauri\dayz-launcher.key" -Raw).Trim() | gh secret set TAURI_SIGNING_PRIVATE_KEY --repo NobbyBo11ocks/DayZ-Launcher
@@ -487,7 +487,7 @@ Run the workflow manually from the Actions tab for a build-only dry run.
    gh release create vX.Y.Z "src-tauri/target/release/bundle/nsis/DZSA CrayZ Launcher_<version>_x64-setup.exe" "src-tauri/target/release/bundle/nsis/DZSA CrayZ Launcher_<version>_x64-setup.exe.sig" --title vX.Y.Z --notes-file notes.md
    ```
 
-3. Generate the update manifest from the uploaded asset (GitHub renames spaces in asset names to dots, so the URL must come from the API) and upload it:
+3. Generate the update manifest (the script builds the download URL from the tag and the asset's name as GitHub stores it, dots for spaces, and checks that the release holds it) and upload it:
 
    ```bash
    node tools/make_latest.js vX.Y.Z --notes notes.md

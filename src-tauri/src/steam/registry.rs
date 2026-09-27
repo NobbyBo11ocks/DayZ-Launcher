@@ -111,14 +111,14 @@ pub mod process {
         PROCESS_QUERY_LIMITED_INFORMATION,
     };
 
-    /// PID of a live `steam.exe`. When `steam_path` is known the image must live
-    /// under it, so an unrelated binary called steam.exe does not count.
     /// PID of any running process with this image name. Used to notice that DayZ
-    /// is already playing before starting a second copy of it (D-160).
+    /// is already playing before starting a second copy of it (D-165).
     pub fn find_named(exe: &str) -> Option<u32> {
         pids_named(exe).into_iter().next()
     }
 
+    /// PID of a live `steam.exe`. When `steam_path` is known the image must live
+    /// under it, so an unrelated binary called steam.exe does not count.
     pub fn find_steam(steam_path: Option<&Path>) -> Option<u32> {
         steam_pids(steam_path).into_iter().next()
     }
@@ -189,8 +189,8 @@ pub mod process {
 #[cfg(test)]
 mod cost {
     /// What the liveness probe costs, since it runs every `LIVENESS_INTERVAL` for as
-    /// long as the launcher is open and the idle-CPU budget is 0.2 % of one core
-    /// (docs/05 §6). Ignored by default: it reads the live machine.
+    /// long as the launcher is open and the idle-CPU budget is < 0.5 % of one core
+    /// with the window focused, ≈ 0 when it is not (docs/05 §6). Ignored by default: it reads the live machine.
     #[test]
     #[ignore]
     fn detect_is_cheap_enough_to_poll() {

@@ -70,7 +70,7 @@ export type JunctionInfo = {
 /**
  * Absent keys, not nulls: the host leaves out everything it has nothing to say
  * about, and the two fields nothing renders (`external`, `unknown`) never cross
- * IPC at all (D-160).
+ * IPC at all (D-164).
  */
 export type DayzTags = {
   battleye: boolean;
@@ -113,9 +113,10 @@ export type ServerRow = {
   verifiedAt?: number | null;
   verdict?: Verdict | null;
   /**
-   * Front-end only, set by the store: this row's exact name belongs to a server that
-   * verified on another address, and this copy never has. 2 771 rows in the live cache,
-   * 0 collisions among 1 077 honest populated names (D-233).
+   * Front-end only, set by the store: this row's name (case and spacing folded) belongs
+   * to a server verified with at least five players on another address, and this copy's
+   * own latest check has not verified it. 2 771 rows in the live cache, 0 collisions
+   * among 1 077 honest populated names (D-233).
    */
   clone?: boolean;
   /** ISO 3166-1 alpha-2 from the embedded GeoIP table, absent when unknown (D-073). */
@@ -128,16 +129,18 @@ export const isInflated = (r: ServerRow): boolean => r.steamEmpty === true && r.
 /**
  * Any rule fired: hidden by the default "Hide inflated" filter.
  * R4 (refuses PLAYER) only counts when Steam has not vouched for the server:
- * a small minority of servers drop A2S_PLAYER at the host firewall — D-050 measured 6 of 2 858, and D-047 retracts the earlier 24 % reading as burst loss, so `steamEmpty === false` overrides an "unverifiable" verdict.
+ * a small minority of servers drop A2S_PLAYER at the host firewall — D-050 measured 6 of 2 858, and D-047 retracts the earlier 24 % reading as burst loss. Steam's vouch keeps an "unverifiable" row trusted only when a head-count was taken before (R6, D-233).
  */
 export const isUntrusted = (r: ServerRow): boolean =>
   isInflated(r) ||
   r.verdict === "inflated" ||
   r.verdict === "synthetic" ||
   r.verdict === "offline" ||
-  // No DayZ server has ever verified above 116 here, and the engine caps a slot list at
-  // 127; 2 323 cached rows claim more, every one of them a Steam-says-empty fake. Insurance
-  // for the day one of them also holds a Steam session (D-233).
+  // No DayZ server has ever verified above 116 here, and 2 323 cached rows claim more
+  // than 127, every one of them a Steam-says-empty fake: the line rests on that
+  // measurement, not on an engine limit nobody has sourced (docs/11 records an honest
+  // server advertising 225 slots, D-268). Insurance for the day one of them also holds
+  // a Steam session (D-233).
   r.players > 127 ||
   // The bots byte, as a prior on rows nobody has counted: the INFO patchers write it
   // equal to their fabricated count. Honest servers with AI declare bots != players, and
@@ -154,20 +157,21 @@ export const isUntrusted = (r: ServerRow): boolean =>
 
 /**
  * True when the number on screen is the server's own claim rather than a head-count
- * we made ourselves (D-160). Steam vouching for a server keeps it visible, but the
+ * we made ourselves (D-288). Steam vouching for a server keeps it visible, but the
  * count is still unchecked and must not look verified: hiding behind a green tick is
  * exactly the gap a server that answers INFO and firewalls PLAYER relies on.
  */
 export const isUnchecked = (r: ServerRow): boolean =>
   r.verifiedPlayers == null &&
-  // A fabricated list is no head-count either (D-236): the cell shows the server's own
+  // A fabricated list is no head-count either (D-237): the cell shows the server's own
   // claim under the warning, not a count nobody took.
   (r.verdict === "unverifiable" || r.verdict === "offline" || r.verdict === "synthetic" || r.verdict == null);
 
 /**
  * Population a player may rely on (mirrors `judge` in browser/verify.rs). This is
  * what the list sorts by and what the title-bar count adds up, so it must never be
- * a number only the server has asserted.
+ * a number a check has contradicted. A row no check has reached yet counts its own
+ * claim until one does; the grid marks it "?" (`isUnchecked`).
  */
 export const trustedPlayers = (r: ServerRow): number => {
   // A fresh Steam batch saying empty, with INFO agreeing at 0, beats a head-count
@@ -178,7 +182,7 @@ export const trustedPlayers = (r: ServerRow): number => {
   if (isInflated(r)) return 0;
   // A server that refuses PLAYER has a claim, not a count. The cell still shows the
   // claim, dimmed and marked "?"; the sort must not reward it (D-233). Nor may a list
-  // judged fabricated, whose length is the claim again (D-236).
+  // judged fabricated, whose length is the claim again (D-237).
   if (r.verdict === "unverifiable" || r.verdict === "synthetic") return 0;
   return r.players;
 };
@@ -265,7 +269,7 @@ export type RefreshDone = {
   /** Steam finished the `hasplayers` answer, uncapped: the only kind of refresh that may
    *  withdraw a vouch from the servers it did not list. The host decides (D-236). */
   complete?: boolean;
-  /** The request never reached Steam: an answer so the UI stops waiting, not a result (D-160). */
+  /** The request never reached Steam: an answer so the UI stops waiting, not a result (D-161). */
   rejected?: boolean;
   /** Why: "busy" (a refresh is already running and will report for itself — not an
    *  error), "no-session" (Steam is not there) or "no-answer" (Steam listed nothing,
@@ -520,7 +524,7 @@ export type Launched = { pid: number; exe: string; commandLine: string };
 export type LaunchExited = { pid: number; code: number | null };
 
 export type Favourite = { id: string; addedAt: number };
-/** One past join, for the Recent page (D-076). */
+/** One past join, for the Recent page (D-054). */
 export type HistoryEntry = { id: string; joinedAt: number; name: string; ip: string; gamePort: number; mods: number };
 export type PopulationSample = { ts: number; players: number; queue: number };
 export type ImportResult = { total: number; imported: number; already: number; unreachable: number; path: string };

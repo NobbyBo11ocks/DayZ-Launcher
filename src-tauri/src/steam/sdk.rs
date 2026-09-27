@@ -1,13 +1,15 @@
 //! Steamworks client thread (ADR-002, docs/05 §1–3).
 //!
 //! One OS thread owns the `steamworks::Client` (initialised as app 221100, which
-//! makes Steam show the user as in DayZ, exactly like the official launcher), pumps
-//! `run_callbacks()`, and serves server-list refreshes. The server-list callbacks
-//! are `Rc`-based in steamworks 0.13.1, so everything touching them stays on this
-//! thread; results leave through an unbounded channel in batches of up to 100 ms.
+//! makes Steam show the user as in DayZ while the session is held, exactly like the
+//! official launcher; the idle release ends that, D-077), pumps `run_callbacks()`,
+//! and serves server-list refreshes. The server-list callbacks are `Rc`-based in
+//! steamworks 0.13.1, so everything touching them stays on this thread; results leave
+//! through an unbounded channel in batches of at most 358 rows or 100 ms (D-193).
 //!
-//! Steam caps one internet list request at 10 000 servers (D-041) while ~12 500
-//! DayZ servers are live, so a refresh runs a sequence of *partitions* (filter
+//! Steam caps one internet list request at 10 000 servers (D-041) while a full
+//! listing held 36 100 DayZ servers on 2026-09-25, 30 011 of them inflated (D-245),
+//! so a refresh runs a sequence of *partitions* (filter
 //! sets) and merges them: populated servers first because they matter most and
 //! arrive fastest, then empty ones.
 
@@ -31,13 +33,14 @@ use crate::browser::ServerRow;
 use super::DAYZ_APP_ID;
 
 const BATCH_INTERVAL: Duration = Duration::from_millis(100);
-/// Rows per `servers:batch`. A row serialises to 558 B, so 358 is the ~200 KB docs/04
-/// §4 sets as the ceiling for one event (D-193).
-const BATCH_MAX_ROWS: usize = 358;
+/// Rows per event that carries server rows (`servers:batch`, `servers:dzsa-batch`). A
+/// row serialises to 558 B, so 358 is the ~200 KB docs/05 §4 sets as the ceiling for
+/// one event (D-193).
+pub(crate) const BATCH_MAX_ROWS: usize = 358;
 const TICK_ACTIVE: Duration = Duration::from_millis(10);
 /// Nothing is in flight, so the only reason to wake is to notice a new command,
 /// which the 100 ms batch interval already bounds. 50 ms doubled the host's share
-/// of the idle CPU budget for nothing (D-160).
+/// of the idle CPU budget for nothing (D-164).
 const TICK_IDLE: Duration = Duration::from_millis(100);
 /// Steam's per-request ceiling; a partition returning exactly this many is truncated.
 pub const STEAM_LIST_CAP: usize = 10_000;
@@ -49,8 +52,9 @@ pub type Filters = HashMap<String, String>;
 /// Pseudo filter key selecting Steam's LAN server discovery (D-087).
 pub const LAN_PARTITION_KEY: &str = "lan";
 
-/// Maps with the most genuinely empty servers (cache statistics 2026-09-21, D-044);
-/// each `noplayers` + `map` partition stays far below the 10 000 cap.
+/// Maps with the most genuinely empty servers (cache statistics 2026-09-21, D-044).
+/// The farms have since pushed enoch, namalsk and chernarusplus over the 10 000 cap;
+/// a capped map partition gets a `collapse_addr_hash` follow-up (D-245).
 pub const EMPTY_PARTITION_MAPS: [&str; 10] = [
     "chernarusplus",
     "deerisle",
@@ -71,8 +75,9 @@ const PARTITION_GAP: Duration = Duration::from_secs(3);
 const MAX_CONSECUTIVE_EMPTY: usize = 2;
 
 /// Default (automatic) refresh: only servers with authenticated players. That is
-/// every server a player could join, arrives in ~40 s, and skips the ~27 000 fake
-/// entries that dominate Steam's empty-server partitions (D-046). Keys are Steam
+/// every server a player could join, arrives in ~40 s, and skips the fake entries
+/// that dominate Steam's empty-server partitions: ~27 000 when D-046 counted them,
+/// ~41 500 on 2026-09-25 (D-245). Keys are Steam
 /// filter *operation codes*; the value is ignored for flag filters.
 pub fn default_partitions() -> Vec<Filters> {
     vec![HashMap::from([("hasplayers".to_string(), "1".to_string())])]
@@ -289,7 +294,7 @@ pub struct RefreshDone {
     /// the fallback list (D-089).
     pub source: &'static str,
     /// The request never reached Steam. The caller must not treat this as a completed
-    /// refresh: it is an answer so the UI can stop waiting (D-160).
+    /// refresh: it is an answer so the UI can stop waiting (D-161).
     #[serde(default)]
     pub rejected: bool,
     /// *Why* it was rejected, because the two reasons want opposite handling and one
@@ -1054,7 +1059,8 @@ fn query_details(ugc: &UGC, ids: Vec<u64>, reply: mpsc::Sender<Result<Vec<ItemDe
 const STEAM_RETRY: Duration = Duration::from_secs(10);
 /// How often a live session is checked for "Steam has gone away" (D-160). The probe
 /// is a process snapshot measured at 2.46 ms here, so ten seconds keeps it at 0.025 %
-/// of one core against an 0.2 % idle budget (docs/05 §6, D-192).
+/// of one core, against the < 0.5 % idle budget of docs/05 §6 (0.20 % measured in all
+/// at v0.1.23), D-192.
 const LIVENESS_INTERVAL: Duration = Duration::from_secs(10);
 /// The check has to fail for this long before Steam is reported gone, so that a
 /// momentary reconnect inside Steam does not tear a working session down. With the
@@ -1680,7 +1686,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                         };
                         let _ = events.send(SteamEvent::Done(done));
                         // A LAN scan is not a list refresh and must not hold the next
-                        // one back (D-160); an unanswered one fetched nothing to protect.
+                        // one back (D-096); an unanswered one fetched nothing to protect.
                         if !lan_only && !unanswered {
                             *shared.last_done.lock().unwrap_or_else(|e| e.into_inner()) =
                                 Some(ServerRow::now_unix());
@@ -1699,7 +1705,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                     // Steam can hand over several thousand rows inside one 100 ms
                     // window — the first callback of a partition usually does — and
                     // the flush took whatever had accumulated, so a single
-                    // `servers:batch` could be megabytes against the ~200 KB docs/04
+                    // `servers:batch` could be megabytes against the ~200 KB docs/05
                     // §4 asks for. Split it; the loop comes back in 10 ms while a
                     // refresh is active, so nothing is held up (D-193).
                     let ending = finished.is_some() || timed_out;

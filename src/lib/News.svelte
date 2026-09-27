@@ -204,7 +204,7 @@
       </div>
       <!-- `frame-src` says what may be framed, not what the frame may do: without
            a sandbox the player could navigate the whole window away on a click.
-           allow-top-navigation is deliberately absent (D-160), and so are the popup
+           allow-top-navigation is deliberately absent (D-163), and so are the popup
            tokens: the app sets no new-window handler, so a popup from the player opened
            as a plain window running YouTube outside any sandbox. "On YouTube" above
            opens the browser instead (D-283). -->

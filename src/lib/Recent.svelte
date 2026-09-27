@@ -49,7 +49,7 @@
   const when = (unix: number) => new Date(unix * 1000).toLocaleString();
 
   // "Clear list" (D-130): the only way history rows are deleted, and only after an
-  // inline confirmation, like the junction cleanup in Diagnostics (D-093).
+  // inline confirmation, like the junction clean-up on the Mods page (D-093, D-170).
   let confirmClear = $state(false);
   let clearing = $state(false);
   async function clearAll() {

@@ -4,7 +4,7 @@
   // (D-081): nothing may overflow the 360 px column, long lists collapse behind a
   // toggle, and the player sessions are summarised instead of listed.
   // Every command through the logging wrapper: a failure is recorded with its
-  // command name before it is rethrown (D-158/D-160).
+  // command name before it is rethrown (D-158/D-165).
   import { listen } from "@tauri-apps/api/event";
   import { invokeLogged as invoke } from "./log";
   import Flag from "./Flag.svelte";
@@ -82,7 +82,7 @@
 
   // Installed Workshop items (diagnostics is a few ms). Read once, then again after
   // any Workshop download finishes: it was read once per session, so mods installed
-  // during the session kept their "missing" mark until a restart (D-160). By the join
+  // during the session kept their "missing" mark until a restart (D-165). By the join
   // plan's rule (D-265): installed means the folder is there, which Steam's list alone
   // does not say, and an unreadable list is "unknown", not "nothing installed", where
   // every mod showed as missing (D-256, D-281).

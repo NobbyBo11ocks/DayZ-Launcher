@@ -6,17 +6,17 @@ Everything in this document was either read from the Valve wiki / two independen
 
 | Source | Key needed | Completeness | Gives mods? | Latency | Role in our launcher |
 |---|---|---|---|---|---|
-| Steamworks `ISteamMatchmakingServers::RequestInternetServerList(221100)` (S-25) | No (Steam client must be running) | All servers that heartbeat to Steam | No (name, map, players, ping, tags) | Streams in over a few seconds | **Primary list** |
+| Steamworks `ISteamMatchmakingServers::RequestInternetServerList(221100)` (S-25) | No (Steam client must be running) | All servers that heartbeat to Steam | No (name, map, players, ping, tags) | Streams in: the populated partition in ~40 s, a full listing over several minutes (D-041, D-046) | **Primary list** |
 | ~~Master Server Query Protocol, UDP `hl2master.steampowered.com:27011`~~ (S-17) | – | **Retired.** `hl2master`/`hl1master.steampowered.com` return NXDOMAIN on the system resolver, 1.1.1.1 and 8.8.8.8 (2026-09-21); community reports date the shutdown to October 2025 (S-50). Not usable (D-031) | – | – | none |
 | Steam Web API `IGameServersService/GetServerList/v1?filter=\appid\221100&limit=20000` (S-16) | **Yes** | Same | No (`gametype` = tags) | One HTTP call | Not used (would leak a key) |
 | Direct A2S_INFO / A2S_RULES to each server | No | n/a | **Yes** (RULES) | ~RTT per server, fan out | **Details + ping + mods** |
-| DZSA `GET https://dayzsalauncher.com/api/v1/query/{ip}/{queryPort}` (S-18) **[LIVE]** | No (Cloudflare blocks non-browser user agents; got 403 from a plain fetcher) | Only registered servers | Yes | One HTTP call | Optional fallback when RULES fails |
-| DZSA `GET /api/v1/launcher/servers/dayz` (S-19) | No | Registered only | Yes | > 10 MB JSON | Not used at startup (too heavy) |
-| BattleMetrics `GET https://api.battlemetrics.com/servers?filter[game]=dayz&filter[search]=…` (S-38) | Optional | Broad | Partial | subscription required since 2026 (403 unauthenticated, re-checked 2026-09-23) | Optional link-out only |
+| DZSA `GET https://dayzsalauncher.com/api/v1/query/{ip}/{queryPort}` (S-18) **[LIVE]** | No (Cloudflare blocks non-browser user agents; got 403 from a plain fetcher) | Only registered servers | Yes | One HTTP call | Not used: a RULES read that fails falls back to the last stored mod list (D-209) |
+| DZSA `GET /api/v1/launcher/servers/dayz` (S-19) | No | Registered only | Yes | ~24 MB JSON | **Fallback list**: loaded once at start-up when Steam fails to initialise and the last Steam refresh is over an hour old, and by "Load list from DZSA" (D-089, D-247) |
+| BattleMetrics `GET https://api.battlemetrics.com/servers?filter[game]=dayz&filter[search]=…` (S-38) | Optional | Broad | Partial | subscription required since 2026 (403 unauthenticated, re-checked 2026-09-23) | Not used (no link-out either) |
 
-Decision: primary list from Steamworks, then A2S fan-out for ping/details, RULES on demand (selected row, favourites, join). Fallbacks when Steamworks is unavailable: a user-supplied Steam Web API key (optional setting, never shipped in the binary), then the DZSA list. See ADR-002 in [04](04-tech-stack-decision.md).
+Decision: primary list from Steamworks, then A2S for the head-count, ping and details; RULES for the details pane and the join, and a mod scan after every verification pass for the Mods column and the mod filter ([05](05-architecture-and-optimisation.md) §3). The fallback when Steamworks is unavailable is the DZSA list (D-089); a setting for a user-supplied Steam Web API key was considered and never built. See ADR-002 in [04](04-tech-stack-decision.md).
 
-Steamworks filter keys (Master Server Query Protocol filters, S-15/S-17), passed as `&[HashMap<&str,&str>]` in the crate: `appid=221100`, `gamedir=dayz`, `empty=1`, `full=1`, `dedicated=1`, `secure=1`, `password=0`, `name_match=*text*`, `map=chernarusplus`, `gametype=battleye,no3rd`.
+Steamworks filters (`MatchMakingKeyValuePair_t`, S-83) go to the crate as one `&HashMap<&str,&str>` per request (S-25). The start-up refresh sends `hasplayers`; Refresh sends `hasplayers`, then `noplayers` + `map` for each map in `EMPTY_PARTITION_MAPS`, then `noplayers` + `collapse_addr_hash`. A map partition that hits Steam's 10 000 cap is followed by the same filters plus `collapse_addr_hash` (D-245; docs/11, "The farms outgrew the list"). A map cannot order its operands, so `nor`/`nand` cannot be sent. The Master Server Query Protocol keys (S-17) are not used.
 
 ## 2. A2S transport (Valve "Server queries", S-15)
 
@@ -60,7 +60,7 @@ Response: `FF FF FF FF 49` then:
 | Keywords (0x20) | string | `battleye,no3rd,external,privHive,shardABC123,lqs0,etm4.000000,entm6.000000,mod,15:12` |
 | GameID (0x01) | uint64 | 221100 (lower 24 bits = AppID) |
 
-Ping = round-trip time of the INFO exchange (measure from the **final** request, i.e. after the challenge). Live RTT was 108 ms from this machine.
+Ping = round-trip time of the INFO exchange (measure from the **final** request, i.e. after the challenge). Live RTT was 108 ms from this machine. A row's ping starts as Steam's own from the listing, is replaced by this round trip whenever a check reads INFO, and falls back to PLAYER's round trip when it was never measured (D-247).
 
 ### Keyword tags (S-37, **[LIVE]** examples)
 
@@ -68,7 +68,7 @@ Ping = round-trip time of the INFO exchange (measure from the **final** request,
 |---|---|
 | `battleye` | BattlEye enabled |
 | `no3rd` | first-person only |
-| `external` | public/external hive (vs `privHive` private hive) |
+| `external` | meaning unconfirmed: the live string above carries it together with `privHive`, and S-37 does not describe it; parsed, never shown (D-164) |
 | `privHive` | private hive (characters stored on that server) |
 | `shard<xxx>` | hive shard id (`shard000`/`shard001` official, `shardABC123` private) |
 | `lqs<N>` | players in **login queue** (queue size) |
@@ -107,7 +107,7 @@ DayZ smuggles a binary structure through the key/value pairs (S-09, S-11, S-12, 
 | dlcHash[] | uint32 × popcount(dlcFlags) | none |
 | modCount | uint8 | 12 |
 | mod[i].hash | uint32 | e.g. `0x68afc6c1` for CF (purpose unknown) |
-| mod[i].idLen | uint8 | 4 on every live entry; mask with `0x0F`, then read that many bytes LE as the Workshop ID (parsers accept 1/2/4/8) |
+| mod[i].idLen | uint8 | 4 on 3 209 of 3 213 live entries and 1 on the other 4 (S-76); the low nibble (`& 0x0F`) is the width in bytes, read LE as the Workshop ID. This parser takes 1–8; S-12's takes 1, 4 or 8 |
 | mod[i].id | uintN | 1559212036 |
 | mod[i].nameLen + name | uint8 + UTF-8 | `Community Framework` (= `mod.cpp` `name`, **not** the Workshop title `CF`) |
 | signatureCount | uint8 | 12 |
@@ -151,9 +151,9 @@ The 12 `steamWorkshopId`s matched the live A2S_RULES decode exactly. Per-server 
 
 ## 7. Implementation notes for the Rust core (as built in M2)
 
-- `a2s::Client`: one short-lived socket per query, challenge loop (max 3), split reassembly, 64 KiB receive buffer, ICMP-unreachable detection, **send pacing** (default 400 datagrams/s), concurrency 128, timeout 1 s, 1 retry. Measured (D-037): live servers answer with p99 ≈ 250 ms; loss is driven by burst size through consumer NAT, so pacing and modest concurrency beat raw fan-out width.
-- **Player counts**: INFO `players` is spoofed by more than half of community servers (D-038). Query PLAYER for every server that is on screen, in favourites, or being joined, and display that head-count; show the INFO number only as "reported" with a warning when it disagrees.
-- Keep a per-server state machine: `Listed → InfoOk(ping) → PlayersOk(head-count) → RulesOk(mods)`; RULES only on demand (selection, favourites, filters that need mods, join).
-- Store the raw INFO/RULES bytes for a server when a parse fails and surface it on the Logs page (D-168); that is how protocol drift gets caught.
+- `a2s::Client`: one short-lived socket per query, its retry included (D-164), challenge loop (max 3), split reassembly, a 64 KiB receive buffer for RULES and 16 KiB for INFO and PLAYER, ICMP-unreachable detection, **send pacing** (default 400 datagrams/s), concurrency 128, timeout 1 s, 1 retry. Measured (D-037): live servers answer with p99 ≈ 250 ms; loss is driven by burst size through consumer NAT, so pacing and modest concurrency beat raw fan-out width.
+- **Player counts**: INFO `players` is spoofed by more than half of community servers (D-038). PLAYER is read for every server Steam lists as populated after each refresh, and for the rows on screen when their last check is stale ([05](05-architecture-and-optimisation.md) §3); a join reads RULES and INFO. The list shows and sorts by the head-count; the INFO number appears only as "reported", with a warning when it disagrees.
+- The cache keeps a verdict and its timestamps per server (`verified_players`, `verified_at`, `verdict`) rather than a state machine; the `Listed → InfoOk → PlayersOk → RulesOk` machine planned here was never built. RULES is read by the details pane and the join, and by the mod scan after every verification pass.
+- Keeping the raw INFO/RULES bytes of a failed parse, to catch protocol drift, was planned and is not implemented: the details pane shows the error's message, and the mod scan records only that the read failed, so it waits before asking again (D-244).
 - Cache: list snapshot + last INFO per server in SQLite with timestamps; on startup render the cache immediately, then refresh.
 - Version check: compare INFO `version` with the local `DayZ_x64.exe` ProductVersion; `requiredVersion=129` maps to 1.29.

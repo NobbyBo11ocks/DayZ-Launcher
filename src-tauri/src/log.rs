@@ -39,7 +39,8 @@ pub fn enabled() -> bool {
 }
 
 /// Areas the user has switched off (D-172). An entry's area is its target up to the
-/// first `:`, so muting `ui` silences `ui:ipc` and `ui:window` together.
+/// first `:`, folded by `area` into the Logs page chip that covers it, so muting `app`
+/// silences `ui:ipc`, `ui:window`, `news` and `update` together.
 static MUTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 pub fn set_muted(areas: Vec<String>) {
@@ -50,13 +51,14 @@ pub fn set_muted(areas: Vec<String>) {
 
 /// The Logs page's area for a target: its head up to the first `:`, with the heads that
 /// have no chip of their own folded into the chip that says it covers them. App covers
-/// "anything the interface reports" (every `ui:…` target) and the news feed, and Mods
-/// covers junctions. With the raw head, muting App or Mods left those entries recorded,
-/// and "junctions" and "news" could not be muted at all (D-256). `Logs.svelte` mirrors this.
+/// "anything the interface reports" (every `ui:…` target), the news feed and the
+/// updater's clean-up, and Mods covers junctions. With the raw head, muting App or Mods
+/// left those entries recorded, and "junctions", "news" and "update" could not be muted
+/// at all (D-256, D-287). `Logs.svelte` mirrors this.
 pub fn area(target: &str) -> &str {
     let head = target.split_once(':').map_or(target, |(a, _)| a);
     match head {
-        "ui" | "news" => "app",
+        "ui" | "news" | "update" => "app",
         "junctions" => "mods",
         other => other,
     }
@@ -97,7 +99,8 @@ pub struct Entry {
     /// Unix milliseconds.
     pub at: u64,
     pub level: Level,
-    /// Area: "steam", "verify", "cache", "launch", "news", "ui", …
+    /// "steam", "verify", "cache:prune", "ui:ipc", …; its area is the part before the
+    /// first `:`, folded by `area`.
     pub target: String,
     pub message: String,
 }
@@ -154,7 +157,7 @@ pub fn path() -> Option<PathBuf> {
 /// entries, and `log_ui` takes whatever the WebView sends. A name containing a
 /// newline and a plausible timestamp writes entries indistinguishable from real ones,
 /// in the file the user copies into a support report. The WebView's own path has
-/// flattened since D-160; the Rust macros never did (D-221).
+/// flattened since D-163; the Rust macros never did (D-221).
 fn flatten(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
@@ -283,6 +286,7 @@ mod tests {
         assert_eq!(area("ui:ipc"), "app");
         assert_eq!(area("ui"), "app");
         assert_eq!(area("news"), "app");
+        assert_eq!(area("update"), "app");
         assert_eq!(area("junctions"), "mods");
         assert_eq!(area("steam"), "steam");
         assert_eq!(area("cache:prune"), "cache");

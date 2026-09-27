@@ -176,12 +176,6 @@ class NewsStore {
     }
   }
 
-  /**
-   * What to show as a post's picture (D-111). A card prefers the small YouTube
-   * preview when the post has a video (one small fetch, no thumbnail work); the
-   * featured post and video-less posts use the backend's 640 px thumbnail, which
-   * arrives asynchronously (null until then). Steam's originals are 3840×2160.
-   */
   /** The feed replaced, and the pictures of posts that left it released: each is an object
    *  URL holding its bytes until revoked, and they were kept for the whole run (D-282). */
   #setItems(items: NewsItem[]) {
@@ -196,12 +190,18 @@ class NewsStore {
     for (const k of [...this.#thumbFailed]) if (!keep.has(k.slice(0, k.lastIndexOf(":")))) this.#thumbFailed.delete(k);
   }
 
+  /**
+   * What to show as a post's picture (D-111). A card prefers the small YouTube
+   * preview when the post has a video (one small fetch, no thumbnail work); otherwise
+   * the backend makes a thumbnail, 640 px for the featured post and 360 px for a card,
+   * which arrives asynchronously (null until then). Steam's originals are 3840×2160.
+   */
   thumbUrl(n: NewsItem, featured = false): string | null {
     const yt = n.video ? `https://i.ytimg.com/vi/${n.video}/${featured ? "hqdefault" : "mqdefault"}.jpg` : null;
     if (!featured && yt) return yt;
     if (!n.image) return yt;
     // Cards draw at ~340 px, the featured picture at roughly twice that; asking for
-    // 640 px everywhere decoded ~920 KB per card in the WebView (D-160). Keyed by size
+    // 640 px everywhere decoded ~920 KB per card in the WebView (D-164). Keyed by size
     // as well: keyed by post alone, a card that became the featured post reused its
     // 360 px picture in the 640 px hero, blurred (D-256).
     const max = featured ? 640 : 360;

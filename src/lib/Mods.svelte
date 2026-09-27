@@ -58,8 +58,9 @@
 
   // Dangling-junction clean-up (D-093), which used to live on the Diagnostics page
   // and moved here with it (D-170). Junctions are shared with the official launcher,
-  // so this is confirmed, and it only ever removes entries whose target folder is
-  // gone — never one the launcher did not create and never a live one.
+  // so this is confirmed, and it only ever removes junctions whose target is a
+  // Workshop item folder that is certainly gone, whoever made them, and never a live
+  // one (D-276).
   let confirmClean = $state(false);
   let cleaning = $state(false);
   async function cleanJunctions() {

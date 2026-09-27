@@ -86,7 +86,7 @@ jobs:
       # All three version fields, not just the one Tauri reads. Cargo.toml drifted four
       # versions behind unnoticed, and CARGO_PKG_VERSION is what `app_info` shows in
       # Settings, what the first line of every support log says, and what the Steam news
-      # User-Agent claims (D-221).
+      # User-Agent claims (D-220).
       # The tag name reaches every script through the environment, never by
       # interpolation into the script's source: git allows `$`, `(` and `'` in a ref,
       # which PowerShell would have run with the signing key in scope (D-245).
@@ -166,7 +166,7 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "installer exit code $($p.ExitCode)" }
           # Never hard-code the product name again: the rename to "DZSA CrayZ Launcher"
           # moved the install folder and the uninstall key, this step threw, and the
-          # manifest rewrite below was skipped (D-160).
+          # manifest rewrite below was skipped (D-166).
           $product = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).productName
           $dir = Join-Path $env:LOCALAPPDATA "Programs\$product"
           foreach ($f in 'dayz-launcher.exe', 'steam_api64.dll', 'uninstall.exe') {

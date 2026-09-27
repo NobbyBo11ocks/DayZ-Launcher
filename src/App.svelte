@@ -166,7 +166,7 @@
     <!-- The server filters sit under the sections while the Servers page is open, the
          one page they apply to (user's sketch, D-249). They are outside the page's
          boundary below, so they get one of their own: a failure here must not take
-         the rail and the window with it (D-160). -->
+         the rail and the window with it (D-165). -->
     {#if active === "servers"}
       <svelte:boundary onerror={(e) => logError("view", `filters failed to render: ${describe(e)}`)}>
         <FilterPanel />
@@ -199,7 +199,7 @@
   </div>
 
   <main class="content" class:padded={!listViews.has(active)}>
-    <!-- One page failing must not blank the whole window (D-160): the boundary keeps
+    <!-- One page failing must not blank the whole window (D-165): the boundary keeps
          the title bar and the sidebar alive so the user can switch away, and the
          error reaches launcher.log like any other. Keyed on the section, because a
          boundary that has failed stays failed: switching away kept "This page stopped

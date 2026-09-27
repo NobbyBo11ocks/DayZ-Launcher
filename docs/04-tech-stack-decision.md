@@ -43,10 +43,10 @@ Tauri 3.0.0-alpha.1 exists on crates.io but is pre-release; stay on 2.11.x.
 
 Two ways exist to get a **complete** server list without a Steam Web API key:
 
-1. **Steamworks `ISteamMatchmakingServers::RequestInternetServerList(221100)`** through the `steamworks` crate (`MatchmakingServers::internet_server_list`, verified in docs.rs for 0.13.1, S-25). Requires Steam running and `Client::init_app(221100)`; Steam will show the user as "in DayZ" while the launcher runs (same as the official launcher, which Steam itself launches as app 221100).
+1. **Steamworks `ISteamMatchmakingServers::RequestInternetServerList(221100)`** through the `steamworks` crate (`MatchmakingServers::internet_server_list`, verified in docs.rs for 0.13.1, S-25). Requires Steam running and `Client::init_app(221100)`; Steam shows the user as "in DayZ" while the launcher holds its Steam session (as with the official launcher, which Steam itself launches as app 221100). The idle release (D-077) closes the session after 15 idle minutes by default.
 2. ~~Raw **Master Server Query Protocol** (UDP to `hl2master.steampowered.com:27011`)~~: **retired by Valve** (NXDOMAIN on every resolver tested 2026-09-21, D-031). Not an option.
 
-Because one-click mod sync **requires** Steamworks anyway (`UGC::subscribe_item`, `download_item`, `item_state`, `item_install_info`, all present in 0.13.1), option 1 is chosen. `steam_api64.dll` (vendored by `steamworks-sys`) is bundled as a Tauri resource next to the exe. Fallbacks for the list only: a user-supplied Steam Web API key (`IGameServersService/GetServerList`, optional setting), then the DZSA list. BattleMetrics remains link-out only.
+Because one-click mod sync **requires** Steamworks anyway (`UGC::subscribe_item`, `download_item`, `item_state`, `item_install_info`, all present in 0.13.1), option 1 is chosen. `steam_api64.dll` (vendored by `steamworks-sys`) is bundled as a Tauri resource next to the exe. Fallback for the list only: the DZSA list (D-089). A setting for a user-supplied Steam Web API key (`IGameServersService/GetServerList`) and BattleMetrics links were considered and never built.
 
 ## 5. Re-verification commands
 

@@ -21,7 +21,7 @@ pub struct ServerRow {
     pub players: i32,
     pub max_players: i32,
     // Stored and queried, never rendered: 19 000 rows cross IPC on every start, so
-    // each unread field is ~19 000 copies of nothing (D-160).
+    // each unread field is ~19 000 copies of nothing (D-164).
     // Read by the front end since D-233: every fake-population tool found writes the
     // bots byte equal to its fabricated count (5 093 of 5 093 Steam-says-empty rows),
     // and honest servers that declare AI do not match their player count.
@@ -56,7 +56,7 @@ pub struct ServerRow {
     /// Unix seconds of the last PLAYER verification.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verified_at: Option<i64>,
-    /// Verdict string from `verify::Verdict::as_str` (rules R2–R5), if verified.
+    /// Verdict string from `verify::Verdict::as_str` (rules R2–R5, R11, R12), if verified.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verdict: Option<String>,
     /// ISO 3166-1 alpha-2 country of `ip` from the embedded GeoIP table (D-073);

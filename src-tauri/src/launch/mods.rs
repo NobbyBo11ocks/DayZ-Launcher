@@ -2,7 +2,8 @@
 //! one NTFS junction per mod named `@<meta.cpp name>` pointing at the Workshop item folder.
 //! Existing junctions are reused when they already point at the right folder; a
 //! name clash with a different target gets a `@<name> (<id>)` sibling. Nothing is
-//! ever deleted.
+//! deleted except the empty folder a failed `junction::create` of ours left behind
+//! (D-239); the Mods page's clean-up lives in `steam::workshop` (D-276).
 
 use std::path::{Path, PathBuf};
 
@@ -32,7 +33,7 @@ pub fn junction_name(id: u64, meta_name: Option<&str>) -> String {
             (c.is_ascii_graphic() || *c == ' ')
                 // `;` is not forbidden by Windows but it separates -mod= entries
                 // (launch/args.rs), so a mod name carrying one would split its own
-                // path into two arguments and the launch would fail (D-160).
+                // path into two arguments and the launch would fail (D-163).
                 && !matches!(
                     c,
                     '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' | ';'

@@ -12,7 +12,7 @@ Windows-only DayZ Standalone launcher: Tauri 2 (Rust) + Svelte 5, key-free serve
 | [04-tech-stack-decision.md](04-tech-stack-decision.md) | ADR-001 stack with verified versions, ADR-002 Steam integration |
 | [05-architecture-and-optimisation.md](05-architecture-and-optimisation.md) | Modules, data flow, IPC, budgets, per-file optimisation checklist |
 | [06-ui-design.md](06-ui-design.md) | Layout, table, details, filters, tokens, themes, states, accessibility |
-| [07-roadmap.md](07-roadmap.md) | Milestones M0–M7 with acceptance criteria |
+| [07-roadmap.md](07-roadmap.md) | Milestones M0–M7 with acceptance criteria, then one row per release since v0.1.0 |
 | [08-sources.md](08-sources.md) | Every source with access date and confidence |
 | [09-decisions-log.md](09-decisions-log.md) | Append-only decisions and verifications |
 | [10-open-questions.md](10-open-questions.md) | Unresolved items and how to resolve them |

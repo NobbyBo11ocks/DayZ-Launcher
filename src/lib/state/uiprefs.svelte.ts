@@ -1,4 +1,5 @@
-// UI preferences (theme, accent, filters, onboarding, last update check) live in the
+// UI preferences (theme, accent, filters, onboarding, last update check, the News
+// page's switch and last-seen post) live in the
 // launcher's settings.json on the Rust side (D-070). localStorage is only an
 // instant-start cache kept by the individual stores; this module is the single
 // writer to the file. Patches are coalesced so a burst of filter toggles is one write.
