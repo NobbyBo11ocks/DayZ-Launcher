@@ -134,7 +134,7 @@
   function saveIdle() {
     if (!launch) return;
     const n = Math.round(Number(launch.steamIdleMinutes));
-    launch.steamIdleMinutes = Number.isFinite(n) ? Math.min(1440, Math.max(0, n)) : 15;
+    launch.steamIdleMinutes = Number.isFinite(n) ? Math.min(1440, Math.max(0, n)) : 5;
     scheduleSave();
   }
 

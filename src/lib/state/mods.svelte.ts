@@ -26,7 +26,7 @@ class ModUpdates {
    *  in the WebView, so one field and one `clear` covers either. */
   #timer: ReturnType<typeof setTimeout> | undefined;
   /** The running client's last answer, with the installed version of every item when
-   *  it was given. The session is released after 15 idle minutes and cannot be asked
+   *  it was given. The session is released after its idle minutes (5 by default, D-299) and cannot be asked
    *  then (D-220), so from the second check on the badge fell back to the file: an
    *  update only the client knew about vanished, and a leftover the user had
    *  unsubscribed came back flagged, where "Update" subscribed it again (D-191, D-275). */

@@ -133,6 +133,11 @@ pub struct Settings {
     /// dropped at the source, so they cost nothing (D-172).
     #[serde(default)]
     pub log_muted: Vec<String>,
+    /// Set once the one-time move from the old 15-minute idle release to 5 has run
+    /// (D-299), as `accent_default_v2` did for the accent (D-132): a saved 15 cannot be
+    /// told apart from the old default.
+    #[serde(default)]
+    pub idle_default_v2: bool,
     pub ui: UiPrefs,
 }
 
@@ -145,15 +150,32 @@ impl Default for Settings {
             no_splash: true,
             no_pause: false,
             launch_profiles: Vec::new(),
-            steam_idle_minutes: 15,
+            // 5, not 15 (D-299): the session holds 9 MB after a start and ~30 MB after a
+            // full Refresh until it is released (D-298), and Steam shows the player in
+            // DayZ for as long as it lasts. Whatever needs Steam opens it again.
+            steam_idle_minutes: 5,
             logging: true,
             log_muted: Vec::new(),
+            idle_default_v2: false,
             ui: UiPrefs::default(),
         }
     }
 }
 
 impl Settings {
+    /// What `UiPrefs::normalise` does for the whole file, plus the one-time move of the
+    /// old 15-minute idle release to the new default; any other value is the player's
+    /// own and stays (D-299).
+    fn normalise(&mut self) {
+        self.ui.normalise();
+        if !self.idle_default_v2 {
+            if self.steam_idle_minutes == 15 {
+                self.steam_idle_minutes = 5;
+            }
+            self.idle_default_v2 = true;
+        }
+    }
+
     /// Idle timeout for the Steam session, `None` when disabled.
     pub fn steam_idle_timeout(&self) -> Option<std::time::Duration> {
         (self.steam_idle_minutes > 0)
@@ -232,7 +254,7 @@ impl SettingsStore {
                 Settings::default()
             }
         };
-        current.ui.normalise();
+        current.normalise();
         let store = Self {
             path: path.to_path_buf(),
             current: Mutex::new(current),
@@ -296,7 +318,7 @@ impl SettingsStore {
         let adopted = match std::fs::read(&self.path) {
             Ok(bytes) => match parse_settings(&bytes) {
                 Ok(mut s) => {
-                    s.ui.normalise();
+                    s.normalise();
                     // Adopted means applied: start-up applied the defaults the failed
                     // read left, and nothing else re-read the flags (D-245).
                     crate::log::set_enabled(s.logging);
@@ -344,6 +366,9 @@ impl SettingsStore {
             ));
         }
         s.ui = cur.ui.clone();
+        // A value saved from Settings is the player's own: the move off the old default
+        // must not run over it at the next start (D-299).
+        s.idle_default_v2 = true;
         self.persist(&s)?;
         *cur = s;
         Ok(())
@@ -555,6 +580,47 @@ mod tests {
         };
         teal.normalise();
         assert_eq!(teal.accent, "teal");
+    }
+
+    #[test]
+    fn old_idle_default_moves_to_five_once() {
+        // A new install starts at 5 (D-299).
+        assert_eq!(Settings::default().steam_idle_minutes, 5);
+        // A file from before D-299: the old default and no marker.
+        let old: Settings =
+            parse_settings(br#"{"steamIdleMinutes": 15, "logging": true}"#).unwrap();
+        let mut s = old.clone();
+        s.normalise();
+        assert_eq!(s.steam_idle_minutes, 5);
+        assert!(s.idle_default_v2);
+        // 15 chosen afterwards survives every later load.
+        s.steam_idle_minutes = 15;
+        s.normalise();
+        assert_eq!(s.steam_idle_minutes, 15);
+        // Any other value, 0 ("stay connected") included, is the player's own.
+        for own in [0, 10, 30] {
+            let mut t: Settings =
+                parse_settings(format!(r#"{{"steamIdleMinutes": {own}}}"#).as_bytes()).unwrap();
+            t.normalise();
+            assert_eq!(t.steam_idle_minutes, own);
+        }
+    }
+
+    #[test]
+    fn a_saved_idle_value_is_marked_as_the_players_own() {
+        let dir = std::env::temp_dir().join(format!("dzl-idle-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("settings.json");
+        let _ = std::fs::remove_file(&path);
+        let store = SettingsStore::load(&path);
+        // Settings sends back an object built before the marker existed.
+        let mut sent = store.get();
+        sent.steam_idle_minutes = 15;
+        sent.idle_default_v2 = false;
+        store.set_launch(sent).unwrap();
+        let again = SettingsStore::load(&path);
+        assert_eq!(again.get().steam_idle_minutes, 15);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

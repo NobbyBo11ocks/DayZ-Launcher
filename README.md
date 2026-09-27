@@ -246,7 +246,7 @@ Star any server and it lands in **Favourites** with the same verified counts. Yo
 
 - Signed one-click updates
 - A per-user installer; the launcher runs at the same elevation as Steam
-- **Steam idle release**, so a launcher left open stops counting as playtime after 15 idle minutes (adjustable in Settings)
+- **Steam idle release**, so a launcher left open stops counting as playtime after 5 idle minutes and gives its memory back (adjustable in Settings)
 - A Logs page with per-area mutes and an off switch
 - Confirmed clean-up of dangling `!Workshop` junctions, and never one you did not confirm
 - A slim window that remembers where it was

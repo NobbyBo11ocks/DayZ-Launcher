@@ -149,11 +149,12 @@ pub struct SteamStatus {
     pub idle: bool,
 }
 
-/// Release Steamworks after this long without a command or active job: 15 minutes by
-/// default, from Settings (D-077). Memory is not the reason — measured on 2026-09-21,
-/// `SteamAPI_Shutdown` unloads `steamclient64.dll` but the host's private bytes stayed
-/// at 61 MB (D-057) — playtime is: while a Steamworks session for app 221100 exists,
-/// Steam shows the user as playing DayZ and counts it. `DAYZ_STEAM_IDLE_SECS=<n>`
+/// Release Steamworks after this long without a command or active job: 5 minutes by
+/// default, from Settings (D-077, D-299). Playtime is one reason: while a Steamworks
+/// session for app 221100 exists, Steam shows the user as playing DayZ and counts it.
+/// Memory is the other: the release gives back 9 MB after a start and ~30 MB after a
+/// full Refresh, Steam's copy of the listing (D-298; D-057 read no drop, which was not
+/// a clean reading). `DAYZ_STEAM_IDLE_SECS=<n>`
 /// overrides the setting for experiments.
 fn idle_timeout() -> Option<Duration> {
     std::env::var("DAYZ_STEAM_IDLE_SECS")
@@ -1234,7 +1235,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
             // re-opened for any command, counts.
             //
             // StaleItems was missing, and the Workshop poll runs every 15 minutes -
-            // exactly the default `steam_idle_minutes`. So the release lasted about
+            // exactly the default `steam_idle_minutes` then (5 since D-299). So the release lasted about
             // five seconds per cycle: Steam went on showing the user in DayZ and
             // counting playtime all session, with a Shutdown/Init pair every quarter
             // hour, which is the churn D-190 blamed for the 0xC0000409 exit (D-220).
