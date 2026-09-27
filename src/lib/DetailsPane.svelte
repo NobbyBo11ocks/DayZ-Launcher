@@ -129,15 +129,15 @@
   // or an inflated verdict kept the first check's green "Verified head-count" on screen
   // while the row had left the grid (D-281). No new query (D-065): the verification the
   // pass or the visible-row check already made is the one shown.
-  $effect(() => {
-    const pending = listen<Verification[]>("servers:verified", (ev) => {
+  $effect(() =>
+    // From the store's row stream, which replaced the event (D-297).
+    servers.onVerified((list) => {
       const d = details;
       if (!d) return;
-      const v = ev.payload.find((x) => x.id === d.id);
+      const v = list.find((x) => x.id === d.id);
       if (v) details = { ...d, verification: v };
-    });
-    return () => void pending.then((f) => f());
-  });
+    }),
+  );
 
   // Live INFO/RULES/PLAYER, once per selection.
   $effect(() => {

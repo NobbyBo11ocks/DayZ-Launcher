@@ -391,6 +391,14 @@ impl Cache {
     /// checkpointed_pages)` — so the row has to be read. Q22 is an unexplained loss of
     /// committed rows, and "the checkpoint quietly copied nothing" is one of the few
     /// explanations left, so both outcomes are on the record (D-187).
+    /// Hands back the page cache a pass filled. It grows to SQLite's 2 MiB default over a
+    /// verification pass or a mod scan and nothing reads it until the next one, while a
+    /// full read of the list takes the same 42–47 ms from the system's file cache at any
+    /// size (row 13, D-297).
+    pub fn shrink_memory(&self) {
+        let _ = self.conn.execute_batch("PRAGMA shrink_memory;");
+    }
+
     pub fn checkpoint(&self) -> bool {
         let result = self
             .conn

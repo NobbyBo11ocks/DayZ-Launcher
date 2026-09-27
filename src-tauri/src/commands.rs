@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use serde::Serialize;
+use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::a2s::{self, Client};
@@ -39,6 +40,46 @@ pub struct AppState {
     /// running-game check, which came after the mod read, and both started
     /// `DayZ_BE.exe` (D-165's symptom, D-295).
     pub launching: Arc<AtomicBool>,
+    /// The page's end of the row stream, once it has subscribed (`send_rows`, D-297).
+    pub rows_out: Mutex<Option<Channel<InvokeResponseBody>>>,
+}
+
+/// Sends one row-lifecycle message to the page: a listing batch, a refresh done, a
+/// prune, verification results, a mod scan and its start and end. As events, each was
+/// evaluated as a script with its JSON pasted in (tauri 2.11.6, `emit_js_script`), and
+/// the renderer kept every compiled script until V8 flushed it — about 0.5 MB per
+/// 358-row batch, some 50 MB for minutes after a full Refresh (row 13). A channel
+/// message over 8 KiB is fetched and parsed as JSON instead, and the channel keeps them
+/// in the order they were sent, which the page relies on: a refresh's done after its
+/// last batch, verification after the rows it checks (D-297).
+///
+/// Nothing is sent before the page subscribes; it was not listening to the events these
+/// replace either.
+pub fn send_rows<T: Serialize + ?Sized>(app: &AppHandle, kind: &str, data: &T) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let Some(channel) = state.rows_out.lock().ok().and_then(|c| c.clone()) else {
+        return;
+    };
+    match serde_json::to_string(data) {
+        Ok(json) => {
+            let body = format!("{{\"kind\":\"{kind}\",\"data\":{json}}}");
+            if let Err(e) = channel.send(InvokeResponseBody::Json(body)) {
+                crate::log_warn!("ipc", "{kind} not sent to the page: {e}");
+            }
+        }
+        Err(e) => crate::log_warn!("ipc", "{kind} not serialised: {e}"),
+    }
+}
+
+/// The page subscribes to the row stream once it has read the cache. A reload
+/// subscribes again, and replaces the old end (D-297).
+#[tauri::command]
+pub fn rows_subscribe(state: State<'_, AppState>, channel: Channel<InvokeResponseBody>) {
+    if let Ok(mut out) = state.rows_out.lock() {
+        *out = Some(channel);
+    }
 }
 
 /// Clears its flag however the pass ends, including an early `return`.
@@ -314,7 +355,7 @@ pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResu
         wrote.map_err(AppError::Internal)?;
         // Its own event: the store keeps measured values over these placeholders, as
         // `upsert_keeping_measured` does, and every other batch is a measurement (D-271).
-        let _ = app.emit("servers:dzsa-batch", &batch);
+        send_rows(&app, "dzsa-batch", &batch);
     }
     // `last_refresh` deliberately not written here. It seeds the Steam worker's 60 s
     // throttle across restarts (lib.rs), so a DZSA import used to make the *next*
@@ -337,7 +378,7 @@ pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResu
     // No `servers:mods-done` here any more: it fed a scan summary line that went in
     // D-250, the store reads the stored lists again itself, and a scan still running
     // lost its "reading mod lists" flag to it (D-281).
-    let _ = app.emit("servers:done", &done);
+    send_rows(&app, "done", &done);
     crate::log_info!(
         "steam",
         "DZSA list imported: {n} server(s), {with_mods} with a mod list, in {} ms; verifying {}",
@@ -361,8 +402,9 @@ pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResu
             }
             None => {
                 crate::log_info!("verify", "a pass is already running; DZSA pass skipped");
-                let _ = app.emit(
-                    "servers:verify-done",
+                send_rows(
+                    &app,
+                    "verify-done",
                     &VerifySummary {
                         skipped: true,
                         ..Default::default()
@@ -374,7 +416,7 @@ pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResu
         // Nothing to verify still has to close the pass (D-162): the UI sets
         // "verifying" as soon as the fallback is asked for, and only this event
         // clears it. An empty or all-empty DZSA list left it spinning for ever.
-        let _ = app.emit("servers:verify-done", &VerifySummary::default());
+        send_rows(&app, "verify-done", &VerifySummary::default());
     }
     Ok(n)
 }
@@ -613,7 +655,8 @@ pub async fn run_verification(
             summary.offline,
             summary.elapsed_ms
         );
-        let _ = app.emit("servers:verify-done", &summary);
+        shrink_cache(&cache).await;
+        send_rows(&app, "verify-done", &summary);
     }
     summary
 }
@@ -630,7 +673,7 @@ async fn publish(
     for v in &results {
         latest.insert(v.id.clone(), v.verdict);
     }
-    let _ = app.emit("servers:verified", &results);
+    send_rows(app, "verified", &results);
     let c = Arc::clone(cache);
     let _ = tauri::async_runtime::spawn_blocking(move || {
         if let Ok(mut c) = c.lock() {
@@ -754,7 +797,7 @@ pub async fn run_mod_scan(
         total: targets.len(),
         ..Default::default()
     };
-    let _ = app.emit("servers:mods-start", &summary);
+    send_rows(&app, "mods-start", &summary);
     if targets.is_empty() {
         if held_back > 0 {
             crate::log_info!(
@@ -762,7 +805,7 @@ pub async fn run_mod_scan(
                 "scan: nothing to read, {held_back} held back after failing"
             );
         }
-        let _ = app.emit("servers:mods-done", &summary);
+        send_rows(&app, "mods-done", &summary);
         return summary;
     }
     // Gentler than the verification pass: RULES replies are up to ~5 KB each. Its own
@@ -844,7 +887,7 @@ pub async fn run_mod_scan(
         // The failed ids too: they have no list and wait before the next read (D-244),
         // so the "not scanned yet" count leaves them out rather than offering a scan
         // that will not ask them (D-276).
-        let _ = app.emit("servers:mods", &(payload, names, &failed));
+        send_rows(&app, "mods", &(payload, names, &failed));
     }
     summary.elapsed_ms = t0.elapsed().as_millis() as u64;
     if summary.total > 0 || held_back > 0 {
@@ -862,7 +905,8 @@ pub async fn run_mod_scan(
         "[mods] scan done: total={} scanned={} failed={} in {} ms",
         summary.total, summary.scanned, summary.failed, summary.elapsed_ms
     );
-    let _ = app.emit("servers:mods-done", &summary);
+    shrink_cache(&cache).await;
+    send_rows(&app, "mods-done", &summary);
     summary
 }
 
@@ -1294,7 +1338,7 @@ pub async fn server_details(
         reason,
     };
     let persist = vec![verification.clone()];
-    let _ = app.emit("servers:verified", &persist);
+    send_rows(&app, "verified", &persist);
     let _ = tauri::async_runtime::spawn_blocking(move || {
         if let Ok(mut c) = cache.lock() {
             let _ = c.apply_verifications(&persist);
@@ -1341,6 +1385,17 @@ async fn cached_mods(
     .await
     .ok()
     .flatten()
+}
+
+/// The page cache back after a pass or a scan (`Cache::shrink_memory`, D-297).
+async fn shrink_cache(cache: &Arc<Mutex<Cache>>) {
+    let c = Arc::clone(cache);
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        if let Ok(c) = c.lock() {
+            c.shrink_memory();
+        }
+    })
+    .await;
 }
 
 /// Keeps what a join's own INFO read said about the game port and the password when it
@@ -1491,7 +1546,7 @@ pub async fn join_plan(
             .unwrap_or(false);
             // Stored first, then sent, as the scan does (D-281).
             if saved {
-                let _ = app.emit("servers:mods", &(payload, names, Vec::<String>::new()));
+                send_rows(&app, "mods", &(payload, names, Vec::<String>::new()));
             }
         }
     }
@@ -2352,7 +2407,7 @@ pub async fn direct_connect(
     .await
     .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?
     .map_err(AppError::Internal)?;
-    let _ = app.emit("servers:batch", &vec![row.clone()]);
+    send_rows(&app, "batch", &vec![row.clone()]);
     if let Some(mut t) = Target::from_row(&row) {
         t.was_synthetic |= was_synthetic;
         tauri::async_runtime::spawn(run_verification(
@@ -2537,7 +2592,7 @@ pub async fn import_official_favourites(
         // In Steam's batch size, like the DZSA import: a long favourites file sent as
         // one event went over docs/05 §4's ~200 KB from about 360 rows (D-287).
         for chunk in shown.chunks(crate::steam::sdk::BATCH_MAX_ROWS) {
-            let _ = app.emit("servers:batch", chunk);
+            send_rows(&app, "batch", chunk);
         }
         tauri::async_runtime::spawn(run_verification(
             app.clone(),

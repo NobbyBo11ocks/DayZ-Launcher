@@ -6,11 +6,12 @@
 // command name before it is rethrown (D-158).
 import { invokeLogged as invoke } from "../log";
 import { mapHaystack, mapLabel } from "../maps";
+import { Channel } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { uiPrefs } from "./uiprefs.svelte";
 import { describe, logWarn } from "../log";
-import { type CachedServers, decodeCachedRows, type Favourite, type FriendInfo, type HistoryEntry, type ImportResult, isInflated, isUntrusted, type ModScanSummary, type ModsIndex, queueOf, type RefreshDone, type ServerMods, type ServerRow, type SteamStatus, trustedPlayers, type Verification, type VerifySummary } from "../types";
+import { type CachedServers, compactRow, decodeCachedRows, type Favourite, type FriendInfo, type HistoryEntry, type ImportResult, isInflated, isUntrusted, type ModScanSummary, type ModsIndex, queueOf, type RefreshDone, type ServerMods, type ServerRow, type SteamStatus, trustedPlayers, type Verification, type VerifySummary } from "../types";
 
 export type SortKey = "name" | "map" | "mods" | "players" | "ping" | "time" | "version";
 export type Perspective = "any" | "1pp" | "3pp";
@@ -72,6 +73,18 @@ const WATCHDOG_MS = 30_000;
  * over 13 000 rows is now done once per rename instead (D-188, D-211).
  */
 type Hay = { n: string; d: string | null; m: string; text: string; style: number; map: string };
+
+/** One message of the host's row stream (`send_rows` in commands.rs, D-297). */
+type RowsMsg =
+  | { kind: "batch"; data: ServerRow[] }
+  | { kind: "dzsa-batch"; data: ServerRow[] }
+  | { kind: "done"; data: RefreshDone }
+  | { kind: "pruned"; data: string[] }
+  | { kind: "verified"; data: Verification[] }
+  | { kind: "verify-done"; data: VerifySummary }
+  | { kind: "mods-start"; data: ModScanSummary }
+  | { kind: "mods"; data: [ServerMods[], [number, string][], string[]] }
+  | { kind: "mods-done"; data: ModScanSummary };
 
 /** Bit 1 = says PVE, 2 = says PVP, 4 = says RP. A server may say several. */
 const STYLE_PVE = 1;
@@ -319,15 +332,18 @@ class ServersStore {
    * Two passes over the map, once per flush. `cloneKey` — trim, lower-case, a regex —
    * on every row twice was 60 % of the whole flush chain once the farms tripled the
    * row count: 50.7 ms at 71 000 rows, 17 ms at 24 000 (the "~2 ms" this comment
-   * used to claim was never measured). The key is cached per id against the name,
-   * like `#hayFor`: 17 ms at 71 000, 7 ms at 40 000 (D-246).
+   * used to claim was never measured). The key is cached, which took it to 17 ms at
+   * 71 000 and 7 ms at 40 000 (D-246) — per name, not per row: a `{name, key}` for each
+   * of 40 000 rows held 4 MB in the renderer, and farms repeat one name hundreds of
+   * times (D-297).
    */
-  #cloneKeys = new Map<string, { n: string; k: string }>();
+  #cloneKeys = new Map<string, string>();
   #cloneKeyOf(r: ServerRow): string {
-    const e = this.#cloneKeys.get(r.id);
-    if (e !== undefined && e.n === r.name) return e.k;
-    const k = cloneKey(r.name);
-    this.#cloneKeys.set(r.id, { n: r.name, k });
+    let k = this.#cloneKeys.get(r.name);
+    if (k === undefined) {
+      k = cloneKey(r.name);
+      this.#cloneKeys.set(r.name, k);
+    }
     return k;
   }
   /** The owners the last pass used, and the rows written since it. A row's flag reads
@@ -337,6 +353,8 @@ class ServersStore {
   #cloneOwners = new Map<string, string>();
   #cloneTouched = new Set<string>();
   #recomputeClones() {
+    // More names than rows means names that left or were renamed: start again (D-297).
+    if (this.#cloneKeys.size > this.rows.size) this.#cloneKeys.clear();
     const owners = new Map<string, string>();
     for (const r of this.rows.values()) {
       if (r.verdict === "verified" && (r.verifiedPlayers ?? 0) >= 5) owners.set(this.#cloneKeyOf(r), r.ip);
@@ -622,6 +640,9 @@ class ServersStore {
     const hive = f.hive;
     const mods = f.mods;
     const styleBit = f.style === "any" ? 0 : STYLE_BIT[f.style];
+    // Nothing reads the texts without a search, a map or a playstyle, and they were kept
+    // for the rest of the session after one search: 2 MB at 71 000 rows (D-297).
+    if (!q && !map && !styleBit && this.#hay.size > 0) this.#hay.clear();
     const dayOnly = f.dayOnly;
     const maxPing = f.maxPing;
     const versionMine = f.versionMine;
@@ -699,6 +720,15 @@ class ServersStore {
     if (key === "mods") void this.#modsVersion;
     const modCounts = key === "mods" ? this.#modCounts : null;
     const nameRank = key === "name" ? this.#rankByName() : null;
+    // Another sort lets the name order go: it was kept for the whole session after one
+    // sort by name, 3.4 MB at 71 000 rows, and coming back rebuilds it in 90–176 ms
+    // (D-297).
+    if (key !== "name" && this.#nameOrder.length > 0) {
+      this.#nameOrder = [];
+      this.#nameRank = new Map();
+      this.#namesDirty = true;
+      this.#namesAdded.clear();
+    }
     // Same argument as D-181’s name ranks, and cheaper still because there are only
     // ~100 distinct map names across the whole list: one collator pass over the
     // distinct values turns every comparison into integer subtraction (D-193). The
@@ -827,13 +857,6 @@ class ServersStore {
     void this.#rowsVersion;
     return this.selectedId ? (this.rows.get(this.selectedId) ?? null) : null;
   });
-
-  /** Catalogue entries, most widely used first. */
-  modOptions = $derived(
-    [...this.modCatalog.entries()]
-      .map(([id, e]) => ({ id, name: e.name, servers: e.servers }))
-      .sort((a, b) => b.servers - a.servers || a.name.localeCompare(b.name)),
-  );
 
   /** Populated modded servers whose mod list has not been scanned yet, by the host's own
    *  target rule (`Cache::scan_targets`): counted with the store's head-count instead, it
@@ -1012,84 +1035,20 @@ class ServersStore {
     // panel, the Mods page, Favourites and LAN). Read at start it held the cache lock
     // for 85–99 ms and the main thread for 56–75 ms behind the News page, which reads
     // none of it (D-284).
+    // The row stream, in the order the host sent it (`send_rows`, D-297): as events these
+    // arrived as scripts with the JSON pasted in, and the renderer kept each one it had
+    // compiled, about 0.5 MB a 358-row batch and some 50 MB for minutes after a full
+    // Refresh. Subscribed before anything below can start a refresh.
+    const stream = new Channel<RowsMsg>();
+    stream.onmessage = (m) => this.#onRows(m);
+    await invoke("rows_subscribe", { channel: stream });
     this.#unlisten.push(
-      await listen<ServerRow[]>("servers:batch", (ev) => this.#enqueue(ev.payload, false)),
-      await listen<ServerRow[]>("servers:dzsa-batch", (ev) => this.#enqueue(ev.payload, true)),
-      await listen<RefreshDone>("servers:done", (ev) => {
-        // A rejected refresh never reached Steam (D-161). It is sent so the UI stops
-        // waiting, not as a result: keeping it would replace a real summary with
-        // "0 of 0 shown · 0 from Steam in 0 s" and read as a success.
-        this.flushRows();
-        if (ev.payload.rejected) {
-          // "Busy" is not a failure: a refresh is already running and will report for
-          // itself. Treating the two the same put a permanent red "Steam did not answer
-          // the refresh" on screen for a double-click on Refresh, and switched off the
-          // verifying indicator for the pass that was genuinely running (D-208).
-          if (ev.payload.reason !== "busy") {
-            this.verifying = false;
-            this.#verifyingSince = 0;
-            this.error = "Steam did not answer the refresh, so the list was not updated.";
-          }
-          return;
-        }
-        this.done = ev.payload;
-        // The verification pass starts now, not when Refresh was pressed. A full refresh
-        // measured 473 s (D-046), so a clock started at the button press ran out while
-        // Steam was still listing, and a red "verification stopped answering" appeared
-        // next to a pass that then finished normally (D-236).
-        if (this.verifying) this.#verifyingSince = Date.now();
-        // A LAN scan or a DZSA import is not a Steam refresh. It claimed the Steam card's
-        // "last refresh" time, which the host keeps for Steam alone (D-220), and a DZSA
-        // import finishing during a Steam refresh threw away that refresh's record of
-        // the servers it had seen, so the vouches below were never withdrawn (D-256).
-        if (ev.payload.source !== "steam") return;
-        this.lastRefresh = Math.floor(Date.now() / 1000);
-        // Steam may have updated DayZ while the list was coming in.
-        void this.refreshLocalVersion();
-        // Mirror of the host's `unvouch_unlisted` (D-233, D-271): the in-memory rows must agree
-        // with the cache, or the vouch would linger on screen until the next start.
-        const seen = this.#seenThisRefresh;
-        this.#seenThisRefresh = null;
-        // The host decides what "complete" means from the partition answers, so the
-        // two cannot disagree about a refresh Steam timed out or throttled (D-236).
-        if (seen && ev.payload.complete === true) {
-          let n = 0;
-          for (const r of this.rows.values()) {
-            if (r.steamEmpty === false && !seen.has(r.id)) {
-              // A new object, not a write into the old one: the grid's keyed rows and
-              // the details pane compare by identity, so an in-place change kept the
-              // vouched look until a verification happened to replace the row (D-236).
-              this.rows.set(r.id, { ...r, steamEmpty: null });
-              n++;
-            }
-          }
-          if (n > 0) this.rowsChanged();
-        }
-      }),
+      () => (stream.onmessage = () => {}),
       await listen<SteamStatus>("steam:status", (ev) => {
         this.#statusEvents++;
         this.steam = ev.payload;
         this.maybeAutoRefresh();
         if (this.friendsInDayz == null) void this.pollFriends();
-      }),
-      await listen<string[]>("servers:pruned", (ev) => this.dropRows(ev.payload)),
-      await listen<Verification[]>("servers:verified", (ev) => this.applyVerifications(ev.payload)),
-      await listen<VerifySummary>("servers:verify-done", (ev) => {
-        this.verifySummary = ev.payload;
-        this.verifying = false;
-        this.#verifyingSince = 0;
-        // A late answer proves the watchdog wrong; its message must not sit beside it.
-        if (this.error === VERIFY_STALLED) this.error = null;
-      }),
-      await listen<ModScanSummary>("servers:mods-start", (ev) => {
-        this.modScanning = ev.payload.total > 0;
-        this.#scanningSince = Date.now();
-      }),
-      await listen<[ServerMods[], [number, string][], string[]]>("servers:mods", (ev) => this.applyMods(ev.payload[0], ev.payload[1], ev.payload[2])),
-      await listen<ModScanSummary>("servers:mods-done", () => {
-        this.modScanning = false;
-        this.#scanningSince = 0;
-        if (!this.modsIndexLoaded) void this.loadModsIndex();
       }),
     );
     // Only now that `steam:status` is being listened for. The worker emits the
@@ -1305,6 +1264,102 @@ class ServersStore {
     }, waitMs);
   }
 
+  /** One message of the row stream, handled as its event used to be (D-297). */
+  #onRows(m: RowsMsg) {
+    switch (m.kind) {
+      case "batch":
+        return this.#enqueue(m.data, false);
+      case "dzsa-batch":
+        return this.#enqueue(m.data, true);
+      case "done":
+        return this.#onRefreshDone(m.data);
+      case "pruned":
+        return this.dropRows(m.data);
+      case "verified":
+        this.applyVerifications(m.data);
+        for (const f of this.#verifiedListeners) f(m.data);
+        return;
+      case "verify-done":
+        this.verifySummary = m.data;
+        this.verifying = false;
+        this.#verifyingSince = 0;
+        // A late answer proves the watchdog wrong; its message must not sit beside it.
+        if (this.error === VERIFY_STALLED) this.error = null;
+        return;
+      case "mods-start":
+        this.modScanning = m.data.total > 0;
+        this.#scanningSince = Date.now();
+        return;
+      case "mods":
+        return this.applyMods(m.data[0], m.data[1], m.data[2]);
+      case "mods-done":
+        this.modScanning = false;
+        this.#scanningSince = 0;
+        if (!this.modsIndexLoaded) void this.loadModsIndex();
+        return;
+    }
+  }
+
+  #verifiedListeners = new Set<(list: Verification[]) => void>();
+  /** Verification results as they arrive, for the details pane, which listened to the
+   *  event itself before the row stream (D-297). Returns the unsubscribe. */
+  onVerified(f: (list: Verification[]) => void): () => void {
+    this.#verifiedListeners.add(f);
+    return () => this.#verifiedListeners.delete(f);
+  }
+
+  #onRefreshDone(d: RefreshDone) {
+    // A rejected refresh never reached Steam (D-161). It is sent so the UI stops
+    // waiting, not as a result: keeping it would replace a real summary with
+    // "0 of 0 shown · 0 from Steam in 0 s" and read as a success.
+    this.flushRows();
+    if (d.rejected) {
+      // "Busy" is not a failure: a refresh is already running and will report for
+      // itself. Treating the two the same put a permanent red "Steam did not answer
+      // the refresh" on screen for a double-click on Refresh, and switched off the
+      // verifying indicator for the pass that was genuinely running (D-208).
+      if (d.reason !== "busy") {
+        this.verifying = false;
+        this.#verifyingSince = 0;
+        this.error = "Steam did not answer the refresh, so the list was not updated.";
+      }
+      return;
+    }
+    this.done = d;
+    // The verification pass starts now, not when Refresh was pressed. A full refresh
+    // measured 473 s (D-046), so a clock started at the button press ran out while
+    // Steam was still listing, and a red "verification stopped answering" appeared
+    // next to a pass that then finished normally (D-236).
+    if (this.verifying) this.#verifyingSince = Date.now();
+    // A LAN scan or a DZSA import is not a Steam refresh. It claimed the Steam card's
+    // "last refresh" time, which the host keeps for Steam alone (D-220), and a DZSA
+    // import finishing during a Steam refresh threw away that refresh's record of
+    // the servers it had seen, so the vouches below were never withdrawn (D-256).
+    if (d.source !== "steam") return;
+    this.lastRefresh = Math.floor(Date.now() / 1000);
+    // Steam may have updated DayZ while the list was coming in.
+    void this.refreshLocalVersion();
+    // Mirror of the host's `unvouch_unlisted` (D-233, D-271): the in-memory rows must agree
+    // with the cache, or the vouch would linger on screen until the next start.
+    const seen = this.#seenThisRefresh;
+    this.#seenThisRefresh = null;
+    // The host decides what "complete" means from the partition answers, so the
+    // two cannot disagree about a refresh Steam timed out or throttled (D-236).
+    if (seen && d.complete === true) {
+      let n = 0;
+      for (const r of this.rows.values()) {
+        if (r.steamEmpty === false && !seen.has(r.id)) {
+          // A new object, not a write into the old one: the grid's keyed rows and
+          // the details pane compare by identity, so an in-place change kept the
+          // vouched look until a verification happened to replace the row (D-236).
+          this.rows.set(r.id, { ...r, steamEmpty: null });
+          n++;
+        }
+      }
+      if (n > 0) this.rowsChanged();
+    }
+  }
+
   /** Holds a batch for the next flush; `dzsa` for rows from the DZSA list (D-271). */
   #enqueue(rows: ServerRow[], dzsa: boolean) {
     for (const r of rows) this.#inbox.push([r, dzsa]);
@@ -1326,11 +1381,16 @@ class ServersStore {
       const prev = this.rows.get(r.id);
       // A new row is placed into the name order; one that renamed itself rebuilds it;
       // a changed player count does neither (D-181, D-284).
-      if (!prev) this.#namesAdded.add(r.id);
+      if (!prev) {
+        // A full rebuild is due anyway, and places it (D-297).
+        if (!this.#namesDirty) this.#namesAdded.add(r.id);
+      }
       else if (prev.name !== r.name) this.#namesDirty = true;
       // The host keeps a DZSA row's measured values over the list's placeholders, and
       // so does this; every other batch is a measurement and lands as it is.
-      this.#put(prev ? this.#merge(prev, r, dzsa) : r);
+      // In the store's one shape, reusing the replaced row's strings (D-297).
+      const c = compactRow(r, prev);
+      this.#put(prev ? this.#merge(prev, c, dzsa) : c);
       // Only what Steam listed as populated keeps a vouch, as the host decides (D-271):
       // DZSA, LAN and probed rows arriving during a refresh are not Steam's answer.
       if (r.steamEmpty === false) this.#seenThisRefresh?.add(r.id);
@@ -1384,7 +1444,6 @@ class ServersStore {
       this.#count(gone, -1);
       n++;
       this.#hay.delete(id);
-      this.#cloneKeys.delete(id);
       this.#pending.delete(id);
       this.#checkedAt.delete(id);
       const at = this.#byIp.get(gone.ip);
@@ -1549,8 +1608,11 @@ class ServersStore {
       // Merged like a listing: a probe carries no verdict, and the known one and its
       // count vanished until the re-check landed (D-256).
       const prev = this.rows.get(row.id);
-      this.#put(prev ? this.#merge(prev, row, false) : row);
-      if (!prev) this.#namesAdded.add(row.id);
+      const c = compactRow(row, prev);
+      this.#put(prev ? this.#merge(prev, c, false) : c);
+      if (!prev) {
+        if (!this.#namesDirty) this.#namesAdded.add(row.id);
+      }
       else if (prev.name !== row.name) this.#namesDirty = true;
       this.rowsChanged();
       if (select) this.selectedId = row.id;

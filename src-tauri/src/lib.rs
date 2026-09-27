@@ -28,6 +28,9 @@ use settings::SettingsStore;
 use steam::sdk::{SteamEvent, SteamWorker};
 
 static STARTED: OnceLock<Instant> = OnceLock::new();
+/// The async runtime, four workers (D-297). Held for the life of the process: tauri
+/// only borrows its handle.
+static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
 /// Milliseconds since `run()` began; used by debug traces to measure cold start.
 pub fn uptime_ms() -> u128 {
@@ -205,6 +208,16 @@ pub fn run() {
     }
     let _ = ELEVATION.set(state);
     proc::set_priority(proc::Priority::High);
+    // Four workers, not tauri's one per logical CPU: 32 on the reference machine held
+    // 1.5 MB against 0.2 MB for four, and the host's async work is waiting — A2S
+    // datagrams, HTTP, blocking tasks, which have a pool of their own (row 13, D-297).
+    if let Ok(rt) = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .enable_all()
+        .build()
+    {
+        tauri::async_runtime::set(RUNTIME.get_or_init(|| rt).handle().clone());
+    }
     tauri::Builder::default()
         // Must be the first plugin (its README): a second launch hands its arguments
         // to the running instance, which just comes to the front (D-079).
@@ -354,6 +367,7 @@ pub fn run() {
                 scanning: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 dzsa: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 launching: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                rows_out: std::sync::Mutex::new(None),
                 settings,
             });
             app.resources_table().add(ExitGuard(app.handle().clone()));
@@ -375,7 +389,7 @@ pub fn run() {
                         SteamEvent::Batch(rows) => {
                             populated.extend(rows.iter().filter(|r| r.steam_empty == Some(false)).filter_map(Target::from_row));
                             listed.extend(rows.iter().filter(|r| r.steam_empty == Some(false)).map(|r| r.id.clone()));
-                            let _ = handle.emit("servers:batch", &rows);
+                            commands::send_rows(&handle, "batch", &rows);
                             let c = Arc::clone(&cache);
                             let _ = tauri::async_runtime::spawn_blocking(move || {
                                 if let Ok(mut c) = c.lock() {
@@ -421,7 +435,7 @@ pub fn run() {
                                 d.elapsed_ms,
                                 d.partitions.len()
                             );
-                            let _ = handle.emit("servers:done", &d);
+                            commands::send_rows(&handle, "done", &d);
                             // A LAN scan is not a list refresh: it must not push the
                             // automatic refresh's throttle or age out cached rows (D-096),
                             // and a rejected one fetched nothing at all (D-161): treating it as
@@ -516,7 +530,7 @@ pub fn run() {
                             // together, ~21 000 ids at the D-233 cache size — 444 KiB in
                             // one event against docs/05 §4's ~200 KB ceiling (D-236).
                             for chunk in pruned.chunks(PRUNED_EVENT_IDS) {
-                                let _ = handle.emit("servers:pruned", chunk);
+                                commands::send_rows(&handle, "pruned", chunk);
                             }
                             // A rejected `Done` is an answer, not a result: the refresh
                             // it refers to either never reached Steam (D-161) or is still
@@ -575,9 +589,7 @@ pub fn run() {
                                     populated = targets;
                                     populated.sort_by(|a, b| a.id.cmp(&b.id));
                                     populated.dedup_by(|a, b| a.id == b.id);
-                                    let _ = handle.emit(
-                                        "servers:verify-done",
-                                        &commands::VerifySummary {
+                                    commands::send_rows(&handle, "verify-done", &commands::VerifySummary {
                                             skipped: true,
                                             ..Default::default()
                                         },
@@ -646,9 +658,7 @@ pub fn run() {
                                 // though (D-159): a LAN scan never sets the flag, and an
                                 // empty summary there replaced a good one on screen with
                                 // "0 verified · 0 fake · 0 offline".
-                                let _ = handle.emit(
-                                    "servers:verify-done",
-                                    &commands::VerifySummary::default(),
+                                commands::send_rows(&handle, "verify-done", &commands::VerifySummary::default(),
                                 );
                             }
                         }
@@ -715,6 +725,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::rows_subscribe,
             commands::app_info,
             commands::diagnostics,
             commands::local_game_version,

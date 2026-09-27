@@ -96,7 +96,11 @@
   let modQuery = $state("");
   const modOptions = $derived.by(() => {
     const q = modQuery.trim().toLowerCase();
-    const list = servers.modOptions.filter((m) => !q || m.name.toLowerCase().includes(q)).slice(0, 300);
+    // The 300 most widely used that match, picked here: the store sorted all ~18 000
+    // catalogue entries into an array it kept for the rest of the session (D-297).
+    const matching: { id: number; name: string; servers: number }[] = [];
+    for (const [id, e] of servers.modCatalog) if (!q || e.name.toLowerCase().includes(q)) matching.push({ id, name: e.name, servers: e.servers });
+    const list = matching.sort((a, b) => b.servers - a.servers || a.name.localeCompare(b.name)).slice(0, 300);
     if (f.mod && !list.some((m) => m.id === f.mod)) {
       const cur = servers.modCatalog.get(f.mod);
       list.unshift({ id: f.mod, name: cur?.name ?? String(f.mod), servers: cur?.servers ?? 0 });

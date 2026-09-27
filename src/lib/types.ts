@@ -230,26 +230,144 @@ export type CachedServers = {
   lastRefresh: number | null;
 };
 
+/** Strings that repeat across rows, one instance each: 71 397 rows carry 6 958
+ *  addresses, 199 maps, 24 versions, five verdicts and about 200 countries, and JSON
+ *  gave every row its own copies (D-297). Bounded by what the session has seen. */
+const sharedStrings = new Map<string, string>();
+function share<T extends string | null | undefined>(s: T): T {
+  if (typeof s !== "string") return s;
+  const k = sharedStrings.get(s);
+  if (k !== undefined) return k as T;
+  sharedStrings.set(s, s);
+  return s;
+}
+
+/** The tags in one shape, every field present (D-297). */
+function tagsOf(t: DayzTags): DayzTags {
+  return {
+    battleye: t.battleye,
+    firstPersonOnly: t.firstPersonOnly,
+    privateHive: t.privateHive,
+    modded: t.modded,
+    dlc: t.dlc,
+    allowedFilePatching: t.allowedFilePatching,
+    queue: t.queue,
+    timeMultiplier: t.timeMultiplier,
+    nightMultiplier: t.nightMultiplier,
+    timeMinutes: t.timeMinutes,
+  };
+}
+
+const sameTags = (a: DayzTags, b: DayzTags): boolean =>
+  a.battleye === b.battleye &&
+  a.firstPersonOnly === b.firstPersonOnly &&
+  a.privateHive === b.privateHive &&
+  a.modded === b.modded &&
+  a.dlc === b.dlc &&
+  a.allowedFilePatching === b.allowedFilePatching &&
+  a.queue === b.queue &&
+  a.timeMultiplier === b.timeMultiplier &&
+  a.nightMultiplier === b.nightMultiplier &&
+  a.timeMinutes === b.timeMinutes;
+
+/**
+ * A row in the one shape every row in the store has: all fields present, in one order,
+ * the strings of the row it replaces reused when equal, and the repeating ones shared.
+ * The start-up decode added fields one by one and left the absent ones out, and
+ * batches kept the shape JSON gave them, so rows came in several shapes — the ones with
+ * all twenty fields in dictionary mode — and no two rows shared a string: 692 B a row in
+ * Node, about 407 in the renderer (row 13, D-297). An absent field is `undefined`,
+ * which every reader already treats as absent.
+ */
+export function compactRow(r: ServerRow, prev?: ServerRow): ServerRow {
+  return {
+    id: prev !== undefined ? prev.id : r.id,
+    ip: prev !== undefined && prev.ip === r.ip ? prev.ip : share(r.ip),
+    gamePort: r.gamePort,
+    queryPort: r.queryPort,
+    name: prev !== undefined && prev.name === r.name ? prev.name : r.name,
+    map: share(r.map),
+    description: prev !== undefined && prev.description === r.description ? prev.description : r.description,
+    players: r.players,
+    maxPlayers: r.maxPlayers,
+    password: r.password,
+    serverVersion: r.serverVersion,
+    version: share(r.version),
+    pingMs: r.pingMs,
+    tags: prev !== undefined && sameTags(prev.tags, r.tags) ? prev.tags : tagsOf(r.tags),
+    bots: r.bots,
+    verifiedPlayers: r.verifiedPlayers,
+    steamEmpty: r.steamEmpty,
+    verifiedAt: r.verifiedAt,
+    verdict: share(r.verdict),
+    clone: r.clone,
+    country: share(r.country),
+  };
+}
+
 /** The rows of `servers_cached`, each the same object every other event sends: a
- *  `null` is a value that form leaves out, so it is skipped (D-284). */
+ *  `null` is a value that form leaves out (D-284). Built straight into the store's one
+ *  shape, with the names and descriptions mirror farms repeat shared across the list
+ *  (D-297). */
 export function decodeCachedRows(c: CachedServers): ServerRow[] {
   const { keys, tagKeys, rows } = c;
-  const tagsAt = keys.indexOf("tags");
+  const col = (k: string) => keys.indexOf(k);
+  const tcol = (k: string) => tagKeys.indexOf(k);
+  const get = (a: unknown[], i: number | undefined): any => (i === undefined || i < 0 ? undefined : (a[i] ?? undefined));
+  const [iId, iIp, iGame, iQuery, iName, iMap, iDesc, iPlayers, iMax, iPass, iSv, iVer, iPing, iTags, iBots, iVp, iSe, iVa, iVerdict, iClone, iCountry] = [
+    "id", "ip", "gamePort", "queryPort", "name", "map", "description", "players", "maxPlayers", "password", "serverVersion", "version", "pingMs", "tags",
+    "bots", "verifiedPlayers", "steamEmpty", "verifiedAt", "verdict", "clone", "country",
+  ].map(col);
+  const [tBe, tFp, tPh, tMod, tDlc, tFile, tQueue, tTime, tNight, tMin] = [
+    "battleye", "firstPersonOnly", "privateHive", "modded", "dlc", "allowedFilePatching", "queue", "timeMultiplier", "nightMultiplier", "timeMinutes",
+  ].map(tcol);
+  // For this list only: names and descriptions repeat within it, not across sessions.
+  const local = new Map<string, string>();
+  const once = (s: string | undefined): string | undefined => {
+    if (s === undefined) return s;
+    const k = local.get(s);
+    if (k !== undefined) return k;
+    local.set(s, s);
+    return s;
+  };
   const out = new Array<ServerRow>(rows.length);
   for (let i = 0; i < rows.length; i++) {
     const a = rows[i]!;
-    const o: Record<string, unknown> = {};
-    for (let j = 0; j < keys.length; j++) {
-      const v = a[j];
-      if (v === null || v === undefined) continue;
-      if (j === tagsAt) {
-        const tv = v as unknown[];
-        const t: Record<string, unknown> = {};
-        for (let k = 0; k < tagKeys.length; k++) if (tv[k] !== null && tv[k] !== undefined) t[tagKeys[k]!] = tv[k];
-        o.tags = t;
-      } else o[keys[j]!] = v;
-    }
-    out[i] = o as ServerRow;
+    const tv = (get(a, iTags) ?? []) as unknown[];
+    out[i] = {
+      id: get(a, iId),
+      ip: share(get(a, iIp)),
+      gamePort: get(a, iGame),
+      queryPort: get(a, iQuery),
+      name: once(get(a, iName))!,
+      map: share(get(a, iMap)),
+      description: once(get(a, iDesc))!,
+      players: get(a, iPlayers),
+      maxPlayers: get(a, iMax),
+      password: get(a, iPass),
+      serverVersion: get(a, iSv),
+      version: share(get(a, iVer)),
+      pingMs: get(a, iPing),
+      tags: {
+        battleye: get(tv, tBe),
+        firstPersonOnly: get(tv, tFp),
+        privateHive: get(tv, tPh),
+        modded: get(tv, tMod),
+        dlc: get(tv, tDlc),
+        allowedFilePatching: get(tv, tFile),
+        queue: get(tv, tQueue),
+        timeMultiplier: get(tv, tTime),
+        nightMultiplier: get(tv, tNight),
+        timeMinutes: get(tv, tMin),
+      },
+      bots: get(a, iBots),
+      verifiedPlayers: get(a, iVp),
+      steamEmpty: get(a, iSe),
+      verifiedAt: get(a, iVa),
+      verdict: share(get(a, iVerdict)),
+      clone: get(a, iClone),
+      country: share(get(a, iCountry)),
+    };
   }
   return out;
 }
