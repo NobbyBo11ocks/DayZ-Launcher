@@ -6,7 +6,7 @@
   // no embedded player and the memory budget holds.
   // Every command through the logging wrapper: a failure is recorded with its
   // command name before it is rethrown (D-158).
-  import { invokeLogged as invoke } from "./log";
+  import { describe, invokeLogged as invoke, logWarn } from "./log";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { untrack } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
@@ -38,6 +38,37 @@
   /** Posts whose picture failed to load: the card falls back to text (a broken image is worse than none). */
   const broken = new SvelteSet<string>();
   const thumb = (n: NewsItem, big = false) => (broken.has(n.gid) ? null : news.thumbUrl(n, big));
+
+  /** Cards whose picture may be asked for: on screen, or within a screen of it. Every
+   *  card asked on first render, so opening "All news" fetched some 17 pictures, ~78 MB
+   *  of sources, for cards nobody scrolled to (row 24). */
+  const near = new SvelteSet<string>();
+  let observer: IntersectionObserver | null = null;
+  function lazy(node: HTMLElement, gid: string) {
+    if (typeof IntersectionObserver !== "function") {
+      near.add(gid);
+      return;
+    }
+    observer ??= new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          const id = (e.target as HTMLElement).dataset.gid;
+          if (id) near.add(id);
+          observer?.unobserve(e.target);
+        }
+      },
+      { root: node.closest(".scroll"), rootMargin: "100% 0px" },
+    );
+    node.dataset.gid = gid;
+    observer.observe(node);
+    return { destroy: () => observer?.unobserve(node) };
+  }
+  $effect(() => () => {
+    observer?.disconnect();
+    observer = null;
+  });
+  const cardThumb = (n: NewsItem) => (near.has(n.gid) ? thumb(n) : null);
   const watch = (n: NewsItem) => `https://www.youtube.com/watch?v=${n.video}`;
 
   // The video open in the player, or null. `-nocookie` is YouTube's no-tracking host and
@@ -108,8 +139,16 @@
     }
   }
 
+  /** Why a post could not be opened. It went into the feed's error, whose retry then
+   *  fetched the news again at every focus until a fetch succeeded (row 24). */
+  let openError = $state<string | null>(null);
   function open(url: string) {
-    void openUrl(url).catch((e) => (news.error = String(e)));
+    void openUrl(url)
+      .then(() => (openError = null))
+      .catch((e) => {
+        logWarn("news", `${url} could not be opened: ${describe(e)}`);
+        openError = String(e);
+      });
   }
 </script>
 
@@ -123,6 +162,7 @@
       {/each}
     </div>
     {#if news.error}<span class="error" role="alert">{news.error}</span>{/if}
+    {#if openError}<span class="error" role="alert">{openError}</span>{/if}
   </div>
 
   <div class="scroll">
@@ -156,12 +196,12 @@
       </article>
       <div class="grid">
         {#each rest as n (n.gid)}
-          <article class="card" class:update={n.update}>
-            {#if thumb(n)}
+          <article class="card" class:update={n.update} use:lazy={n.gid}>
+            {#if cardThumb(n)}
               <!-- Named for its post: every card's picture was "Play the video" or "Open the
                    post", ahead of the card's heading (D-291). -->
               <button class="media" onclick={() => (n.video ? play(n) : open(n.url))} aria-label={n.video ? `Play the video: ${n.title}` : `Open the post: ${n.title}`}>
-                <img src={thumb(n)} alt="" loading="lazy" onerror={() => broken.add(n.gid)} />
+                <img src={cardThumb(n)} alt="" loading="lazy" onerror={() => broken.add(n.gid)} />
                 {#if n.video}<span class="play small" aria-hidden="true"></span>{/if}
               </button>
             {/if}
@@ -180,7 +220,8 @@
         {/each}
       </div>
     {:else}
-      <p class="muted">{news.loading ? "Loading the latest posts…" : "No posts to show."}</p>
+      <!-- Nothing to call empty before the stored posts are in (row 24). -->
+      <p class="muted">{news.loaded && !news.loading ? "No posts to show." : "Loading the latest posts…"}</p>
     {/if}
   </div>
 </section>

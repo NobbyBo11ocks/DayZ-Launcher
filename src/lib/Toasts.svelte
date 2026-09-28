@@ -1,6 +1,7 @@
 <script lang="ts">
-  // DayZ update posts (D-099): stacked in the top-right corner until dismissed.
-  // Favourite alerts used to share this rail; they were removed in D-182.
+  // DayZ update posts (D-099) and one-off notices (D-303: a settings file that could
+  // not be read, saved data moved, a join not added to Recent), stacked in the top-right
+  // corner until dismissed. Favourite alerts used to share this rail (removed in D-182).
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { news } from "./state/news.svelte";
   import { notices } from "./state/notices.svelte";

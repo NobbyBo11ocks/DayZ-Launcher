@@ -10,6 +10,15 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.94",
+    notes: [
+      { kind: "fixed", text: "Several new DayZ updates at once now show the newest, with one notification." },
+      { kind: "fixed", text: "The News page shows its posts sooner when the launcher starts." },
+      { kind: "fixed", text: "News summaries no longer show stray spaces, links or odd codes." },
+      { kind: "changed", text: "News pictures download once, and only as you scroll to them." },
+    ],
+  },
+  {
     version: "0.1.93",
     notes: [
       { kind: "changed", text: "Friends keeps your last list, with its time, while disconnected from Steam." },
@@ -133,6 +142,24 @@ export const CHANGES: readonly Release[] = [
     notes: [{ kind: "added", text: "After every update, this window shows what changed." }],
   },
 ];
+
+/**
+ * What the What's new window does at start (D-301): the releases to show, or whether to
+ * record this version as seen without showing any. The mark is the newer of the settings
+ * file's and the copy in storage, as for the update check (D-281): a file that came back
+ * as the defaults must not show the same notes again (row 14, H4). A first run (not yet
+ * onboarded) only records the version, the welcome shows then; and the mark is never
+ * lowered, or an older version started after a newer one showed the same notes again
+ * at the next update (row 15, F6). Lived inside App.svelte, untested (row 24).
+ */
+export function whatsNewPlan(fileSeen: string, storedSeen: string, version: string, onboarded: boolean): { releases: Release[]; markSeen: boolean } {
+  let seen = fileSeen;
+  if (storedSeen && (!seen || compareVersions(storedSeen, seen) > 0)) seen = storedSeen;
+  if (seen === version) return { releases: [], markSeen: false };
+  const releases = onboarded ? unseenChanges(seen, version) : [];
+  if (releases.length > 0) return { releases, markSeen: false };
+  return { releases: [], markSeen: !seen || compareVersions(version, seen) > 0 };
+}
 
 /** At most this many releases in the window; a player several updates behind gets the newest. */
 const MAX_SHOWN = 5;

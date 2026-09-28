@@ -28,3 +28,20 @@ test("What's new shows the releases since the one last seen, newest first, five 
   assert.deepEqual(ids(unseenChanges("0.1.9", newest)), versions.slice(0, 5));
   assert.deepEqual(ids(unseenChanges(second, `${newest}-dev`)), [newest], "a build of the newest counts as it");
 });
+
+test("What's new at start: show, record or leave, by the file's mark, the stored copy and the first run (D-301, D-281, row 15 F6, row 24)", async (t) => {
+  const app = await freshApp(t, { timers: false });
+  const { CHANGES, whatsNewPlan } = await app.load("changes");
+  const versions = CHANGES.map((r) => r.version);
+  const [newest, second, third] = versions;
+  const ids = (p) => p.releases.map((r) => r.version);
+  assert.deepEqual(whatsNewPlan(newest, "", newest, true), { releases: [], markSeen: false }, "seen already");
+  const update = whatsNewPlan(third, "", newest, true);
+  assert.deepEqual(ids(update), [newest, second]);
+  assert.equal(update.markSeen, false, "marked when the window is closed");
+  assert.deepEqual(whatsNewPlan("", "", newest, false), { releases: [], markSeen: true }, "a first run records the version; the welcome shows");
+  assert.deepEqual(whatsNewPlan("", newest, newest, true), { releases: [], markSeen: false }, "a file that came back as the defaults: the stored copy says it was seen");
+  assert.deepEqual(ids(whatsNewPlan(third, second, newest, true)), [newest], "the newer of the two marks");
+  assert.deepEqual(whatsNewPlan(newest, "", third, true), { releases: [], markSeen: false }, "an older version never lowers the mark");
+  assert.deepEqual(ids(whatsNewPlan("", "", newest, true)), [newest], "a file from before the notes: this release's");
+});

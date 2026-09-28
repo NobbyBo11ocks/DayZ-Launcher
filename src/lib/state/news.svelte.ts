@@ -17,7 +17,7 @@ const RETRY_GAP_MS = 60_000;
 /** On the very first run, only this many of the newest official posts count as unread. */
 const FIRST_RUN_UNREAD = 5;
 
-export type NewsAlert = { gid: string; title: string; url: string; at: number };
+export type NewsAlert = { gid: string; title: string; url: string };
 /** `updates`: official game-update posts (default); `official`: every Bohemia post; `press`: plus third-party feeds. */
 export type NewsView = "updates" | "official" | "press";
 
@@ -41,6 +41,10 @@ class NewsStore {
   visitSeen = $state(0);
   /** The file's mark has been adopted; until then nothing counts as read (D-245). */
   seenLoaded = $state(false);
+  /** The stored posts have been applied, or could not be read: until then the page has
+   *  nothing to call empty. It said "No posts to show." from the first frame until they
+   *  came, through a slow settings read as well (row 24). */
+  loaded = $state(false);
   /** The landing page shows the latest game updates only unless the user widens it (D-101). */
   view = $state<NewsView>("updates");
   /** Update posts not yet dismissed, newest last (at most three). */
@@ -65,6 +69,11 @@ class NewsStore {
     if (this.#started) return;
     this.#started = true;
     const run = ++this.#run;
+    // The stored posts are asked for at once. Asked for after the settings read, they
+    // queued behind the whole server list, whose read holds the cache lock for 65–117 ms
+    // at 40 000–71 000 rows: the order D-284 wanted for the start page never took effect
+    // (row 24).
+    const stored = invoke<NewsCached>("news_cached").catch(() => null);
     // The file's mark first, and only then the cached posts: with the order the other
     // way round, `markSeen` moved the mark to the newest cached post before the file
     // was read, or `beginVisit`'s fallback froze the boundary at 0 — every post
@@ -75,12 +84,10 @@ class NewsStore {
     // meanwhile counted as unread again (D-240).
     this.seen = Math.max(this.seen, u.newsSeen ?? 0);
     this.seenLoaded = true;
-    try {
-      const c = await invoke<NewsCached>("news_cached");
-      this.#setItems(c.items);
-    } catch {
-      /* nothing cached yet */
-    }
+    const c = await stored;
+    if (!this.#started || run !== this.#run) return;
+    if (c) this.#setItems(c.items);
+    this.loaded = true;
     // A switch-off between here and now must not be overtaken by this first fetch.
     if (!this.#started || run !== this.#run) return;
     await this.refresh();
@@ -111,8 +118,13 @@ class NewsStore {
       clearInterval(this.#timer);
       this.#timer = undefined;
     }
-    // Nothing should be left pointing at a page that is no longer in the sidebar.
+    // Nothing should be left pointing at a page that is no longer in the sidebar: the
+    // alerts, and the list with every picture's object URL, which were kept for the rest
+    // of the session; `start()` reads the stored copy again (row 24).
     this.alerts = [];
+    this.#setItems([]);
+    this.#thumbFailed.clear();
+    this.loaded = false;
   }
 
   async refresh() {
@@ -145,9 +157,7 @@ class NewsStore {
           if (uiPrefs.readOk) uiPrefs.patch({ newsSeen: mark });
         }
       } else {
-        for (const n of c.items) {
-          if (n.official && n.update && n.date > before && !known.has(n.gid)) this.announce(n);
-        }
+        this.#announce(c.items.filter((n) => n.official && n.update && n.date > before && !known.has(n.gid)));
       }
     } catch (e) {
       this.error = String(e);
@@ -156,12 +166,19 @@ class NewsStore {
     }
   }
 
-  private announce(n: NewsItem) {
-    this.alerts = [...this.alerts.filter((a) => a.gid !== n.gid), { gid: n.gid, title: n.title, url: n.url, at: Date.now() }].slice(-3);
+  /** New update posts from one fetch: the newest three as toasts, newest last, with one
+   *  taskbar flash and one Windows notification, for the newest. Announced one by one in
+   *  the feed's order (newest first), the three kept were the oldest, the newest post was
+   *  the one dropped, and each asked for its own flash and notification (row 24). */
+  #announce(fresh: NewsItem[]) {
+    if (fresh.length === 0) return;
+    const newest = [...fresh].sort((a, b) => b.date - a.date).slice(0, 3);
+    const gids = new Set(newest.map((n) => n.gid));
+    this.alerts = [...this.alerts.filter((a) => !gids.has(a.gid)), ...newest.reverse().map((n) => ({ gid: n.gid, title: n.title, url: n.url }))].slice(-3);
     void getCurrentWindow()
       .requestUserAttention(UserAttentionType.Informational)
       .catch(() => {});
-    void notifyIfUnfocused(n);
+    void notifyIfUnfocused(newest[newest.length - 1]!);
   }
 
   dismissAlert(gid: string) {
@@ -232,6 +249,8 @@ class NewsStore {
       this.#thumbPending.add(key);
       void invoke<ArrayBuffer>("news_thumb", { gid: n.gid, url: n.image, max })
         .then((buf) => {
+          // Switched off meanwhile: nothing is kept for a page that has left the sidebar.
+          if (!this.#started) return;
           const old = this.thumbs.get(key);
           this.thumbs.set(key, URL.createObjectURL(new Blob([buf], { type: "image/jpeg" })));
           if (old) URL.revokeObjectURL(old);

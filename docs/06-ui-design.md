@@ -77,7 +77,7 @@ A column in the left rail, under the sections, while the Servers page is open (D
 | Download in progress | progress per mod and a status line with the rate and the time left, in the join dialog |
 | Version mismatch | the version cell in amber with the tooltip "Server runs X; your DayZ is Y", the details pane's version chip in amber, and a warning in the join dialog |
 | Query failed | a ⚠ with "Server is not answering…" in the row; the details pane says "Not answering" after its own retry (D-272) |
-| After an update | the "What's new" window (D-301): every release since the one last seen, one short line per change under Added, Fixed, Changed or Removed in the News pill, and "Got it"; once per version, never on a first run (the welcome shows then) |
+| After an update | the "What's new" window (D-301): the releases since the one last seen, the newest five at most (a settings file from before 0.1.78, which has no mark, gets the current release's), one short line per change under Added, Fixed, Changed or Removed in the News pill, and "Got it"; once per version, never on a first run (the welcome shows then) |
 | Connection down | the Servers header: "No server is answering, so your connection may be down; the list is kept as it was." while the checks find it so (D-303) |
 | Steam signed out | the Servers header: "Steam is running but nobody is signed in; the launcher connects once you sign in."; Settings shows Steam's own reason (D-303) |
 | Cache in memory, damaged or not saving | the start-up box titled "…is running without its cache"; Favourites "Your favourites could not be read this session."; a notice once where a damaged cache went; the Servers header while writes fail (D-303) |

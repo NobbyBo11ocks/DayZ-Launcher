@@ -131,12 +131,17 @@ pub fn is_update_title(title: &str) -> bool {
     .any(|w| t.contains(w))
 }
 
-/// Strips BBCode (`[b]`, `[url=…]`, `[list]`…) and HTML tags, decodes the common
-/// entities, collapses whitespace and cuts at `max` characters on a word boundary.
+/// Strips BBCode (`[b]`, `[url=…]`, `[list]`…) and HTML tags, decodes entities (the
+/// named ones posts use, and every numeric one), drops bare links, collapses whitespace
+/// and cuts at `max` characters on a word boundary.
 pub fn plain_text(s: &str, max: usize) -> String {
     let mut out = String::with_capacity(s.len().min(max + 16));
     let mut chars = s.chars().peekable();
     let mut last_space = true;
+    // A tag keeps the words on either side apart, but not a word from the punctuation
+    // after it: `[b]Steam[/b].` read "Steam ." — 190 times in 60 posts, the featured
+    // update post among them (row 24).
+    let mut pending = false;
     while let Some(c) = chars.next() {
         match c {
             '[' | '<' => {
@@ -152,8 +157,9 @@ pub fn plain_text(s: &str, max: usize) -> String {
                     skipped.push(n);
                 }
                 if !closed {
-                    out.push(c);
+                    visible(&mut out, c, &mut pending);
                     out.push_str(&skipped);
+                    last_space = false;
                 } else {
                     // `[img]url[/img]` carries a bare picture path as its content (the
                     // 1.27/1.28 posts, D-133): drop it with the tag. Without a closing
@@ -168,19 +174,21 @@ pub fn plain_text(s: &str, max: usize) -> String {
                             }
                         }
                         if !inner.is_empty() {
+                            if std::mem::take(&mut pending) {
+                                out.push(' ');
+                            }
                             out.push_str(&inner);
                             last_space = inner.ends_with(char::is_whitespace);
                         }
                     }
+                    // Tags often separate lines or list items: keep the words apart.
                     if !last_space {
-                        // Tags often separate lines or list items: keep the words apart.
-                        out.push(' ');
-                        last_space = true;
+                        pending = true;
                     }
                 }
             }
             '&' => {
-                // An entity is `&name;` or `&#nnn;`; anything else stays literal.
+                // An entity is `&name;`, `&#nnn;` or `&#xhh;`; anything else stays literal.
                 let mut ent = String::new();
                 while let Some(&n) = chars.peek() {
                     if (n.is_ascii_alphanumeric() || n == '#') && ent.len() < 8 {
@@ -190,51 +198,52 @@ pub fn plain_text(s: &str, max: usize) -> String {
                         break;
                     }
                 }
-                let rep = if chars.peek() == Some(&';') {
-                    match ent.as_str() {
-                        "amp" => Some("&"),
-                        "quot" => Some("\""),
-                        "apos" | "#39" => Some("'"),
-                        "lt" => Some("<"),
-                        "gt" => Some(">"),
-                        "nbsp" | "#160" => Some(" "),
-                        _ => None,
-                    }
+                let decoded = if chars.peek() == Some(&';') {
+                    entity(&ent)
                 } else {
                     None
                 };
-                match rep {
-                    Some(" ") => {
+                match decoded {
+                    Some(d) => {
                         chars.next();
-                        if !last_space {
-                            out.push(' ');
-                            last_space = true;
+                        if d.is_whitespace() {
+                            pending = false;
+                            if !last_space {
+                                out.push(' ');
+                                last_space = true;
+                            }
+                        } else if !d.is_control() {
+                            visible(&mut out, d, &mut pending);
+                            last_space = false;
                         }
                     }
-                    Some(r) => {
-                        chars.next();
-                        out.push_str(r);
-                        last_space = false;
-                    }
                     None => {
-                        out.push('&');
+                        visible(&mut out, '&', &mut pending);
                         out.push_str(&ent);
                         last_space = false;
                     }
                 }
             }
             c if c.is_whitespace() => {
+                pending = false;
                 if !last_space {
                     out.push(' ');
                     last_space = true;
                 }
             }
             c => {
-                out.push(c);
+                visible(&mut out, c, &mut pending);
                 last_space = false;
             }
         }
     }
+    // A bare link is an address, not a word: "Read the full article here: https://…"
+    // and a post's X link stood in five summaries of sixty (row 24).
+    let out = out
+        .split(' ')
+        .filter(|w| !is_link(w))
+        .collect::<Vec<_>>()
+        .join(" ");
     let text = out.trim();
     if text.chars().count() <= max {
         return text.to_string();
@@ -248,6 +257,52 @@ pub fn plain_text(s: &str, max: usize) -> String {
         _ => cut.as_str(),
     };
     format!("{}…", cut.trim_end_matches([',', '.', ':', ';']))
+}
+
+/// Writes a visible character, with the space a tag before it asked for unless the
+/// character closes a phrase.
+fn visible(out: &mut String, c: char, pending: &mut bool) {
+    if std::mem::take(pending) && !".,;:!?)’”…".contains(c) {
+        out.push(' ');
+    }
+    out.push(c);
+}
+
+/// The character an entity stands for: the named ones posts use, and every numeric one.
+/// Only a handful were decoded, and the press feeds write their punctuation as hex —
+/// "DayZ&#x2019;s", "83km&#xB2; map&#x2014;that's" (row 24).
+fn entity(name: &str) -> Option<char> {
+    Some(match name {
+        "amp" => '&',
+        "quot" => '"',
+        "apos" => '\'',
+        "lt" => '<',
+        "gt" => '>',
+        "nbsp" => '\u{a0}',
+        "rsquo" => '’',
+        "lsquo" => '‘',
+        "rdquo" => '”',
+        "ldquo" => '“',
+        "mdash" => '—',
+        "ndash" => '–',
+        "hellip" => '…',
+        _ => {
+            let n = name.strip_prefix('#')?;
+            let code = match n.strip_prefix(['x', 'X']) {
+                Some(hex) => u32::from_str_radix(hex, 16).ok()?,
+                None => n.parse().ok()?,
+            };
+            return char::from_u32(code);
+        }
+    })
+}
+
+/// A whole word that is a web address.
+fn is_link(w: &str) -> bool {
+    w.get(..8)
+        .is_some_and(|p| p.eq_ignore_ascii_case("https://"))
+        || w.get(..7)
+            .is_some_and(|p| p.eq_ignore_ascii_case("http://"))
 }
 
 fn convert(raw: RawItem) -> NewsItem {
@@ -292,6 +347,11 @@ pub fn image_allowed(url: &str) -> bool {
 /// Decodes a picture and re-encodes it as a JPEG of at most [`THUMB_MAX`] px on
 /// the long side (aspect kept). CPU-bound: call from a blocking task.
 pub fn shrink(data: &[u8], max: u32) -> Result<Vec<u8>, String> {
+    encode_thumbnail(&decode(data)?, max)
+}
+
+/// The picture, decoded within limits.
+fn decode(data: &[u8]) -> Result<image::DynamicImage, String> {
     // Without limits a small file declaring huge dimensions allocates the whole
     // raster before `thumbnail` ever downscales it (D-163).
     let mut limits = image::Limits::default();
@@ -303,9 +363,13 @@ pub fn shrink(data: &[u8], max: u32) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("picture unreadable: {e}"))?;
     let mut reader = reader;
     reader.limits(limits);
-    let img = reader
+    reader
         .decode()
-        .map_err(|e| format!("picture unreadable: {e}"))?;
+        .map_err(|e| format!("picture unreadable: {e}"))
+}
+
+/// A JPEG of `img` no larger than `max` on either side.
+fn encode_thumbnail(img: &image::DynamicImage, max: u32) -> Result<Vec<u8>, String> {
     let small = img.thumbnail(max, max).to_rgb8();
     let mut out = Vec::with_capacity(64 * 1024);
     let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 82);
@@ -385,19 +449,55 @@ pub async fn thumbnail(
     // bounded nothing; the cap now applies while it downloads (D-163).
     let body = crate::http::body_capped(resp, IMAGE_MAX_BYTES, "picture").await?;
     tokio::task::spawn_blocking(move || {
-        let bytes = shrink(&body, max)?;
-        let _ = std::fs::create_dir_all(&dir);
-        // Beside the file, then renamed over it: a plain write truncates first, so a
-        // full disk or a crash left a short picture that was served at every start
-        // until its post left the list (row 14, H10).
-        let tmp = path.with_extension("jpg.tmp");
-        if std::fs::write(&tmp, &bytes).is_err() || std::fs::rename(&tmp, &path).is_err() {
-            let _ = std::fs::remove_file(&tmp);
+        // Every size from this one download: each size downloaded the ~4.6 MB source
+        // again, and a new post is featured at 640 px before it becomes a card at 360,
+        // so every post came down twice (row 24).
+        let img = decode(&body)?;
+        let wanted = encode_thumbnail(&img, max)?;
+        store(&path, &wanted);
+        for other in THUMB_SIZES.into_iter().filter(|&s| s != max) {
+            let other_path = dir.join(format!("{safe}-{other}.jpg"));
+            if read_whole_jpeg(&other_path).is_none() {
+                if let Ok(bytes) = encode_thumbnail(&img, other) {
+                    store(&other_path, &bytes);
+                }
+            }
         }
-        Ok(bytes)
+        Ok(wanted)
     })
     .await
     .map_err(|e| format!("thumbnail task failed: {e}"))?
+}
+
+/// The sizes the page asks for: a card's and the featured post's.
+const THUMB_SIZES: [u32; 2] = [360, 640];
+
+/// Writes a thumbnail beside its place and renames it over: a plain write truncates
+/// first, so a full disk or a crash left a short picture that was served at every
+/// start until its post left the list (row 14, H10). A failure is said once a session:
+/// a folder that cannot be written made every picture again at every start, and
+/// nothing said why (row 24).
+fn store(path: &std::path::Path, bytes: &[u8]) {
+    static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let written = path
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| {
+            let tmp = path.with_extension("jpg.tmp");
+            std::fs::write(&tmp, bytes)
+                .and_then(|()| std::fs::rename(&tmp, path))
+                .inspect_err(|_| {
+                    let _ = std::fs::remove_file(&tmp);
+                })
+        });
+    if let Err(e) = written {
+        if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            crate::log_warn!(
+                "news",
+                "news pictures cannot be saved, so they are made again each time: {e}"
+            );
+        }
+    }
 }
 
 /// Drops cached thumbnails whose post is no longer in the list.
@@ -408,9 +508,13 @@ pub fn prune_thumbnails(dir: &std::path::Path, keep: &std::collections::HashSet<
     for entry in entries.flatten() {
         let name = entry.file_name();
         let full = name.to_string_lossy();
-        // Only ever a thumbnail: the unsuffixed branch below deletes on sight, and a
-        // half-written `.tmp` in this directory is not ours to remove (D-197).
-        let Some(stem) = full.strip_suffix(".jpg") else {
+        // Only ever a thumbnail, or one of our own half-written `<gid>-<max>.jpg.tmp`
+        // files (row 14, H10): a crash between the write and the rename left one that
+        // no sweep removed, as D-197's rule predates those writes (row 24).
+        let Some(stem) = full
+            .strip_suffix(".jpg")
+            .or_else(|| full.strip_suffix(".jpg.tmp"))
+        else {
             continue;
         };
         // "<gid>-<max>.jpg" since D-164. A file with no suffix predates that and can
@@ -428,9 +532,6 @@ pub fn prune_thumbnails(dir: &std::path::Path, keep: &std::collections::HashSet<
     }
 }
 
-/// Latest `count` posts, newest first, with full bodies (`maxlength=0`) so the
-/// pictures and video previews further down a post are found; the gzip reply for
-/// 60 posts is well under 100 KB.
 /// The News page's error when there is no connection (row 14, F6, approved).
 const NEWS_OFFLINE: &str =
     "The news could not be loaded: no connection to Steam. It is tried again when the connection is back.";
@@ -444,6 +545,9 @@ fn failed(detail: impl std::fmt::Display) -> String {
     NEWS_FAILED.to_string()
 }
 
+/// Latest `count` posts, newest first, with full bodies (`maxlength=0`) so the
+/// pictures and video previews further down a post are found; the gzip reply for
+/// 60 posts is well under 100 KB.
 pub async fn fetch(count: u32) -> Result<Vec<NewsItem>, String> {
     let client = reqwest::Client::builder()
         .user_agent(USER_AGENT)
@@ -499,6 +603,77 @@ mod tests {
         );
         assert_eq!(plain_text("[img src=\"x\"][/img]Hello", 100), "Hello");
         assert_eq!(plain_text("[img]no closing tag", 100), "no closing tag");
+    }
+
+    /// Row 24, from the live feed of 2026-09-22: no space before punctuation after a
+    /// tag, the press feeds' hex entities, and no bare links.
+    #[test]
+    fn reads_like_the_post() {
+        assert_eq!(
+            plain_text("the [b]Experimental phase on Steam[/b]. This marks the release of [b]DayZ Badlands[/b], which (see [url=https://x.y]this[/url]).", 500),
+            "the Experimental phase on Steam. This marks the release of DayZ Badlands, which (see this)."
+        );
+        assert_eq!(
+            plain_text("DayZ&#x2019;s Frostline DLC&#x2014;It&#x2019;s too cold, 83km&#xB2; map &#8230; &hellip; &ldquo;a&rdquo; x&ndash;y", 500),
+            "DayZ’s Frostline DLC—It’s too cold, 83km² map … … “a” x–y"
+        );
+        assert_eq!(plain_text("a&#0;b and &#39;q&#39;", 100), "ab and 'q'");
+        assert_eq!(
+            plain_text("Read the full article here: https://www.gamingonlinux.com/2026/09/x\nFollow us HTTPS://X.com/DayZ/status/1 today", 500),
+            "Read the full article here: Follow us today"
+        );
+        // Words on either side of a tag stay apart.
+        assert_eq!(
+            plain_text("line one[/p][p]line two<br>three", 100),
+            "line one line two three"
+        );
+    }
+
+    /// Row 24: one download gives every size, each a whole JPEG no larger than asked.
+    #[test]
+    fn one_picture_makes_every_size() {
+        let src = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            1280,
+            720,
+            image::Rgb([90, 120, 30]),
+        ));
+        let mut png = Vec::new();
+        src.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let img = decode(&png).unwrap();
+        for max in THUMB_SIZES {
+            let jpg = encode_thumbnail(&img, max).unwrap();
+            assert!(jpg.starts_with(&[0xFF, 0xD8]) && jpg.ends_with(&[0xFF, 0xD9]));
+            let back = image::load_from_memory(&jpg).unwrap();
+            assert!(back.width() <= max && back.height() <= max, "{max}");
+        }
+    }
+
+    /// Row 24: the sweep takes our own leftover `.tmp` files of posts that left the list,
+    /// and keeps those of posts still in it.
+    #[test]
+    fn the_sweep_takes_leftover_tmp_files() {
+        let dir = std::env::temp_dir().join(format!("dzl-thumbs-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for f in [
+            "111-360.jpg",
+            "111-640.jpg.tmp",
+            "222-360.jpg",
+            "222-640.jpg.tmp",
+            "notes.txt",
+        ] {
+            std::fs::write(dir.join(f), b"x").unwrap();
+        }
+        let keep: std::collections::HashSet<String> = ["111".to_string()].into_iter().collect();
+        prune_thumbnails(&dir, &keep);
+        let mut left: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(left, ["111-360.jpg", "111-640.jpg.tmp", "notes.txt"]);
     }
 
     #[test]

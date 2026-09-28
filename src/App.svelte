@@ -1,7 +1,7 @@
 <script lang="ts">
   import { listen } from "@tauri-apps/api/event";
   import { tick, untrack } from "svelte";
-  import { compareVersions, unseenChanges, type Release } from "./lib/changes";
+  import { type Release, whatsNewPlan } from "./lib/changes";
   import { describe, installErrorHooks, invokeLogged, logError } from "./lib/log";
   import Favourites from "./lib/Favourites.svelte";
   import FilterPanel from "./lib/FilterPanel.svelte";
@@ -42,9 +42,11 @@
   });
 
   // Nothing is fetched when the page is off, and switching it off mid-session
-  // stops the 30-minute refresh rather than leaving it armed (D-174, D-185). First, so
-  // the landing page's cached posts are asked for before the server list, whose read
-  // holds the cache lock for 65–117 ms at 40 000–71 000 rows (D-284).
+  // stops the 30-minute refresh rather than leaving it armed (D-174, D-185). The
+  // landing page's stored posts are asked for as `news.start()` begins, ahead of the
+  // server list, whose read holds the cache lock for 65–117 ms at 40 000–71 000 rows;
+  // D-284 put this effect first for that, but the ask waited for the settings read
+  // until row 24.
   $effect(() => {
     if (prefs.news) void news.start();
     else news.stop();
@@ -153,22 +155,16 @@
     } catch {
       return;
     }
-    // The newer of the file's mark and the copy in storage, as for the update check
-    // (D-281): a settings file that came back as the defaults must not show the same
-    // notes again (row 14, H4).
-    let seen = fileSeen;
+    // The rules are `whatsNewPlan`'s (changes.ts), where they are tested (row 24).
+    let kept = "";
     try {
-      const kept = localStorage.getItem(SEEN_KEY) ?? "";
-      if (kept && (!seen || compareVersions(kept, seen) > 0)) seen = kept;
+      kept = localStorage.getItem(SEEN_KEY) ?? "";
     } catch {
       /* storage unavailable */
     }
-    if (seen === version) return;
-    const releases = onboarded ? unseenChanges(seen, version) : [];
-    if (releases.length > 0) whatsNew = { version, releases };
-    // Never lowered: an older version started after a newer one wrote its own number,
-    // and the next update showed the same notes again (row 15, F6).
-    else if (!seen || compareVersions(version, seen) > 0) markSeen(version);
+    const plan = whatsNewPlan(fileSeen, kept, version, onboarded);
+    if (plan.releases.length > 0) whatsNew = { version, releases: plan.releases };
+    else if (plan.markSeen) markSeen(version);
   }
   function markSeen(version: string) {
     uiPrefs.patch({ lastSeenVersion: version });
