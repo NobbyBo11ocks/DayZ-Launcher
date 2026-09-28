@@ -12,9 +12,15 @@
   const box = searchBox();
   let typed = $state(servers.filters.search);
   $effect(() => box.dispose);
-  // The Mods column reads the stored mod lists, which start-up no longer loads (D-284).
+  // The Mods column reads the stored mod lists, which start-up no longer loads (D-284):
+  // once the list is in, not beside it, where it held the cache lock for 85–99 ms at
+  // the same moment (row 23).
   $effect(() => {
-    if (!servers.modsIndexLoaded) void servers.loadModsIndex();
+    if (servers.listLoaded && !servers.modsIndexLoaded) void servers.loadModsIndex();
+  });
+  // Favourites that could not be read at start are asked for again here (row 23).
+  $effect(() => {
+    untrack(() => void servers.retryFavourites());
   });
   // A reset from elsewhere has to show up in the field and cancel a pending write
   // (D-159). Only the store is tracked: with `typed` tracked too, every keystroke
@@ -95,7 +101,10 @@
       {#if servers.error}<span class="error" role="alert">{servers.error}</span>{/if}
     </div>
   </div>
-  {#if servers.favourites.size === 0}
+  {#if servers.favourites.size === 0 && !(servers.favouritesLoaded || servers.favouritesUnread || servers.cache?.inMemory)}
+    <!-- Not read yet: nothing to say "none" about, and no focus to move (row 23). -->
+    <div class="empty"></div>
+  {:else if servers.favourites.size === 0}
     <div class="empty">
       <!-- A cache the host could not use this session, or a read that failed at start, is
            not "none yet" (row 14, F14, approved). -->

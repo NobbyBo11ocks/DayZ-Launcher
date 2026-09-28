@@ -10,6 +10,16 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.92",
+    notes: [
+      { kind: "fixed", text: "Favourites and Recent show a server's new name, map and version." },
+      { kind: "fixed", text: "Join again and joining a friend no longer open a different server." },
+      { kind: "fixed", text: "Favourites, Recent and Friends no longer say \"none\" while still loading." },
+      { kind: "fixed", text: "Starring and unstarring quickly keeps the favourite you picked last." },
+      { kind: "fixed", text: "The LAN page shows only its own scan, and every server it finds." },
+    ],
+  },
+  {
     version: "0.1.91",
     notes: [{ kind: "changed", text: "A server's details now say what gave its fake player list away." }],
   },

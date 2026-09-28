@@ -12,7 +12,7 @@ import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { notices } from "./notices.svelte";
 import { uiPrefs } from "./uiprefs.svelte";
 import { describe, logError, logWarn } from "../log";
-import { type CacheStatus, type CachedServers, compactRow, decodeCachedRows, type Favourite, type FriendInfo, type HistoryEntry, type ImportResult, isInflated, isUntrusted, type ModScanSummary, type ModsIndex, queueOf, type RefreshDone, type ServerMods, type ServerRow, type SteamStatus, trustedPlayers, type Verification, type VerifySummary } from "../types";
+import { type CacheStatus, type CachedServers, compactRow, decodeCachedRows, type Favourite, type FriendInfo, type FriendServer, type HistoryEntry, type ImportResult, isInflated, isUntrusted, type ModScanSummary, type ModsIndex, queueOf, type RefreshDone, type ServerMods, type ServerRow, type SteamStatus, trustedPlayers, type Verification, type VerifySummary } from "../types";
 
 export type SortKey = "name" | "map" | "mods" | "players" | "ping" | "time" | "version";
 export type Perspective = "any" | "1pp" | "3pp";
@@ -216,6 +216,8 @@ const CACHE_POLL_MS = 60_000;
 const FRIENDS_POLL_MS = 60_000;
 /** One collator for the whole session: `localeCompare` builds one per call (D-152). */
 const COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+/** Up to this many rows sort by name with the collator itself, ~4 500 comparisons. */
+const DIRECT_NAME_SORT = 500;
 
 /**
  * Collator order over the *distinct* values of a field, as a lookup.
@@ -576,6 +578,17 @@ class ServersStore {
   /** The favourites could not be read at start: the Favourites page says so instead of
    *  "No favourites yet" (row 14, F14, approved). */
   favouritesUnread = $state(false);
+  /** What has been read this session. Until then a page has nothing to say "none" about:
+   *  Favourites said "No favourites yet" and took the focus while 100 000 cached rows
+   *  loaded ahead of the favourites, Recent said "No recent servers" while it asked
+   *  (row 23). */
+  listLoaded = $state(false);
+  favouritesLoaded = $state(false);
+  historyLoaded = $state(false);
+  /** A LAN scan this page started is running. The LAN page read any Steam refresh as its
+   *  scan ("Scanning…" for the whole of a multi-minute Servers refresh), and a refused
+   *  scan took the Servers page's line and its automatic refresh (row 23). */
+  lanScanning = $state(false);
   /** Set by a view that wants the app to switch section (Mods → Servers with a mod filter). */
   navigate = $state<string | null>(null);
   /** Friends in DayZ right now, for the title bar (D-103); polled while the Steam session is active. */
@@ -648,6 +661,7 @@ class ServersStore {
     this.#count(r, 1);
     this.rows.set(r.id, r);
     this.#cloneTouched.add(r.id);
+    if (isLanIp(r.ip)) this.#lanIds.add(r.id);
   }
   /** Ids by address, for the details pane's "Other servers at this address", which
    *  walked every row on every flush while a row was selected (D-284). */
@@ -825,6 +839,13 @@ class ServersStore {
     // read is what re-sorts the list when a count changes.
     if (key === "mods") void this.#modsVersion;
     const modCounts = key === "mods" ? this.#modCounts : null;
+    // A short list (Favourites, LAN, a narrow search) sorts by name directly when the
+    // whole list's order would have to be rebuilt for it: after any rename or prune the
+    // Favourites page paid 185 ms at 100 000 rows for its ten rows (row 23).
+    if (key === "name" && n <= DIRECT_NAME_SORT && (this.#namesDirty || this.#nameOrder.length === 0)) {
+      out.sort((a, b) => dir * (COLLATOR.compare(a.name, b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)));
+      return;
+    }
     const nameRank = key === "name" ? this.#rankByName() : null;
     // Another sort lets the name order go: it was kept for the whole session after one
     // sort by name, 3.4 MB at 71 000 rows, and coming back rebuilds it in 90–176 ms
@@ -1088,22 +1109,29 @@ class ServersStore {
     return out;
   });
 
+  /** The LAN tab's rows (D-087): a local-network address, or delivered while a LAN scan
+   *  ran — a server found through a VPN's LAN adapter (Hamachi 25/8, Radmin 26/8,
+   *  Tailscale 100.64/10) was counted by the scan and listed nowhere on the page
+   *  (row 23). Kept as rows arrive: the tab walked every row on each flush, 5.5 ms at
+   *  100 000. */
+  #lanIds = new Set<string>();
+
   /** LAN rows before the search, so the tab can tell "none found" from "none match" (D-240). */
   lanTotal = $derived.by(() => {
-    void this.#rowSetVersion;
+    void this.#rowsVersion;
     let n = 0;
-    for (const r of this.rows.values()) if (isLanIp(r.ip)) n++;
+    for (const id of this.#lanIds) if (this.rows.has(id)) n++;
     return n;
   });
 
-  /** Rows with a local-network address (LAN tab, D-087), search-filtered, in the list's
-   *  own sort order (D-209). */
+  /** LAN rows, search-filtered, in the list's own sort order (D-209). */
   lanRows = $derived.by(() => {
     void this.#rowsVersion;
     const q = this.filters.search.trim().toLowerCase();
     const out: ServerRow[] = [];
-    for (const r of this.rows.values()) {
-      if (!isLanIp(r.ip)) continue;
+    for (const id of this.#lanIds) {
+      const r = this.rows.get(id);
+      if (!r) continue;
       // Only when something reads it: with no search term this was a Map.get plus
       // three string compares per row for a value nobody looked at - 0.475 ms per
       // pass at 13 000 rows (D-223).
@@ -1118,6 +1146,17 @@ class ServersStore {
   async start() {
     if (this.#started) return;
     this.#started = true;
+    // Favourites are the user's own data and live in their own tables: a failure to
+    // read the server list must not take them off the screen with it. Nor may a failure
+    // to read *them* take the session: this sits before every `listen()` below, and an
+    // unguarded rejection here used to skip all of them plus the status snapshot, the
+    // first refresh and the watchdog — one unlucky SQLITE_BUSY from a backup and the
+    // grid read "Starting up…" until the app was restarted (D-194). Asked for beside
+    // the list, not after it: behind 100 000 rows they came seconds late (row 23).
+    const favourites = this.loadFavourites().catch((e) => {
+      this.favouritesUnread = true;
+      logWarn("cache", `favourites unavailable at start: ${describe(e)}`);
+    });
     try {
       const cached = await invoke<CachedServers>("servers_cached");
       this.lastRefresh = cached.lastRefresh;
@@ -1131,19 +1170,10 @@ class ServersStore {
       // The list is the one thing a refresh rebuilds by itself, so say so rather
       // than leaving a bare backend string on screen.
       this.error = `The cached server list could not be read (${describe(e)}). Refresh to fetch a new one.`;
+    } finally {
+      this.listLoaded = true;
     }
-    // Favourites are the user's own data and live in their own tables: a failure to
-    // read the server list must not take them off the screen with it. Nor may a failure
-    // to read *them* take the session: this sits before every `listen()` below, and an
-    // unguarded rejection here used to skip all of them plus the status snapshot, the
-    // first refresh and the watchdog — one unlucky SQLITE_BUSY from a backup and the
-    // grid read "Starting up…" until the app was restarted (D-194).
-    try {
-      await this.loadFavourites();
-    } catch (e) {
-      this.favouritesUnread = true;
-      logWarn("cache", `favourites unavailable at start: ${describe(e)}`);
-    }
+    await favourites;
     // No mod index here: the pages that read it load it when they open (the filter
     // panel, the Mods page, Favourites and LAN). Read at start it held the cache lock
     // for 85–99 ms and the main thread for 56–75 ms behind the News page, which reads
@@ -1217,6 +1247,25 @@ class ServersStore {
       if (atStart && c.movedTo) notices.push("Saved data", `Saved data was damaged and moved to ${c.movedTo}. Favourites and Recent start empty.`);
     } catch {
       /* logged by the wrapper; the next minute asks again */
+    }
+    if (!atStart) void this.retryFavourites();
+  }
+
+  #favRetrying = false;
+  /** Favourites that could not be read at start, asked for again when the Favourites page
+   *  opens and each minute. They were read once: one star later the page counted that
+   *  star alone, with the rest still in the cache and nothing on screen saying so
+   *  (row 23). */
+  async retryFavourites() {
+    if (!this.favouritesUnread || this.#favRetrying) return;
+    this.#favRetrying = true;
+    try {
+      await this.loadFavourites();
+      this.favouritesUnread = false;
+    } catch (e) {
+      logWarn("cache", `favourites still unavailable: ${describe(e)}`);
+    } finally {
+      this.#favRetrying = false;
     }
   }
 
@@ -1351,11 +1400,18 @@ class ServersStore {
    * are checked on demand like any other.
    */
   async refreshLan(): Promise<boolean> {
-    this.error = null;
     try {
-      return await invoke<boolean>("servers_refresh", { partitions: [{ lan: "1" }], force: true });
+      const started = await invoke<boolean>("servers_refresh", { partitions: [{ lan: "1" }], force: true });
+      this.succeeded("lan");
+      if (started) {
+        this.lanScanning = true;
+        // The Servers button's "Refreshing… N listed" counts Steam's list, which a LAN
+        // scan is not: it showed the last refresh's count for the whole scan (row 23).
+        this.refreshListed = 0;
+      }
+      return started;
     } catch (e) {
-      this.error = String(e);
+      this.fail("lan", String(e));
       return false;
     }
   }
@@ -1480,10 +1536,15 @@ class ServersStore {
     // waiting, not as a result: keeping it would replace a real summary with
     // "0 of 0 shown · 0 from Steam in 0 s" and read as a success.
     this.flushRows();
-    // The count ends with Steam's refresh, or with one that never started; a DZSA import
-    // or a second press ("busy") finishing meanwhile is not the end of it.
-    if (d.rejected ? d.reason !== "busy" : d.source === "steam") this.#listedThisRefresh = null;
+    if (d.source === "lan") this.lanScanning = false;
+    // The count ends with Steam's refresh, or with one that never started; a DZSA import,
+    // a LAN scan or a second press ("busy") finishing meanwhile is not the end of it.
+    if (d.source === "steam" && !(d.rejected && d.reason === "busy")) this.#listedThisRefresh = null;
     if (d.rejected) {
+      // A LAN scan refused is the LAN page's to say, and its Steam line does: it took the
+      // Servers page's "Press Refresh" (on a page without that button), switched off the
+      // verification indicator and spent an automatic refresh (row 23).
+      if (d.source === "lan") return;
       // "Busy" is not a failure: a refresh is already running and will report for
       // itself. Treating the two the same put a permanent red "Steam did not answer
       // the refresh" on screen for a double-click on Refresh, and switched off the
@@ -1572,6 +1633,8 @@ class ServersStore {
       // In the store's one shape, reusing the replaced row's strings (D-297).
       const c = compactRow(r, prev);
       this.#put(prev ? this.#merge(prev, c, dzsa) : c);
+      // Steam's LAN discovery answering, whatever the address (row 23).
+      if (this.lanScanning && !dzsa) this.#lanIds.add(r.id);
       // Only what Steam listed as populated keeps a vouch, as the host decides (D-271):
       // DZSA, LAN and probed rows arriving during a refresh are not Steam's answer.
       if (r.steamEmpty === false) this.#seenThisRefresh?.add(r.id);
@@ -1626,6 +1689,7 @@ class ServersStore {
       this.rows.delete(id);
       this.#count(gone, -1);
       n++;
+      this.#lanIds.delete(id);
       this.#hay.delete(id);
       this.#pending.delete(id);
       this.#checkedAt.delete(id);
@@ -1688,7 +1752,7 @@ class ServersStore {
       // Mirrors `apply_verifications` (cache.rs), rule for rule (D-237).
       const infoAnswered = v.pingMs != null;
       const synthetic = v.verdict === "synthetic";
-      this.rows.set(v.id, {
+      const next: ServerRow = {
         ...r,
         // Only a fresh INFO moves the claim: the fallback is the count the check
         // started from, which a later Steam batch may already have replaced.
@@ -1712,7 +1776,25 @@ class ServersStore {
           r.steamEmpty === true && r.players === 0 && infoAnswered && (v.reported > 0 || (v.verdict === "verified" && (v.verified ?? 0) > 0))
             ? null
             : r.steamEmpty,
-      });
+      };
+      // What the server said about itself, when it changed (row 23): the name, map,
+      // version, game port and password came from listings and probes alone, so a
+      // favourite no listing returns kept what it was stored with.
+      const f = v.facts;
+      if (f) {
+        if (f.name) next.name = f.name;
+        if (f.map) next.map = f.map;
+        if (f.serverVersion > 0) {
+          next.version = f.version;
+          next.serverVersion = f.serverVersion;
+        }
+        if (f.gamePort != null) next.gamePort = f.gamePort;
+        next.password = f.password;
+        next.bots = f.bots;
+        if (next.name !== r.name) this.#namesDirty = true;
+        // A new map moves the map counts, which `#put` keeps.
+        this.#put(next);
+      } else this.rows.set(v.id, next);
     }
     this.#markDirty();
   }
@@ -1749,31 +1831,64 @@ class ServersStore {
     for (const f of list) {
       this.favourites.add(f.id);
     }
+    // A star still on its way to the cache is the player's latest word: an import
+    // finishing meanwhile took it off the screen (row 23).
+    for (const [id, p] of this.#favPending) {
+      if (p.on) this.favourites.add(id);
+      else this.favourites.delete(id);
+    }
+    this.favouritesLoaded = true;
   }
 
+  /** Stars not yet written, by id: the state last asked for and which toggle asked. */
+  #favPending = new Map<string, { on: boolean; seq: number }>();
+  #favSeq = 0;
+  #favWrites: Promise<void> = Promise.resolve();
 
-
-  async toggleFavourite(id: string) {
+  /** Stars and unstars, written to the cache one at a time: sent at once, two presses
+   *  (F, F, or a double click) waited on the cache lock together, which does not queue
+   *  in order, and the cache could keep the first — starred at the next start, unstarred
+   *  on screen now (row 23, as D-307 did for the preferences). */
+  toggleFavourite(id: string): Promise<void> {
     const on = !this.favourites.has(id);
     if (on) this.favourites.add(id);
     else this.favourites.delete(id);
-    try {
-      await invoke("favourite_set", { id, on });
-      this.succeeded("favourite");
-    } catch (e) {
-      this.fail("favourite", String(e));
-      if (on) this.favourites.delete(id);
-      else this.favourites.add(id);
-    }
+    const seq = ++this.#favSeq;
+    this.#favPending.set(id, { on, seq });
+    const write = async () => {
+      try {
+        await invoke("favourite_set", { id, on });
+        this.succeeded("favourite");
+      } catch (e) {
+        this.fail("favourite", String(e));
+        // Back to what the cache has, unless a later press asked for something else.
+        if (this.#favPending.get(id)?.seq === seq) {
+          if (on) this.favourites.delete(id);
+          else this.favourites.add(id);
+        }
+      } finally {
+        if (this.#favPending.get(id)?.seq === seq) this.#favPending.delete(id);
+      }
+    };
+    const done = this.#favWrites.then(write);
+    this.#favWrites = done;
+    return done;
   }
 
   async loadHistory() {
     try {
       this.history = await invoke<HistoryEntry[]>("history_list", { limit: 100 });
+      this.historyLoaded = true;
       this.succeeded("history");
     } catch (e) {
       this.fail("history", String(e));
     }
+  }
+
+  /** After a launch: Recent shows the join without being opened again, once it has been
+   *  read this session (row 23). */
+  noteJoined() {
+    if (this.historyLoaded) void this.loadHistory();
   }
 
   /** Empties the join history after the user's confirmation on the Recent view (D-130). */
@@ -1787,14 +1902,12 @@ class ServersStore {
     }
   }
 
-  /** Adds a server by address, selects it, and returns it. */
-  /** `select`: false for the join paths, which select the row only when their dialog
-   *  opens; a probe that finished after another dialog opened moved the selection
-   *  behind it (D-281). */
-  async directConnect(address: string, select = true): Promise<ServerRow | null> {
-    this.error = null;
+  /** Probes an address and merges the server into the list: the row, or why not.
+   *  `expectGamePort`: only a server on that game port is taken, the first reply too.
+   *  Touches neither the shared line nor the selection. */
+  async #probe(address: string, expectGamePort?: number): Promise<ServerRow | string> {
     try {
-      const row = await invoke<ServerRow>("direct_connect", { address });
+      const row = await invoke<ServerRow>("direct_connect", { address, expectGamePort: expectGamePort ?? null });
       // Merged like a listing: a probe carries no verdict, and the known one and its
       // count vanished until the re-check landed (D-256).
       const prev = this.rows.get(row.id);
@@ -1805,12 +1918,87 @@ class ServersStore {
       }
       else if (prev.name !== row.name) this.#namesDirty = true;
       this.rowsChanged();
-      if (select) this.selectedId = row.id;
       return row;
     } catch (e) {
-      this.error = String(e);
+      return String(e);
+    }
+  }
+
+  /** Adds a server by address, selects it, and returns it. */
+  /** `select`: false for the join paths, which select the row only when their dialog
+   *  opens; a probe that finished after another dialog opened moved the selection
+   *  behind it (D-281). Its failure is the shared line's until a probe succeeds: set
+   *  outside `fail`, it stayed on every list page until something else cleared it,
+   *  and a new attempt wiped whatever other failure was showing (row 23). */
+  async directConnect(address: string, select = true): Promise<ServerRow | null> {
+    const r = await this.#probe(address);
+    if (typeof r === "string") {
+      this.fail("direct", r);
       return null;
     }
+    this.succeeded("direct");
+    if (select) this.selectedId = r.id;
+    return r;
+  }
+
+  /** Join again from Recent: the listed row while it is still the entry's server, else a
+   *  probe that takes only a server on the entry's game port. The stored port answering
+   *  was enough before, so an entry whose port another server holds now opened that
+   *  server's join (row 23, the case D-265 (7) meant to exclude). Why it failed, or null. */
+  async rejoin(h: HistoryEntry): Promise<string | null> {
+    // The listed row only while it is still this entry's server. The store keeps rows up
+    // to 30 days, so the check below — which only ran for rows missing from it — almost
+    // never ran: an id whose query port another server holds now opened that server,
+    // and one the server moved away from planned against a port nobody answers (D-295).
+    const known = this.rows.get(h.id);
+    if (known && known.gamePort === h.gamePort && known.verdict !== "offline") {
+      if (this.joiningId === null) this.select(h.id);
+      this.requestJoin(h.id);
+      return null;
+    }
+    // The entry's id is `ip:queryPort`, the address Steam knew it by; a server that moved
+    // its query port but kept its game port is found from the game port (D-265).
+    const r = await this.#probe(h.id, h.gamePort);
+    if (typeof r === "string" || r.gamePort !== h.gamePort) return `${h.name} did not answer on ${h.ip}:${h.gamePort}; it may be offline or have moved.`;
+    // Not over a dialog opened while the probe ran (D-265).
+    if (this.joiningId === null) {
+      this.selectedId = r.id;
+      this.requestJoin(r.id);
+    }
+    return null;
+  }
+
+  /** Join a friend's server: the listed row when there is one, else a probe. Steam's
+   *  query port is taken as it is; a game address alone takes only a server on that
+   *  game port, where anything answering there was taken before (row 23). Why it
+   *  failed, or null. */
+  async joinFriend(s: FriendServer): Promise<string | null> {
+    // By game address only when Steam gave no query port: with one, a row missing from
+    // the list is a server to probe, not another id at the same game port (D-295). With
+    // two ids at one game address, or an offline one, the list cannot tell which is live.
+    let known: ServerRow | null = null;
+    if (s.queryPort > 0) known = this.rows.get(`${s.ip}:${s.queryPort}`) ?? null;
+    else {
+      const at = this.rowsAtGameAddress(s.ip, s.gamePort);
+      known = at.length === 1 && at[0]!.verdict !== "offline" ? at[0]! : null;
+    }
+    if (known) {
+      if (this.joiningId === null) this.select(known.id);
+      this.requestJoin(known.id);
+      return null;
+    }
+    // Steam hands over the query port with the game address; a direct connect on the
+    // game port alone has to guess it, and the guess misses 14 % of populated servers
+    // (D-245). The typed port is tried as the query port first.
+    const port = s.queryPort > 0 ? s.queryPort : s.gamePort;
+    const r = await this.#probe(`${s.ip}:${port}`, s.queryPort > 0 ? undefined : s.gamePort);
+    if (typeof r === "string") return r;
+    // A probe that answers late must not replace a dialog opened meanwhile (D-265).
+    if (this.joiningId === null) {
+      this.selectedId = r.id;
+      this.requestJoin(r.id);
+    }
+    return null;
   }
 
   /** The official launcher's favourites, or why they could not be imported. The

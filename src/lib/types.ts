@@ -412,7 +412,13 @@ export type Verification = {
   tags: DayzTags | null;
   verifiedAt: number;
   reason: string;
+  /** What the check's INFO said about the server itself, sent only when it differs from
+   *  the row (row 23). Empty fields and a missing game port say nothing. */
+  facts?: InfoFacts;
 };
+
+/** The server's own description of itself in A2S_INFO, as far as a row keeps it. */
+export type InfoFacts = { name: string; map: string; version: string; serverVersion: number; gamePort: number | null; password: boolean; bots: number };
 
 export type VerifySummary = {
   /** No pass ran: one was already in flight. An all-zero summary would read as
@@ -658,12 +664,12 @@ export type SyncDone = { job: number; ok: boolean; error: string | null; failedI
 export type Launched = { pid: number; exe: string; commandLine: string; historyError?: string };
 export type LaunchExited = { pid: number; code: number | null };
 
-export type Favourite = { id: string; addedAt: number };
+export type Favourite = { id: string };
 /** One past join, for the Recent page (D-054). */
 export type HistoryEntry = { id: string; joinedAt: number; name: string; ip: string; gamePort: number; mods: number };
 export type PopulationSample = { ts: number; players: number; queue: number };
 /** `missing`: the official launcher has no favourites file on this PC (row 14, F7). */
-export type ImportResult = { total: number; imported: number; already: number; unreachable: number; path: string; missing?: boolean };
+export type ImportResult = { imported: number; already: number; unreachable: number; missing?: boolean };
 /** Shown when the official launcher has no favourites file (row 14, F7, approved). */
 export const NOTHING_TO_IMPORT = "Nothing to import: the official DayZ launcher has no saved favourites on this PC.";
 

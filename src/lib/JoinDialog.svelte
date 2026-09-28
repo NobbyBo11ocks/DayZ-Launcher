@@ -466,6 +466,8 @@
       // The game started; only its record in Recent failed, which the log alone knew
       // (row 14, F15, approved).
       if (launched.historyError) notices.push("Recent", `Not added to Recent: ${launched.historyError}.`);
+      // Recent showed the new join only once reopened (row 23).
+      else servers.noteJoined();
       const early = exited.get(launched.pid);
       if (early) {
         exit = early;

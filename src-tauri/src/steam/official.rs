@@ -59,6 +59,19 @@ fn cp1252(b: u8) -> char {
     }
 }
 
+/// The entries with each server once, in the file's order, and how many repeats were
+/// dropped: the file can list a server twice, and the import counted both (row 23).
+pub fn distinct(entries: Vec<OfficialFavourite>) -> (Vec<OfficialFavourite>, usize) {
+    let mut seen = std::collections::HashSet::new();
+    let before = entries.len();
+    let kept: Vec<OfficialFavourite> = entries
+        .into_iter()
+        .filter(|e| seen.insert((e.query_ip.clone(), e.query_port)))
+        .collect();
+    let repeats = before - kept.len();
+    (kept, repeats)
+}
+
 pub fn parse_favourites(xml: &str) -> Vec<OfficialFavourite> {
     let mut out = Vec::new();
     let mut rest = xml;
@@ -243,6 +256,22 @@ mod tests {
         assert_eq!(s.max_players, 10);
         assert_eq!(s.server_version, 129_163_451);
         assert!(s.tags.contains("battleye") && !s.password);
+    }
+
+    /// Row 23: a server the file lists twice is imported once and counted once.
+    #[test]
+    fn a_server_listed_twice_is_one_entry() {
+        let xml = r#"<FavoriteServers>
+            <Server Name="first" QueryEndPoint="1.2.3.4:27016" ConnectionEndPoint="1.2.3.4:2302"/>
+            <Server Name="other" QueryEndPoint="1.2.3.4:27017" ConnectionEndPoint="1.2.3.4:2402"/>
+            <Server Name="again" QueryEndPoint="1.2.3.4:27016" ConnectionEndPoint="1.2.3.4:2302"/>
+        </FavoriteServers>"#;
+        let (kept, repeats) = distinct(parse_favourites(xml));
+        assert_eq!(repeats, 1);
+        assert_eq!(
+            kept.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            ["first", "other"]
+        );
     }
 
     #[test]

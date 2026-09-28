@@ -3,6 +3,7 @@
   // discovery. Same table and details pane as the other list views.
   import DetailsPane from "./DetailsPane.svelte";
   import ServerTable from "./ServerTable.svelte";
+  import { servers } from "./state/servers.svelte";
 
   import { untrack } from "svelte";
   import { searchBox } from "./search";
@@ -12,9 +13,10 @@
   const box = searchBox();
   let typed = $state(servers.filters.search);
   $effect(() => box.dispose);
-  // The Mods column reads the stored mod lists, which start-up no longer loads (D-284).
+  // The Mods column reads the stored mod lists, which start-up no longer loads (D-284),
+  // once the list is in (row 23).
   $effect(() => {
-    if (!servers.modsIndexLoaded) void servers.loadModsIndex();
+    if (servers.listLoaded && !servers.modsIndexLoaded) void servers.loadModsIndex();
   });
   // A reset from elsewhere has to show up in the field and cancel a pending write
   // (D-159). Only the store is tracked: with `typed` tracked too, every keystroke
@@ -28,7 +30,6 @@
       }
     });
   });
-  import { servers } from "./state/servers.svelte";
 
   let scanning = $state(false);
   let scannedAt = $state("");
@@ -40,7 +41,10 @@
     if (started) scannedAt = new Date().toLocaleTimeString();
   }
 
-  const busy = $derived(scanning || servers.steam?.refreshing === true);
+  /** This page's own scan. Any Steam refresh counted, so the page read "Scanning…" for
+   *  the whole of a multi-minute Servers refresh; one still disables the button, since
+   *  Steam refuses a scan while it runs (row 23). */
+  const busy = $derived(scanning || servers.lanScanning);
   const lastScan = $derived(servers.done?.source === "lan" ? servers.done : null);
   /** Only a selection this page shows drives the grid and the pane (D-240), as on Favourites. */
   const selected = $derived(servers.lanRows.find((r) => r.id === servers.selectedId) ?? null);
@@ -61,7 +65,7 @@
   <h1 class="sr-only">LAN</h1>
   <div class="top">
     <div class="bar">
-      <button class="btn" onclick={scan} disabled={!servers.steam?.initialized || busy} title="Ask Steam's LAN discovery for DayZ servers on your network">
+      <button class="btn" onclick={scan} disabled={!servers.steam?.initialized || busy || servers.steam?.refreshing === true} title="Ask Steam's LAN discovery for DayZ servers on your network">
         {busy ? "Scanning…" : "Scan LAN"}
       </button>
       <input class="search" type="search" placeholder="Search…" value={typed} bind:this={searchEl} oninput={(e) => (typed = e.currentTarget.value, box.set(typed))} aria-label="Search LAN servers" />
@@ -76,7 +80,10 @@
   </div>
   <!-- The unfiltered count: with a search typed on the Servers page (the box is shared),
        "No LAN servers yet" appeared over servers the search was only hiding (D-240). -->
-  {#if servers.lanTotal === 0}
+  {#if servers.lanTotal === 0 && !servers.listLoaded}
+    <!-- Not read yet (row 23). -->
+    <div class="empty"></div>
+  {:else if servers.lanTotal === 0}
     <div class="empty">
       <p>No LAN servers yet.</p>
       <p class="muted">Scan LAN asks Steam for DayZ servers on this network: a server on this PC or behind the same router. Servers found stay in this list until the cache expires. For a known address elsewhere, use Direct connect in Servers.</p>

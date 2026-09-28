@@ -17,39 +17,16 @@
    * untouched and invited repeat clicks, each starting another probe (D-184).
    */
   let joining = $state<string | null>(null);
+  /** The listed row, or a probe that takes only a server on the entry's game port
+   *  (`servers.rejoin`, row 23). Not over a dialog opened while the probe ran (D-265),
+   *  and not reported as silent when it did answer (D-281). */
   async function joinAgain(h: HistoryEntry) {
     if (joining) return;
-    // The listed row only while it is still this entry's server. The store keeps rows up
-    // to 30 days, so the check below — which only ran for rows missing from it — almost
-    // never ran: an id whose query port another server holds now opened that server,
-    // and one the server moved away from planned against a port nobody answers (D-295).
-    const known = servers.rowsTick >= 0 ? servers.rows.get(h.id) : undefined;
-    if (known && known.gamePort === h.gamePort && known.verdict !== "offline") {
-      if (servers.joiningId === null) servers.select(h.id);
-      servers.requestJoin(h.id);
-      return;
-    }
     joining = h.id;
     try {
-      // The entry's id is `ip:queryPort`, the address Steam knew it by. The game port
-      // made the host guess the query port, and the guess misses 14 % of populated
-      // servers; Friends stopped guessing in D-245, this page in D-256. A typed port is
-      // tried as the query port first, so the id needs no conversion.
-      let row = await servers.directConnect(h.id, false);
-      // The query port may belong to another server by now (hosts hand ports on): the
-      // game port it reports has to be the one this entry joined. And a server that
-      // moved its query port but kept its game port is found from the game port, which
-      // the host probes with the reply's game port checked (D-265).
-      if (row && row.gamePort !== h.gamePort) row = null;
-      if (!row) row = await servers.directConnect(`${h.ip}:${h.gamePort}`, false);
-      // Not over a dialog opened while the probe ran (D-265), and not reported as
-      // silent when it did answer: that dialog is simply left alone (D-281).
-      if (!row) servers.fail("recent", `${h.name} did not answer on ${h.ip}:${h.gamePort}; it may be offline or have moved.`);
+      const why = await servers.rejoin(h);
+      if (why) servers.fail("recent", why);
       else servers.succeeded("recent");
-      if (row && servers.joiningId === null) {
-        servers.selectedId = row.id;
-        servers.requestJoin(row.id);
-      }
     } finally {
       joining = null;
     }
@@ -105,7 +82,10 @@
       {/if}
     {/if}
   </header>
-  {#if servers.history.length === 0}
+  {#if servers.history.length === 0 && !servers.historyLoaded}
+    <!-- Not read yet: nothing to say "none" about (row 23). -->
+    <div class="empty"></div>
+  {:else if servers.history.length === 0}
     <!-- Centred empty state, like LAN and Favourites (D-143). -->
     <div class="empty">
       <p>No recent servers.</p>

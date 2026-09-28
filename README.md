@@ -134,7 +134,7 @@ Join shows the plan first: which of the server's mods you have, what is missing 
 
 ### 🎨 Dark or light, your colour
 
-A dark and a light theme and twelve accent colours. Every filter lives in the left rail, all in view at once: perspective, playstyle, hive, map, country, ping, mods, queue, password, daytime, version and friends. The lower half — hide inflated, hive, map, country, ping and mods — sits at the bottom of the rail.
+A dark and a light theme and twelve accent colours. Every filter lives in the left rail, all in view at once: perspective, playstyle, hive, map, country, ping, mods, queue, password, daytime, version and friends. The lower half — hide untrusted, hive, map, country, ping and mods — sits at the bottom of the rail.
 
 Maps go by the names people use: *Livonia* finds `enoch`, *Frostline* finds `sakhal`.
 

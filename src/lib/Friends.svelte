@@ -7,10 +7,10 @@
   import { invokeLogged as invoke } from "./log";
   import { untrack } from "svelte";
   import { SvelteMap } from "svelte/reactivity";
-  import { avatarDataUrl } from "./avatar";
+  import { avatarDataUrl, initialOf } from "./avatar";
   import { mapLabel } from "./maps";
   import { servers } from "./state/servers.svelte";
-  import { trustedPlayers, type FriendInfo, type FriendState, type ServerRow } from "./types";
+  import { trustedPlayers, type FriendInfo, type FriendState } from "./types";
 
   // Avatars (D-115): 32 px, requested once per friend when the row renders; Steam
   // answers from its cache, so a miss is retried once a few seconds later.
@@ -136,48 +136,18 @@
   /** The friend's server when it is already in our list (by ip:queryPort). */
   const serverOf = (f: FriendInfo) => (f.server && servers.rowsTick >= 0 ? (servers.rows.get(`${f.server.ip}:${f.server.queryPort}`) ?? null) : null);
 
-  /**
-   * The listed row for a friend known only by a game address (rich presence carries no
-   * query port): looked up by ip and game port, so a server already in the list is
-   * not probed for, and the probe's port guess — which misses 14 % of populated
-   * servers (D-245) — is not needed (D-265). Only when exactly one row answers there:
-   * with two ids at one game address, or an offline one, the list cannot tell which is
-   * live, and the probe checks the reply's game port (D-295).
-   */
-  function byGameAddress(ip: string, gamePort: number): ServerRow | null {
-    const at = servers.rowsAtGameAddress(ip, gamePort);
-    return at.length === 1 && at[0]!.verdict !== "offline" ? at[0]! : null;
-  }
-
+  /** The listed row, or a probe (`servers.joinFriend`: by game address only when Steam
+   *  gave no query port, and then only a server on that game port, D-295, row 23). */
   async function join(f: FriendInfo) {
     if (!f.server) return;
     if (joining) return;
-    // By game address only when Steam gave no query port: with one, a row missing from
-    // the list is a server to probe, not another id at the same game port (D-295).
-    const known = serverOf(f) ?? (f.server.queryPort > 0 ? null : byGameAddress(f.server.ip, f.server.gamePort));
-    if (known) {
-      if (servers.joiningId === null) servers.select(known.id);
-      servers.requestJoin(known.id);
-      return;
-    }
     joining = f.steamId;
     error = null;
-    // Steam hands over the query port with the game address; a direct connect on the
-    // game port alone has to guess it, and the guess misses 14 % of populated servers
-    // (733 of 5 249 in the 2026-09-24 cache, D-245). The typed port is tried as the
-    // query port first, so the address form needs no host change.
-    const port = f.server.queryPort > 0 ? f.server.queryPort : f.server.gamePort;
-    const row = await servers.directConnect(`${f.server.ip}:${port}`, false);
+    const why = await servers.joinFriend(f.server);
     joining = null;
-    // The store records the reason, but this page shows its own error line, so a
-    // friend on an unreachable server looked like a button that does nothing (D-165).
-    if (!row) error = servers.error ?? `${f.name}'s server did not answer; it may block queries or be behind a firewall.`;
-    // A probe that answers late must not replace a dialog opened meanwhile, which could
-    // be mid-download or mid-launch (D-265), nor be reported as silent (D-281).
-    else if (servers.joiningId === null) {
-      servers.selectedId = row.id;
-      servers.requestJoin(row.id);
-    }
+    // This page shows its own error line, so a friend on an unreachable server looked
+    // like a button that does nothing (D-165); the shared line is left alone (row 23).
+    if (why !== null) error = why || `${f.name}'s server did not answer; it may block queries or be behind a firewall.`;
   }
 </script>
 
@@ -204,6 +174,10 @@
       <p>{servers.steam?.signedOut ? "Steam is running but nobody is signed in; the launcher connects once you sign in." : "Steam is not running."}</p>
       <p class="muted">The friends list comes from Steam; it fills in by itself once Steam is up.</p>
     </div>
+  {:else if !loadedAt}
+    <!-- Not read yet (or released while idle before it was): nothing to say "none"
+         about; the line above says why (row 23). -->
+    <div class="empty"></div>
   {:else if visible.length === 0}
     <div class="empty">
       <p>{friends.length ? "Nobody online right now." : "No friends found."}</p>
@@ -225,7 +199,7 @@
                   {#if avatarFor(f)}
                     <img class="avatar" src={avatarFor(f)} alt="" width="24" height="24" />
                   {:else}
-                    <span class="avatar placeholder" aria-hidden="true">{f.name.slice(0, 1).toUpperCase()}</span>
+                    <span class="avatar placeholder" aria-hidden="true">{initialOf(f.name)}</span>
                   {/if}
                   <span class="dot {f.inDayz ? 'dayz' : f.state}" aria-hidden="true"></span>{f.name}
                 </span>

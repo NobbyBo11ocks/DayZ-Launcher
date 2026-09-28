@@ -1681,6 +1681,7 @@ pub async fn server_details(
     let was_synthetic = cached
         .as_ref()
         .is_some_and(|r| r.verdict.as_deref() == Some("synthetic"));
+    let known = cached.as_ref().map(verify::InfoFacts::of_row);
 
     let (mut info, mut rules, mut players) =
         tokio::join!(client.info(addr), client.rules(addr), client.players(addr));
@@ -1749,6 +1750,11 @@ pub async fn server_details(
         tags: info.as_ref().ok().map(|r| r.value.tags.clone()),
         verified_at: ServerRow::now_unix(),
         reason,
+        facts: info
+            .as_ref()
+            .ok()
+            .map(|r| verify::InfoFacts::of(&r.value))
+            .filter(|f| known.as_ref().is_none_or(|k| f.changes(k))),
     };
     // The pane still says what it saw; the row keeps its verdict while this PC cannot
     // reach the internet, as for every other check (row 14, F1/H1).
@@ -1840,8 +1846,11 @@ async fn shrink_cache(cache: &Arc<Mutex<Cache>>) {
 /// Keeps what a join's own INFO read said about the game port and the password when it
 /// differs from the cached row: only a Steam listing or a direct connect changed them,
 /// so after a server moved its game port a launch whose own read dropped went to the
-/// old one, and Recent recorded the old one (D-295).
+/// old one, and Recent recorded the old one (D-295). The list is sent the row too: it
+/// kept the old address, which the details pane showed and copied for the rest of the
+/// session (row 23).
 async fn keep_join_facts(
+    app: &AppHandle,
     cache: &Arc<Mutex<Cache>>,
     row: &ServerRow,
     game_port: u16,
@@ -1860,14 +1869,25 @@ async fn keep_join_facts(
     }
     let c = Arc::clone(cache);
     let id = row.id.clone();
-    let _ = tauri::async_runtime::spawn_blocking(move || {
-        if let Ok(c) = c.lock() {
-            if let Err(e) = c.update_join_facts(&id, game_port, password) {
+    let stored = tauri::async_runtime::spawn_blocking(move || {
+        let c = c.lock().ok()?;
+        match c.update_join_facts(&id, game_port, password) {
+            Ok(n) if n > 0 => c.get(&id).ok().flatten(),
+            Ok(_) => None,
+            Err(e) => {
                 crate::log_warn!("cache", "the join's game port was not kept: {e}");
+                None
             }
         }
     })
-    .await;
+    .await
+    .ok()
+    .flatten();
+    // Without Steam's flag, which the list keeps as it has it, as for an import (D-281).
+    if let Some(mut r) = stored {
+        r.steam_empty = None;
+        send_rows(app, "batch", &vec![r]);
+    }
 }
 
 /// Orders two DayZ versions ("1.29.163709") by their numbers; `None` when either is not
@@ -2006,7 +2026,7 @@ pub async fn join_plan(
         .and_then(|i| i.game_port)
         .unwrap_or(row.game_port);
     if info.is_some() {
-        keep_join_facts(&state.cache, &row, game_port, password_required).await;
+        keep_join_facts(&app, &state.cache, &row, game_port, password_required).await;
     }
 
     let mut warnings = Vec::new();
@@ -2379,7 +2399,7 @@ pub async fn launch_game(
         .and_then(|i| i.game_port)
         .unwrap_or(row.game_port);
     if let Some(i) = &info {
-        keep_join_facts(&state.cache, &row, game_port, i.password).await;
+        keep_join_facts(&app, &state.cache, &row, game_port, i.password).await;
     }
     let required: Vec<(u64, String)> = match &rules {
         // Published mods only, each once (D-221, D-265).
@@ -2672,7 +2692,6 @@ pub struct LaunchExited {
 #[serde(rename_all = "camelCase")]
 pub struct Favourite {
     pub id: String,
-    pub added_at: i64,
 }
 
 #[tauri::command]
@@ -2681,10 +2700,7 @@ pub async fn favourites_list(state: State<'_, AppState>) -> AppResult<Vec<Favour
     tauri::async_runtime::spawn_blocking(move || {
         let c = c.lock().map_err(|_| saved_data("cache lock poisoned"))?;
         let list = c.favourites().map_err(saved_data_sql)?;
-        Ok(list
-            .into_iter()
-            .map(|(id, added_at)| Favourite { id, added_at })
-            .collect())
+        Ok(list.into_iter().map(|(id, _)| Favourite { id }).collect())
     })
     .await
     .map_err(|e| saved_data(format!("cache task failed: {e}")))?
@@ -2752,6 +2768,20 @@ pub async fn population_history(
 /// (most hosts), then Steam's defaults. One host often runs several DayZ servers
 /// (51.81.8.81 answers on 27016 *and* 27017, D-053), so callers must match the
 /// reply's game port rather than accept the first answer.
+/// The game port to look for and the query ports to try once the typed port did not
+/// answer as the server: the typed port is the game port unless the caller knows it, and
+/// then that game port answering for itself is tried too; the typed port is not asked
+/// twice.
+fn fallback_query_ports(port: u16, expect_game_port: Option<u16>) -> (u16, Vec<u16>) {
+    let game_port = expect_game_port.unwrap_or(port);
+    let mut ports = candidate_query_ports(game_port);
+    if expect_game_port.is_some() {
+        ports.insert(0, game_port);
+    }
+    ports.retain(|&p| p != port);
+    (game_port, ports)
+}
+
 fn candidate_query_ports(game_port: u16) -> Vec<u16> {
     let mut v = vec![
         game_port.saturating_add(1),
@@ -2830,6 +2860,7 @@ pub async fn direct_connect(
     app: AppHandle,
     state: State<'_, AppState>,
     address: String,
+    expect_game_port: Option<u16>,
 ) -> AppResult<ServerRow> {
     let text = address.trim().trim_start_matches("steam://connect/");
     let (host, port) = match text.rsplit_once(':') {
@@ -2860,11 +2891,14 @@ pub async fn direct_connect(
     crate::log_info!("join", "direct connect to {address}");
     // The typed port may be the query port (answers INFO directly) or the game port
     // (then find the sibling query port whose reply advertises exactly that game port).
-    let row = match probe_server(&state.a2s, ip, &[port], None).await {
+    // Recent and Friends know the game port they want: every reply is checked against
+    // it, the first one too. Anything answering on a stored port was taken as the
+    // server, so an entry whose port another server holds now opened that one (row 23).
+    let row = match probe_server(&state.a2s, ip, &[port], expect_game_port).await {
         Some(r) => r,
         None => {
-            let ports = candidate_query_ports(port);
-            probe_server(&state.a2s, ip, &ports, Some(port))
+            let (game_port, ports) = fallback_query_ports(port, expect_game_port);
+            probe_server(&state.a2s, ip, &ports, Some(game_port))
                 .await
                 .ok_or_else(|| {
                     // The ports tried go to the log; the player gets a sentence (row 14,
@@ -2923,12 +2957,10 @@ pub async fn direct_connect(
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportResult {
-    pub total: usize,
     pub imported: usize,
     pub already: usize,
     /// Added from the XML data only because the server did not answer A2S now.
     pub unreachable: usize,
-    pub path: String,
     /// The official launcher has no favourites file on this PC: nothing to import, which
     /// is not an error (row 14, F7).
     pub missing: bool,
@@ -2959,18 +2991,13 @@ pub async fn import_official_favourites(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             crate::log_info!("app", "no official favourites file at {}", path.display());
             return Ok(ImportResult {
-                path: path.to_string_lossy().into_owned(),
                 missing: true,
                 ..Default::default()
             });
         }
         Err(e) => return Err(AppError::io(&path, e)),
     };
-    let mut result = ImportResult {
-        total: entries.len(),
-        path: path.to_string_lossy().into_owned(),
-        ..Default::default()
-    };
+    let mut result = ImportResult::default();
     let existing: std::collections::HashSet<String> = {
         let c = Arc::clone(&state.cache);
         tauri::async_runtime::spawn_blocking(move || {
@@ -2995,6 +3022,10 @@ pub async fn import_official_favourites(
     // way. The client's own 128-permit semaphore and 400 pps pacer already bound the
     // burst, so the traffic shape is unchanged (D-037).
     let mut probes = tokio::task::JoinSet::new();
+    let (entries, repeats) = crate::steam::official::distinct(entries);
+    // The file listing a server twice counted it as imported twice (row 23).
+    result.already += repeats;
+    let mut unreadable = 0usize;
     for e in entries {
         let id = ServerRow::id_for(&e.query_ip, e.query_port);
         if existing.contains(&id) {
@@ -3002,6 +3033,7 @@ pub async fn import_official_favourites(
             continue;
         }
         let Ok(ip) = e.query_ip.parse::<std::net::IpAddr>() else {
+            unreadable += 1;
             continue;
         };
         let client = state.a2s.clone();
@@ -3009,6 +3041,14 @@ pub async fn import_official_favourites(
             let probed = probe_server(&client, ip, &[e.query_port], None).await;
             (e, id, probed)
         });
+    }
+    // Left out of every count before: say so in the log at least (row 23).
+    if unreadable > 0 {
+        crate::log_warn!(
+            "app",
+            "official favourites: {unreadable} entr{} with an address that is not an IP skipped",
+            if unreadable == 1 { "y" } else { "ies" }
+        );
     }
     while let Some(joined) = probes.join_next().await {
         let Ok((e, id, probed)) = joined else {
@@ -3123,6 +3163,25 @@ pub async fn import_official_favourites(
 
 #[cfg(test)]
 mod tests {
+    use super::fallback_query_ports;
+
+    /// Row 23: a caller that knows the game port has it tried as well, the typed port is
+    /// not asked twice, and a typed address alone keeps the old candidates.
+    #[test]
+    fn fallback_ports_look_for_the_known_game_port() {
+        let (gp, ports) = fallback_query_ports(2303, Some(2302));
+        assert_eq!(gp, 2302);
+        assert_eq!(ports[0], 2302);
+        assert!(!ports.contains(&2303), "{ports:?}");
+        assert!(ports.contains(&27016));
+        let (gp, ports) = fallback_query_ports(2302, None);
+        assert_eq!(gp, 2302);
+        assert_eq!(ports, super::candidate_query_ports(2302));
+        let (gp, ports) = fallback_query_ports(2302, Some(2302));
+        assert_eq!(gp, 2302);
+        assert!(!ports.contains(&2302), "{ports:?}");
+    }
+
     use super::version_order;
     use std::cmp::Ordering;
 

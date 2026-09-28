@@ -841,10 +841,20 @@ impl Cache {
                                       THEN NULL ELSE steam_empty END,
                    ping_ms = COALESCE(?7, NULLIF(ping_ms, 0), ?9, 0),
                    keywords = COALESCE(?8, keywords),
-                   last_seen = CASE WHEN ?7 IS NULL THEN last_seen ELSE ?3 END
+                   last_seen = CASE WHEN ?7 IS NULL THEN last_seen ELSE ?3 END,
+                   name = COALESCE(NULLIF(?10, ''), name),
+                   map = COALESCE(NULLIF(?11, ''), map),
+                   server_version = COALESCE(NULLIF(?12, 0), server_version),
+                   game_port = COALESCE(?13, game_port),
+                   password = COALESCE(?14, password),
+                   bots = COALESCE(?15, bots)
                  WHERE id = ?1",
             )?;
             for v in results {
+                // What INFO said about the server itself, when it differs from the row
+                // (row 23): the name, map, version, game port and password were written
+                // by listings and probes alone.
+                let f = v.facts.as_ref();
                 stmt.execute(params![
                     v.id,
                     v.verified,
@@ -855,6 +865,12 @@ impl Cache {
                     v.ping_ms.map(i64::from),
                     v.keywords,
                     v.player_rtt_ms.filter(|_| !is_lan_id(&v.id)).map(i64::from),
+                    f.map(|f| f.name.as_str()),
+                    f.map(|f| f.map.as_str()),
+                    f.map(|f| f.server_version),
+                    f.and_then(|f| f.game_port).map(i64::from),
+                    f.map(|f| f.password),
+                    f.map(|f| f.bots),
                 ])?;
             }
         }
@@ -966,6 +982,7 @@ impl Cache {
                         OR (?3 IS NOT NULL AND last_seen < ?3
                             AND steam_id = 0 AND verified_at IS NULL AND steam_empty IS NULL
                             AND NOT (ip LIKE '10.%' OR ip LIKE '192.168.%' OR ip LIKE '127.%'
+                                     OR ip LIKE '169.254.%'
                                      OR ip GLOB '172.1[6-9].*' OR ip GLOB '172.2[0-9].*'
                                      OR ip GLOB '172.3[01].*'))
                         OR (?4 IS NOT NULL AND last_seen < ?4
@@ -1699,6 +1716,7 @@ mod tests {
             tags: None,
             verified_at: 1_000,
             reason: "test".into(),
+            facts: None,
         }])
         .unwrap();
         let w = c.get(&id).unwrap().unwrap();
@@ -1726,6 +1744,7 @@ mod tests {
             tags: None,
             verified_at: 2_000,
             reason: "test".into(),
+            facts: None,
         }])
         .unwrap();
         let w = c.get(&id).unwrap().unwrap();
@@ -1762,6 +1781,7 @@ mod tests {
             tags: None,
             verified_at: 1_000,
             reason: "test".into(),
+            facts: None,
         };
         let counted = Verification {
             verdict: Verdict::Verified,
@@ -1861,6 +1881,7 @@ mod tests {
             tags: None,
             verified_at: 1_000,
             reason: "test".into(),
+            facts: None,
         };
         // Listed by `noplayers` at 0 and filled since.
         let mut empty = row(27017, 0);
@@ -1897,6 +1918,73 @@ mod tests {
         assert!(c.synthetic_ids().unwrap().contains(&farm.id));
     }
 
+    /// Row 23: what a check's INFO said about the server replaces the stored name, map,
+    /// version, game port and password — a favourite no listing returns kept them for
+    /// good — while a check without it, or with empty fields, keeps them.
+    #[test]
+    fn a_check_writes_the_servers_own_facts() {
+        use crate::browser::verify::InfoFacts;
+        let mut c = Cache::open_in_memory().unwrap();
+        let old = row(27017, 12);
+        c.upsert(std::slice::from_ref(&old)).unwrap();
+        let v = |facts: Option<InfoFacts>| Verification {
+            id: old.id.clone(),
+            verdict: Verdict::Verified,
+            reported: 12,
+            verified: Some(12),
+            max_players: 50,
+            ping_ms: Some(30),
+            player_rtt_ms: None,
+            keywords: None,
+            tags: None,
+            verified_at: 1_000,
+            reason: "test".into(),
+            facts,
+        };
+        let facts = InfoFacts {
+            name: "Renamed | Chernarus".into(),
+            map: "enoch".into(),
+            version: "1.30.100000".into(),
+            server_version: ServerRow::version_int("1.30.100000"),
+            game_port: Some(2402),
+            password: true,
+            bots: 0,
+        };
+        c.apply_verifications(&[v(Some(facts.clone()))]).unwrap();
+        let r = c.get(&old.id).unwrap().unwrap();
+        assert_eq!(
+            (
+                r.name.as_str(),
+                r.map.as_str(),
+                r.version.as_str(),
+                r.game_port,
+                r.password
+            ),
+            ("Renamed | Chernarus", "enoch", "1.30.100000", 2402, true)
+        );
+        // A check without facts, and one whose reply left fields empty, keep them.
+        c.apply_verifications(&[v(None)]).unwrap();
+        let silent = InfoFacts {
+            name: String::new(),
+            map: String::new(),
+            version: String::new(),
+            server_version: 0,
+            game_port: None,
+            ..facts
+        };
+        c.apply_verifications(&[v(Some(silent))]).unwrap();
+        let r = c.get(&old.id).unwrap().unwrap();
+        assert_eq!(
+            (
+                r.name.as_str(),
+                r.map.as_str(),
+                r.version.as_str(),
+                r.game_port
+            ),
+            ("Renamed | Chernarus", "enoch", "1.30.100000", 2402)
+        );
+    }
+
     /// D-271: a vouch goes by the ids Steam listed, not by `last_seen`, which an INFO
     /// check during the refresh advances too.
     #[test]
@@ -1923,6 +2011,7 @@ mod tests {
             tags: None,
             verified_at: ServerRow::now_unix() + 60,
             reason: "test".into(),
+            facts: None,
         }])
         .unwrap();
         let ids = HashSet::from([listed.id.clone()]);
@@ -1954,6 +2043,7 @@ mod tests {
             tags: None,
             verified_at: 1_000,
             reason: "test".into(),
+            facts: None,
         };
         let mut filling = row(27017, 0);
         filling.steam_empty = Some(true);

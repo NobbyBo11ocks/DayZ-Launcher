@@ -62,6 +62,8 @@ pub struct Target {
     pub reported_at: i64,
     /// The cached verdict was "synthetic", which R11 must not forget at a restart.
     pub was_synthetic: bool,
+    /// What the row says about the server, so a check sends only the facts that changed.
+    pub known: InfoFacts,
 }
 
 impl Target {
@@ -74,6 +76,7 @@ impl Target {
             max_players: r.max_players,
             reported_at: r.last_seen,
             was_synthetic: r.verdict.as_deref() == Some("synthetic"),
+            known: InfoFacts::of_row(r),
         })
     }
 }
@@ -110,6 +113,65 @@ pub struct Verification {
     pub tags: Option<crate::a2s::DayzTags>,
     pub verified_at: i64,
     pub reason: String,
+    /// What this check's INFO said about the server itself, when that differs from the
+    /// row it started from (row 23). Only a listing or a probe used to write these, so a
+    /// favourite Steam's listings never return, or one imported from the official
+    /// launcher's file while it was offline, kept the name, map and version it was
+    /// stored with; a DayZ update then marked it "≠ mine" although it had updated too.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub facts: Option<InfoFacts>,
+}
+
+/// The server's own description of itself in A2S_INFO, as far as a row keeps it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InfoFacts {
+    pub name: String,
+    pub map: String,
+    /// `1.29.163709`, and Steam's integer form beside it (0 when unparsable).
+    pub version: String,
+    pub server_version: i32,
+    /// `None` when the reply carried no game port.
+    pub game_port: Option<u16>,
+    pub password: bool,
+    pub bots: i32,
+}
+
+impl InfoFacts {
+    pub fn of(info: &Info) -> Self {
+        Self {
+            name: info.name.clone(),
+            map: info.map.clone(),
+            version: info.version.clone(),
+            server_version: ServerRow::version_int(&info.version),
+            game_port: info.game_port,
+            password: info.password,
+            bots: i32::from(info.bots),
+        }
+    }
+
+    pub fn of_row(r: &ServerRow) -> Self {
+        Self {
+            name: r.name.clone(),
+            map: r.map.clone(),
+            version: r.version.clone(),
+            server_version: r.server_version,
+            game_port: Some(r.game_port),
+            password: r.password,
+            bots: r.bots,
+        }
+    }
+
+    /// Whether these facts would change `known`. An empty name or map, an unreadable
+    /// version and a missing game port say nothing, and are never written either.
+    pub fn changes(&self, known: &InfoFacts) -> bool {
+        (!self.name.is_empty() && self.name != known.name)
+            || (!self.map.is_empty() && self.map != known.map)
+            || (self.server_version > 0 && self.server_version != known.server_version)
+            || self.game_port.is_some_and(|p| Some(p) != known.game_port)
+            || self.password != known.password
+            || self.bots != known.bots
+    }
 }
 
 /// Pure decision function; `info` is the fresh INFO if it answered.
@@ -657,6 +719,7 @@ pub async fn verify_one(client: &Client, t: Target, with_info: bool) -> Verifica
             tags: None,
             verified_at: ServerRow::now_unix(),
             reason: "another game answers on this address".into(),
+            facts: None,
         };
     }
     let players = client.players(t.addr).await;
@@ -693,6 +756,10 @@ pub async fn verify_one(client: &Client, t: Target, with_info: bool) -> Verifica
         tags: info.as_ref().map(|r| r.value.tags.clone()),
         verified_at: ServerRow::now_unix(),
         reason,
+        facts: info
+            .as_ref()
+            .map(|r| InfoFacts::of(&r.value))
+            .filter(|f| f.changes(&t.known)),
     }
 }
 
@@ -1070,6 +1137,29 @@ mod tests {
         assert_eq!(judge(Some(&i), Ok(&back), 0, 0).0, Verdict::Verified);
         let duo = players(&[2400.0, 830.0, 312.0, 95.0, 0.6, 0.4], "");
         assert_eq!(judge(Some(&i), Ok(&duo), 0, 0).0, Verdict::Verified);
+    }
+
+    /// Row 23: a check sends the server's facts only when they differ from the row, and
+    /// a reply that says nothing about a field (no game port, no version) changes nothing.
+    #[test]
+    fn a_check_sends_only_the_facts_that_changed() {
+        let i = live_info();
+        let known = InfoFacts::of(&i);
+        assert!(!InfoFacts::of(&i).changes(&known));
+        let mut renamed = i.clone();
+        renamed.name = "New name".into();
+        assert!(InfoFacts::of(&renamed).changes(&known));
+        let mut updated = i.clone();
+        updated.version = "1.30.100000".into();
+        assert!(InfoFacts::of(&updated).changes(&known));
+        let mut moved = i.clone();
+        moved.game_port = Some(2402);
+        assert!(InfoFacts::of(&moved).changes(&known));
+        let mut silent = i.clone();
+        silent.game_port = None;
+        silent.version = "x".into();
+        silent.name = String::new();
+        assert!(!InfoFacts::of(&silent).changes(&known));
     }
 
     #[test]

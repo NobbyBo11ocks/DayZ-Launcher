@@ -1479,7 +1479,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                 // downgraded to whatever was already running, with no event to say so.
                 // D-159 made this rule for the no-session path; the busy path kept it
                 // (D-197).
-                Cmd::Refresh(_) if active.is_some() => {
+                Cmd::Refresh(parts) if active.is_some() => {
                     let _ = events.send(SteamEvent::Done(RefreshDone {
                         total: 0,
                         responded: 0,
@@ -1492,7 +1492,13 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                         complete: false,
                         rejected: true,
                         reason: Some("busy"),
-                        source: "steam",
+                        // A LAN scan refused while a refresh runs is the LAN scan's answer:
+                        // said as Steam's, the list page took it for its own (row 23).
+                        source: if parts.iter().any(|p| p.contains_key("lan")) {
+                            "lan"
+                        } else {
+                            "steam"
+                        },
                     }));
                 }
                 // Not busy here: the arm above answers every refresh that arrives
