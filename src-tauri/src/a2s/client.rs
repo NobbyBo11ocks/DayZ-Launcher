@@ -171,9 +171,12 @@ impl Client {
         })
         .await?;
         sock.connect(addr).await?;
+        // The challenge carries over to the retry: servers hand out the same one for
+        // every kind and repeat (row 18, live), so the retry is one leg, not two.
+        let mut challenge: Option<[u8; 4]> = None;
         let mut last = A2sError::Timeout;
         for _ in 0..=self.retries {
-            match self.query_once(&sock, kind).await {
+            match self.query_once(&sock, kind, &mut challenge).await {
                 Ok(v) => return Ok(v),
                 Err(A2sError::Timeout) => last = A2sError::Timeout,
                 Err(e) => return Err(e),
@@ -182,24 +185,29 @@ impl Client {
         Err(last)
     }
 
-    async fn query_once(&self, sock: &UdpSocket, kind: Kind) -> A2sResult<(Vec<u8>, Duration)> {
-        let mut challenge: Option<[u8; 4]> = None;
+    async fn query_once(
+        &self,
+        sock: &UdpSocket,
+        kind: Kind,
+        challenge: &mut Option<[u8; 4]>,
+    ) -> A2sResult<(Vec<u8>, Duration)> {
         let mut buf = vec![0u8; kind.max_datagram()];
         let mut challenges_seen = 0u8;
-        // The deadline starts at the first send so pacing delay is not charged to the server.
-        let mut deadline: Option<Instant> = None;
 
         'attempt: loop {
             self.pace().await;
+            // What an earlier leg drew in late is not this leg's answer. Taken as one, its
+            // round trip read from this send came out near 0 ms, which was stored as the
+            // ping and showed as "—" (row 18).
+            while sock.try_recv(&mut buf).is_ok() {}
             let sent_at = Instant::now();
-            let deadline = *deadline.get_or_insert(sent_at + self.timeout);
-            // After a challenge the pacer can hold the request past the deadline, and it
-            // went out anyway into a wait that was already over: one more datagram and
-            // NAT flow for nothing (D-037, D-256).
-            if sent_at >= deadline {
-                return Err(A2sError::Timeout);
-            }
-            sock.send(&kind.request(challenge)).await?;
+            // Each leg gets its own window from its own send, so pacing is never charged to
+            // the server. With one window from the first send, the pacer's queue before
+            // the answer to a challenge (0.64 s in the mod scan) left a far server's
+            // second leg too little time, or none (row 18). `challenges_seen` still
+            // bounds the legs.
+            let deadline = sent_at + self.timeout;
+            sock.send(&kind.request(*challenge)).await?;
             let mut reasm = Reassembler::new();
             loop {
                 let remaining = deadline.saturating_duration_since(Instant::now());
@@ -215,14 +223,19 @@ impl Client {
                     Err(_) => return Err(A2sError::Timeout),
                 };
                 let rtt = sent_at.elapsed();
-                match classify(&buf[..n])? {
+                // A datagram that is not a well-formed reply is skipped like any stray:
+                // one ended the query, and the real answer behind it was lost (row 18).
+                let Ok(datagram) = classify(&buf[..n]) else {
+                    continue;
+                };
+                match datagram {
                     Datagram::Single(payload) => {
                         if let Some(c) = challenge_of(payload) {
                             challenges_seen += 1;
                             if challenges_seen > 3 {
                                 return Err(A2sError::ChallengeLoop);
                             }
-                            challenge = Some(c);
+                            *challenge = Some(c);
                             continue 'attempt;
                         }
                         if payload.first() != Some(&kind.response_type()) {
@@ -237,8 +250,13 @@ impl Client {
                         body,
                         ..
                     } => {
-                        if let Some(full) = reasm.push(id, total, number, body)? {
-                            return Ok((full, rtt));
+                        match reasm.push(id, total, number, body) {
+                            Ok(Some(full)) => return Ok((full, rtt)),
+                            Ok(None) => {}
+                            // Past 64 KiB: not a reply this client takes from anyone.
+                            Err(e @ A2sError::Malformed(_)) => return Err(e),
+                            // A fragment that does not fit the response being collected.
+                            Err(_) => {}
                         }
                     }
                 }
@@ -267,6 +285,80 @@ mod tests {
         assert!(!Arc::ptr_eq(&base.permits, &own.permits));
         assert_eq!(own.permits.available_permits(), 64);
         assert_eq!(base.permits.available_permits(), 128);
+    }
+
+    /// A fake server on 127.0.0.1: a PLAYER request without a challenge gets one at
+    /// once; with it, `answer` says what goes back, each datagram after its delay.
+    async fn fake_server(answer: fn() -> Vec<(u64, Vec<u8>)>) -> SocketAddr {
+        let sock = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let addr = sock.local_addr().unwrap();
+        let sock = Arc::new(sock);
+        tokio::spawn(async move {
+            let mut buf = [0u8; 64];
+            loop {
+                let Ok((n, from)) = sock.recv_from(&mut buf).await else {
+                    return;
+                };
+                if buf[..n].ends_with(&[0xFF; 4]) {
+                    let _ = sock
+                        .send_to(&[0xFF, 0xFF, 0xFF, 0xFF, 0x41, 1, 2, 3, 4], from)
+                        .await;
+                    continue;
+                }
+                for (delay, d) in answer() {
+                    let sock = Arc::clone(&sock);
+                    tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_millis(delay)).await;
+                        let _ = sock.send_to(&d, from).await;
+                    });
+                }
+            }
+        });
+        addr
+    }
+
+    const NO_PLAYERS: [u8; 6] = [0xFF, 0xFF, 0xFF, 0xFF, 0x44, 0];
+
+    /// Row 18: the answer to a challenge gets its own window from its own send. With one
+    /// window from the first send, the pacer's 500 ms before the second leg left a
+    /// 600 ms answer no time, and the retry then took that late answer as its own and
+    /// read its round trip as 0 ms.
+    #[tokio::test]
+    async fn each_leg_waits_from_its_own_send() {
+        let addr = fake_server(|| vec![(600, NO_PLAYERS.to_vec())]).await;
+        let c = Client::new(8)
+            .with_rate(2)
+            .with_timeout(Duration::from_millis(1000))
+            .with_retries(1);
+        let r = c
+            .players(addr)
+            .await
+            .expect("answered inside the second leg");
+        assert!(
+            r.rtt >= Duration::from_millis(500),
+            "the round trip is the answer's own, not 0 ms: {:?}",
+            r.rtt
+        );
+    }
+
+    /// Row 18: a datagram that is not a reply is a stray; the answer behind it counts.
+    #[tokio::test]
+    async fn a_malformed_datagram_does_not_end_the_query() {
+        let addr = fake_server(|| {
+            vec![
+                (0, vec![1, 2, 3]),
+                (
+                    5,
+                    vec![0xFE, 0xFF, 0xFF, 0xFF, 9, 0, 0, 0, 1, 5, 0xE0, 0x04, 0xAA],
+                ),
+                (20, NO_PLAYERS.to_vec()),
+            ]
+        })
+        .await;
+        let c = Client::new(8)
+            .with_rate(0)
+            .with_timeout(Duration::from_millis(1000));
+        assert!(c.players(addr).await.is_ok());
     }
 
     #[tokio::test]

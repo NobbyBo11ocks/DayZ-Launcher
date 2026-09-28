@@ -719,7 +719,7 @@ pub fn run() {
                             // so the partial rows have to go or the next refresh
                             // verifies them a second time and the totals stop adding up
                             // (D-208, after D-204).
-                            let targets = if d.rejected {
+                            let mut targets = if d.rejected {
                                 if d.reason != Some("busy") {
                                     populated.clear();
                                 }
@@ -727,6 +727,12 @@ pub fn run() {
                             } else {
                                 std::mem::take(&mut populated)
                             };
+                            // Each server once, at its newest listing. Targets a skipped
+                            // pass put back meet this refresh's own rows here, and both
+                            // went out: two queries per address and a total twice its
+                            // verdicts (D-220's aim, reached here; row 18).
+                            targets.sort_by(|a, b| a.id.cmp(&b.id).then(b.reported_at.cmp(&a.reported_at)));
+                            targets.dedup_by(|a, b| a.id == b.id);
                             if !targets.is_empty() {
                                 #[cfg(debug_assertions)]
                                 eprintln!("[verify] start: {} populated servers", targets.len());

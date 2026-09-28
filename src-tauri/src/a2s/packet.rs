@@ -103,8 +103,9 @@ pub fn classify(d: &[u8]) -> A2sResult<Datagram<'_>> {
     }
 }
 
-/// Collects fragments of one split response. Duplicates are ignored; a fragment
-/// from a different response id resets the collector.
+/// Collects fragments of one split response. Duplicates are ignored, and so are
+/// fragments of another response once one is being collected: resetting on them, two
+/// interleaved responses never completed (row 18; S-12 keeps to the first id too).
 #[derive(Debug, Default)]
 pub struct Reassembler {
     id: Option<u32>,
@@ -127,7 +128,10 @@ impl Reassembler {
         number: u8,
         body: &[u8],
     ) -> A2sResult<Option<Vec<u8>>> {
-        if self.id != Some(id) {
+        if self.id.is_some_and(|current| current != id) {
+            return Ok(None);
+        }
+        if self.id.is_none() {
             self.id = Some(id);
             self.parts = vec![None; total as usize];
             self.have = 0;
@@ -174,6 +178,40 @@ pub fn challenge_of(payload: &[u8]) -> Option<[u8; 4]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Row 18: two responses whose fragments interleave; the first one completes.
+    #[test]
+    fn interleaved_split_responses_do_not_reset_each_other() {
+        let frag = |id: u32, n: u8, body: &[u8]| {
+            let mut d = vec![0xFE, 0xFF, 0xFF, 0xFF];
+            d.extend_from_slice(&id.to_le_bytes());
+            d.extend_from_slice(&[2, n, 0xE0, 0x04]);
+            d.extend_from_slice(body);
+            d
+        };
+        let (a0, b0) = (
+            frag(7, 0, &[0xFF, 0xFF, 0xFF, 0xFF, 0x49, 1]),
+            frag(8, 0, &[9]),
+        );
+        let (a1, b1) = (frag(7, 1, &[3]), frag(8, 1, &[9]));
+        let mut r = Reassembler::new();
+        let mut done = Vec::new();
+        for d in [&a0, &b0, &a1, &b1] {
+            let Datagram::Split {
+                id,
+                total,
+                number,
+                body,
+                ..
+            } = classify(d).unwrap()
+            else {
+                unreachable!()
+            };
+            done.push(r.push(id, total, number, body).unwrap());
+        }
+        assert_eq!(done[2].as_deref(), Some(&[0x49, 1, 3][..]));
+        assert!(done[0].is_none() && done[1].is_none() && done[3].is_none());
+    }
 
     #[test]
     fn info_request_matches_spec() {

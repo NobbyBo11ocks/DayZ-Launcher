@@ -498,6 +498,23 @@ pub async fn verify_one(client: &Client, t: Target, with_info: bool) -> Verifica
     } else {
         None
     };
+    // Another game answering on this address: the port was handed on, and its numbers
+    // are not this server's, least of all a favourite's, which is never pruned (row 18).
+    if info.as_ref().is_some_and(|r| !r.value.is_dayz()) {
+        return Verification {
+            id: t.id,
+            verdict: Verdict::Offline,
+            reported: t.reported,
+            verified: None,
+            max_players: t.max_players,
+            ping_ms: None,
+            player_rtt_ms: None,
+            keywords: None,
+            tags: None,
+            verified_at: ServerRow::now_unix(),
+            reason: "another game answers on this address".into(),
+        };
+    }
     let players = client.players(t.addr).await;
     // A stale count that could not be refreshed is no count: judged against it, a
     // fresh PLAYER read as "INFO 60 vs PLAYER 4" after ordinary churn and hid the

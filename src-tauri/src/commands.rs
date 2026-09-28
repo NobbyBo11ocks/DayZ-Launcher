@@ -714,7 +714,12 @@ pub async fn run_verification(
         // Held back until the second look below has had its say, and the connection
         // with it: published at once, a network drop hid every row it touched (row 14,
         // F1/H1).
-        if v.verdict == Verdict::Offline {
+        // An "unverifiable" too (INFO answered, the player list did not). After a full
+        // Refresh the pass reads INFO first for every target, whose listing is over a
+        // minute old by then (D-237). On 2026-09-28, 335 of 2 577 lost the player list
+        // behind Steam's own 36 000 pings, against 6 after a short listing. Published at
+        // once, each one never counted before stayed hidden until the next pass (row 18, Q29).
+        if matches!(v.verdict, Verdict::Offline | Verdict::Unverifiable) {
             if let Some(t) = by_id.get(&v.id) {
                 offline.push(t.clone());
             }
@@ -764,7 +769,10 @@ pub async fn run_verification(
                 .filter(|v| v.verdict != Verdict::Synthetic)
                 .count();
             let mut latest = HashMap::with_capacity(n);
-            publish(&app, &cache, &mut latest, results).await;
+            // Through the second look's gate: published straight, a connection that had
+            // dropped by then wrote every standing farm "offline" over "synthetic", and
+            // the next start's R11 began them at zero strikes (row 18).
+            publish_second_look(&app, &cache, &mut latest, results).await;
             crate::log_info!(
                 "verify",
                 "{n} standing synthetic verdict(s) compared again: {healed} cleared"
@@ -779,35 +787,13 @@ pub async fn run_verification(
     // On-demand checks too (row 14, F1/H1): a server that restarted while its row was
     // on screen went offline, hidden, and stayed hidden until the next Refresh. One
     // re-read per server at a time, whichever check asked first.
-    let still_offline: Vec<Target> = latest
+    let uncounted: Vec<Target> = latest
         .iter()
-        .filter(|(_, v)| **v == Verdict::Offline)
+        .filter(|(_, v)| matches!(**v, Verdict::Offline | Verdict::Unverifiable))
         .filter_map(|(id, _)| by_id.get(id).cloned())
-        .filter(|t| claim_reread(&t.id))
         .collect();
-    if !still_offline.is_empty() {
-        let n = still_offline.len();
-        let app = app.clone();
-        let cache = Arc::clone(&cache);
-        let patient = client.clone().with_timeout(PATIENT_TIMEOUT);
-        let at = if announce { "the pass" } else { "a check" };
-        tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(OFFLINE_REREAD_AFTER).await;
-            let ids: Vec<String> = still_offline.iter().map(|t| t.id.clone()).collect();
-            let results = verify::verify_many(&patient, still_offline, true).await;
-            let back = results
-                .iter()
-                .filter(|v| v.verdict != Verdict::Offline)
-                .count();
-            let mut latest = HashMap::with_capacity(n);
-            publish_second_look(&app, &cache, &mut latest, results).await;
-            release_reread(&ids);
-            crate::log_info!(
-                "verify",
-                "{n} server(s) offline at {at} read again: {back} answered"
-            );
-        });
-    }
+    let at = if announce { "the pass" } else { "a check" };
+    schedule_reread(&app, &cache, &client, uncounted, at);
     let mut summary = VerifySummary {
         total,
         elapsed_ms: t0.elapsed().as_millis() as u64,
@@ -869,13 +855,17 @@ async fn publish_second_look(
     let (answered, silent): (Vec<_>, Vec<_>) = results
         .into_iter()
         .partition(|v| v.verdict != Verdict::Offline);
-    if !answered.is_empty() {
+    // Servers that answered in this same look prove the connection. Asked anyway, the
+    // "down" cached by a check during a drop (30 s) left a restarting server unrecorded
+    // and put the notice back while the others were answering (row 18).
+    let proven = !answered.is_empty();
+    if proven {
         publish(app, cache, latest, answered).await;
     }
     if silent.is_empty() {
         return;
     }
-    if connection_up().await {
+    if proven || connection_up().await {
         publish(app, cache, latest, silent).await;
     } else {
         crate::log_warn!(
@@ -912,6 +902,45 @@ pub fn set_net(app: &AppHandle, up: bool) {
 /// every minute do not queue a second one behind the first.
 static REREAD_PENDING: std::sync::LazyLock<Mutex<HashSet<String>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashSet::new()));
+
+/// Rows a check could not count, silent or without a player list, are read once more
+/// a few minutes on with INFO included, one re-read per server at a time (D-268; row 14
+/// for on-demand checks; row 18 for "unverifiable" and for the details pane).
+fn schedule_reread(
+    app: &AppHandle,
+    cache: &Arc<Mutex<Cache>>,
+    client: &Client,
+    targets: Vec<Target>,
+    at: &'static str,
+) {
+    let targets: Vec<Target> = targets
+        .into_iter()
+        .filter(|t| claim_reread(&t.id))
+        .collect();
+    if targets.is_empty() {
+        return;
+    }
+    let n = targets.len();
+    let app = app.clone();
+    let cache = Arc::clone(cache);
+    let patient = client.clone().with_timeout(PATIENT_TIMEOUT);
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(OFFLINE_REREAD_AFTER).await;
+        let ids: Vec<String> = targets.iter().map(|t| t.id.clone()).collect();
+        let results = verify::verify_many(&patient, targets, true).await;
+        let counted = results
+            .iter()
+            .filter(|v| !matches!(v.verdict, Verdict::Offline | Verdict::Unverifiable))
+            .count();
+        let mut latest = HashMap::with_capacity(n);
+        publish_second_look(&app, &cache, &mut latest, results).await;
+        release_reread(&ids);
+        crate::log_info!(
+            "verify",
+            "{n} server(s) not counted at {at} read again: {counted} counted"
+        );
+    });
+}
 
 /// True when this call gets to re-read `id`; false when one is already waiting.
 fn claim_reread(id: &str) -> bool {
@@ -971,9 +1000,12 @@ async fn publish(
     for v in &results {
         latest.insert(v.id.clone(), v.verdict);
     }
-    // A server that answered is a connection that works.
+    // A server that answered is a connection that works, for `connection_up` as well.
     if results.iter().any(|v| v.verdict != Verdict::Offline) {
         set_net(app, true);
+        if let Ok(mut seen) = CONNECTION_SEEN.lock() {
+            *seen = Some((Instant::now(), true));
+        }
     }
     send_rows(app, "verified", &results);
     let c = Arc::clone(cache);
@@ -1126,7 +1158,15 @@ pub async fn run_mod_scan(
                 // cache keeps one row per id, so a list sent with every server-side mod
                 // counted more in the Mods column than the same list read back after a
                 // restart (D-276). The join plan stores the same shape (D-295).
-                let mods = c.rules(addr).await.ok().map(|r| r.value.stored_mods());
+                // A reply with no DayZ data is no mod list: stored as one, the server
+                // read as vanilla for a day and a launch whose own read failed started
+                // DayZ without its mods, as the join plan already refuses (row 18).
+                let mods = c
+                    .rules(addr)
+                    .await
+                    .ok()
+                    .filter(|r| r.value.dayz.is_some())
+                    .map(|r| r.value.stored_mods());
                 (id, mods)
             });
         }
@@ -1590,11 +1630,14 @@ pub async fn server_slots(state: State<'_, AppState>, id: String) -> AppResult<S
             format!("bad server id {id}"),
         )
     })?;
+    // Another game on the port is not the server this dialog joins (row 18).
     let reply = state
         .a2s
         .info(addr)
         .await
-        .map_err(|_| AppError::Internal("The server did not answer.".into()))?;
+        .ok()
+        .filter(|r| r.value.is_dayz())
+        .ok_or_else(|| AppError::Internal("The server did not answer.".into()))?;
     Ok(ServerSlots {
         players: reply.value.players as i32,
         max_players: reply.value.max_players as i32,
@@ -1652,6 +1695,13 @@ pub async fn server_details(
             rules = r;
         }
     }
+    // Another game answering on the port is no answer from this server (row 18).
+    if info.as_ref().is_ok_and(|r| !r.value.is_dayz()) {
+        let other = || a2s::A2sError::Malformed("reply from another game");
+        info = Err(other());
+        players = Err(other());
+        rules = Err(other());
+    }
     // With INFO lost, a cached count older than a minute is no count, as in
     // `verify_one` (D-245): judged against a fresh PLAYER, an hour-old 60 read as
     // "advertises 60; 20 actually connected" and hid the row the user had open (D-268).
@@ -1695,6 +1745,13 @@ pub async fn server_details(
         }
         let persist = vec![verification.clone()];
         send_rows(&app, "verified", &persist);
+        // Hidden now, and a hidden row is checked again only when something looks at it:
+        // read once more a few minutes on, as the list's checks are (row 18).
+        if matches!(verdict, Verdict::Offline | Verdict::Unverifiable) {
+            if let Some(t) = cached.as_ref().and_then(Target::from_row) {
+                schedule_reread(&app, &cache, &client, vec![t], "the details pane");
+            }
+        }
         let _ = tauri::async_runtime::spawn_blocking(move || {
             if let Ok(mut c) = cache.lock() {
                 // Noted like the pass's own writes: a verdict the cache refused was
@@ -2729,7 +2786,7 @@ async fn probe_server(
         };
         settled[i] = true;
         if let Ok(reply) = reply {
-            let dayz = reply.value.app_id == 0 || reply.value.app_id == crate::steam::DAYZ_APP_ID;
+            let dayz = reply.value.is_dayz();
             // Anything else answering on that port, or a sibling server on the same host.
             let ours = expect_game_port.is_none_or(|gp| reply.value.game_port == Some(gp));
             if dayz && ours {

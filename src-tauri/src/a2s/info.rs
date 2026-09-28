@@ -38,6 +38,15 @@ pub struct Info {
     pub tags: DayzTags,
 }
 
+impl Info {
+    /// DayZ answering, or a server that names no game (app id 0), as Direct connect
+    /// has always accepted. Anything else is another game on a port a DayZ server
+    /// used to hold, and its numbers are not that server's (row 18).
+    pub fn is_dayz(&self) -> bool {
+        self.app_id == 0 || self.app_id == crate::steam::DAYZ_APP_ID
+    }
+}
+
 pub fn parse(payload: &[u8]) -> A2sResult<Info> {
     let mut r = Reader::new(payload);
     let t = r.u8()?;

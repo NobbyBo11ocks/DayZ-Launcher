@@ -10,6 +10,16 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.85",
+    notes: [
+      { kind: "fixed", text: "Servers no longer drop out of the list right after a full Refresh." },
+      { kind: "fixed", text: "Far-away servers' player counts and mod lists are read more reliably." },
+      { kind: "fixed", text: "A slow server's ping no longer shows as —." },
+      { kind: "fixed", text: "A server you open while it restarts comes back without a Refresh." },
+      { kind: "fixed", text: "A port taken over by another game no longer shows that game's numbers." },
+    ],
+  },
+  {
     version: "0.1.84",
     notes: [
       { kind: "fixed", text: "Join works again once Steam is back after a join failed without it." },
