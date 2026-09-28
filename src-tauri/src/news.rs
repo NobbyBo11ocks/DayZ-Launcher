@@ -116,19 +116,41 @@ fn first_video(contents: &str) -> Option<String> {
     (!id.is_empty() && id.len() <= 16).then_some(id)
 }
 
-/// Game-update posts by title: what the "Updates only" filter and the update alert use.
+/// Game-update posts by title: what the "Updates only" filter, the badge and the update
+/// alert use. A version number (1.xx) beside update, experimental, stable or release as a
+/// whole word, or hotfix or patch as a whole word — never a "status report" (row 24,
+/// approved). Any title containing one of the words counted: "1.29 Update Status
+/// Report", "DayZ Frostline release Tomorrow!" and "DayZ Frostline Expansion Release"
+/// were toasted as DayZ updates, 3 of 16 in a 100-post sample (S-124).
 pub fn is_update_title(title: &str) -> bool {
     let t = title.to_lowercase();
-    [
-        "update",
-        "hotfix",
-        "patch",
-        "experimental",
-        "stable",
-        "release",
-    ]
-    .iter()
-    .any(|w| t.contains(w))
+    if t.contains("status report") {
+        return false;
+    }
+    let words: Vec<&str> = t
+        .split(|c: char| !c.is_alphanumeric() && c != '.')
+        .map(|w| w.trim_matches('.'))
+        .filter(|w| !w.is_empty())
+        .collect();
+    let has = |w: &str| words.contains(&w);
+    if has("hotfix") || has("patch") {
+        return true;
+    }
+    words.iter().any(|w| is_version(w))
+        && ["update", "experimental", "stable", "release"]
+            .iter()
+            .any(|w| has(w))
+}
+
+/// "1.29", or a build of it ("1.28.159874").
+fn is_version(w: &str) -> bool {
+    let b = w.as_bytes();
+    b.len() >= 4
+        && b[0] == b'1'
+        && b[1] == b'.'
+        && b[2].is_ascii_digit()
+        && b[3].is_ascii_digit()
+        && (b.len() == 4 || b[4] == b'.')
 }
 
 /// Strips BBCode (`[b]`, `[url=…]`, `[list]`…) and HTML tags, decodes entities (the
@@ -687,6 +709,21 @@ mod tests {
         assert!(!is_update_title(
             "DayZ Badlands | Dev Blog (Week 84) | Motorbikes&Ragdoll Physics | Wishlist now!"
         ));
+        // Row 24: the three the substring rule toasted, and others it must keep.
+        assert!(!is_update_title(
+            "1.29 Update Status Report | DayZ Badlands News"
+        ));
+        assert!(!is_update_title(
+            "DayZ Frostline release Tomorrow! 15th Oct"
+        ));
+        assert!(!is_update_title("DayZ Frostline Expansion Release"));
+        assert!(is_update_title("Update 1.29.1 notes"));
+        assert!(is_update_title("PC Stable Update 1.21."));
+        assert!(is_update_title("Patch notes"));
+        assert!(
+            !is_update_title("Updated survival guide for 11.29"),
+            "11.29 is no version"
+        );
     }
 
     #[test]

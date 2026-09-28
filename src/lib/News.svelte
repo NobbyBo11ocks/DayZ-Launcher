@@ -69,6 +69,10 @@
     observer = null;
   });
   const cardThumb = (n: NewsItem) => (near.has(n.gid) ? thumb(n) : null);
+  /** Whether the post has a picture to show, loaded or not: its box holds the place while
+   *  it loads, so the text does not jump; one that failed leaves the post as text, and a
+   *  featured post without one takes its card's whole width (row 24, approved). */
+  const hasPic = (n: NewsItem, big = false) => !broken.has(n.gid) && (!!n.video || (!!n.image && !news.thumbFailed(n, big)));
   const watch = (n: NewsItem) => `https://www.youtube.com/watch?v=${n.video}`;
 
   // The video open in the player, or null. `-nocookie` is YouTube's no-tracking host and
@@ -147,7 +151,8 @@
       .then(() => (openError = null))
       .catch((e) => {
         logWarn("news", `${url} could not be opened: ${describe(e)}`);
-        openError = String(e);
+        // In words, the opener's own text to the log (row 24, approved; as D-306 (18)).
+        openError = "The post could not be opened in your browser. The details are on the Logs page.";
       });
   }
 </script>
@@ -167,11 +172,12 @@
 
   <div class="scroll">
     {#if featured}
-      <article class="featured" class:update={featured.update}>
-        {#if thumb(featured, true)}
+      <article class="featured" class:update={featured.update} class:nopic={!hasPic(featured, true)}>
+        {#if hasPic(featured, true)}
+          {@const src = thumb(featured, true)}
           <!-- Out of the Tab order: its Play and Read buttons below do the same (D-291). -->
           <button class="media" tabindex="-1" onclick={() => (featured.video ? play(featured) : open(featured.url))} aria-label={featured.video ? `Play the video: ${featured.title}` : `Open the post: ${featured.title}`}>
-            <img src={thumb(featured, true)} alt="" onerror={() => broken.add(featured.gid)} />
+            {#if src}<img {src} alt="" onerror={() => broken.add(featured.gid)} />{/if}
             {#if featured.video}<span class="play" aria-hidden="true"></span>{/if}
           </button>
         {/if}
@@ -197,11 +203,12 @@
       <div class="grid">
         {#each rest as n (n.gid)}
           <article class="card" class:update={n.update} use:lazy={n.gid}>
-            {#if cardThumb(n)}
+            {#if hasPic(n)}
+              {@const src = cardThumb(n)}
               <!-- Named for its post: every card's picture was "Play the video" or "Open the
                    post", ahead of the card's heading (D-291). -->
               <button class="media" onclick={() => (n.video ? play(n) : open(n.url))} aria-label={n.video ? `Play the video: ${n.title}` : `Open the post: ${n.title}`}>
-                <img src={cardThumb(n)} alt="" loading="lazy" onerror={() => broken.add(n.gid)} />
+                {#if src}<img {src} alt="" loading="lazy" onerror={() => broken.add(n.gid)} />{/if}
                 {#if n.video}<span class="play small" aria-hidden="true"></span>{/if}
               </button>
             {/if}
@@ -312,6 +319,8 @@
 
   .featured { display: grid; grid-template-columns: minmax(280px, 42%) minmax(0, 1fr); border-radius: 14px; overflow: hidden; border: 1px solid var(--border); background: var(--bg-elev); }
   .featured.update { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+  /* No picture: the text takes the card's width, not the left column (row 24). */
+  .featured.nopic { grid-template-columns: minmax(0, 1fr); }
   /* Capped so the hero cannot eat the window on a large screen; the grid below keeps
      more cards in view (D-143). */
   .featured { max-height: 320px; }

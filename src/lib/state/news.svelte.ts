@@ -7,7 +7,7 @@
 import { invokeLogged as invoke } from "../log";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
-import { SvelteMap } from "svelte/reactivity";
+import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { uiPrefs } from "./uiprefs.svelte";
 import type { NewsCached, NewsItem } from "../types";
 
@@ -16,6 +16,9 @@ const REFRESH_MS = 30 * 60_000;
 const RETRY_GAP_MS = 60_000;
 /** On the very first run, only this many of the newest official posts count as unread. */
 const FIRST_RUN_UNREAD = 5;
+/** An update post older than this is news, not an alert: News switched back on after
+ *  months, or a stale stored copy, toasted posts weeks old (row 24, approved). */
+const ALERT_MAX_AGE_SECS = 14 * 86_400;
 
 export type NewsAlert = { gid: string; title: string; url: string };
 /** `updates`: official game-update posts (default); `official`: every Bohemia post; `press`: plus third-party feeds. */
@@ -53,7 +56,7 @@ class NewsStore {
    *  caches the files. */
   thumbs = new SvelteMap<string, string>();
   #thumbPending = new Set<string>();
-  #thumbFailed = new Set<string>();
+  #thumbFailed = new SvelteSet<string>();
   #started = false;
   /** Which `start()` is current: a switch-off and on during the first fetch left two
    *  of them running, each arming its own timer, and `stop()` cleared one (D-240). */
@@ -62,8 +65,10 @@ class NewsStore {
   #visiting = false;
 
   list = $derived(this.items.filter((n) => (this.view === "press" ? true : n.official && (this.view === "official" || n.update))));
-  /** Official posts newer than the seen mark: the rail badge. */
-  unread = $derived(this.items.filter((n) => n.official && n.date > this.seen).length);
+  /** Game-update posts newer than the seen mark: the rail badge, counting the posts the
+   *  page opens on. Every official post counted, so a badge of 3 opened on one new post;
+   *  sales and dev blogs keep their New pill under All news (row 24, approved). */
+  unread = $derived(this.items.filter((n) => n.official && n.update && n.date > this.seen).length);
 
   async start() {
     if (this.#started) return;
@@ -157,7 +162,8 @@ class NewsStore {
           if (uiPrefs.readOk) uiPrefs.patch({ newsSeen: mark });
         }
       } else {
-        this.#announce(c.items.filter((n) => n.official && n.update && n.date > before && !known.has(n.gid)));
+        const recent = Date.now() / 1000 - ALERT_MAX_AGE_SECS;
+        this.#announce(c.items.filter((n) => n.official && n.update && n.date > before && n.date >= recent && !known.has(n.gid)));
       }
     } catch (e) {
       this.error = String(e);
@@ -224,6 +230,11 @@ class NewsStore {
       this.thumbs.delete(k);
     }
     for (const k of [...this.#thumbFailed]) if (!keep.has(k.slice(0, k.lastIndexOf(":")))) this.#thumbFailed.delete(k);
+  }
+
+  /** The post's picture could not be made at this size: the card goes back to text. */
+  thumbFailed(n: NewsItem, featured = false): boolean {
+    return this.#thumbFailed.has(`${n.gid}:${featured ? 640 : 360}`);
   }
 
   /**

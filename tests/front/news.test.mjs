@@ -1,7 +1,7 @@
 // The News page's feed (src/lib/state/news.svelte.ts): a fetch that failed offline.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { advance, deferred, freshApp, settle } from "./harness.mjs";
+import { advance, deferred, freshApp, NOW, settle } from "./harness.mjs";
 
 const OFFLINE = "The news could not be loaded: no connection to Steam. It is tried again when the connection is back.";
 
@@ -55,7 +55,7 @@ function settings(newsSeen, over = {}) {
   };
 }
 const post = (gid, date, over = {}) => ({ gid, title: `Post ${gid}`, url: `https://example.invalid/${gid}`, author: "Bohemia", feed: "Community Announcements", official: true, date, summary: "", update: true, ...over });
-const SEEN = 1_780_000_000;
+const SEEN = Math.floor(NOW / 1000) - 5 * 86_400;
 
 /** Window attention and Windows notifications answered, the window unfocused. */
 function notifications(mock) {
@@ -128,7 +128,7 @@ test("switching News off lets go of the list and every picture, and on again rea
 // ---- Earlier fixes that had no test ----
 
 test("a first run counts the newest five as unread, and writes its mark only over a file that was read (D-194, D-256)", async (t) => {
-  const posts = Array.from({ length: 8 }, (_, i) => post(`f${i}`, SEEN - i * 1000, { update: false }));
+  const posts = Array.from({ length: 8 }, (_, i) => post(`f${i}`, SEEN - i * 1000));
   for (const readable of [true, false]) {
     const app = await freshApp(t, { timers: false });
     app.mock.handle("settings_get", readable ? settings(0) : settings(0, { unreadable: true }));
@@ -206,5 +206,41 @@ test("the New boundary is frozen for a visit while the mark moves on (D-240, D-2
   news.endVisit();
   news.beginVisit();
   assert.equal(news.visitSeen, SEEN + 100, "the next visit starts past it");
+  news.stop();
+});
+
+test("no alert for an update post older than two weeks, and the badge counts update posts only (row 24, approved)", async (t) => {
+  const app = await freshApp(t);
+  notifications(app.mock);
+  const stale = Math.floor(NOW / 1000) - 60 * 86_400; // News back on after two months
+  app.mock.handle("settings_get", settings(stale));
+  app.mock.handle("news_cached", { items: [] });
+  const oldUpdate = post("old", stale + 86_400); // 59 days old
+  const newUpdate = post("new", Math.floor(NOW / 1000) - 3_600);
+  const sale = post("sale", Math.floor(NOW / 1000) - 7_200, { update: false, title: "Sale" });
+  app.mock.handle("news_fetch", { items: [newUpdate, sale, oldUpdate] });
+  const { news } = await app.load("state/news.svelte");
+  await news.start();
+  await settle();
+  assert.deepEqual(news.alerts.map((a) => a.gid), ["new"], "the weeks-old post is not toasted");
+  assert.equal(app.mock.count("plugin:notification|notify"), 1);
+  assert.equal(news.unread, 2, "the two update posts; the sale keeps its New pill only");
+  news.stop();
+});
+
+test("a picture that could not be made says so to the page, which then shows the post as text (row 24, approved)", async (t) => {
+  const app = await freshApp(t);
+  app.mock.handle("settings_get", settings(SEEN));
+  const withPicture = post("p", SEEN - 10, { image: "https://clan.akamai.steamstatic.com/images/1/x.jpg" });
+  app.mock.handle("news_cached", { items: [withPicture] });
+  app.mock.handle("news_fetch", { items: [withPicture] });
+  app.mock.fail("news_thumb", "picture request failed");
+  const { news } = await app.load("state/news.svelte");
+  await news.start();
+  assert.equal(news.thumbFailed(withPicture), false);
+  news.thumbUrl(withPicture);
+  await settle();
+  assert.equal(news.thumbFailed(withPicture), true);
+  assert.equal(news.thumbFailed(withPicture, true), false, "per size");
   news.stop();
 });

@@ -212,7 +212,9 @@
     return () => clearInterval(t);
   });
   const timeOfDay = $derived(hour < 5 ? "Still up" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening");
-  const persona = $derived(servers.steam?.persona ?? null);
+  /** Only while the Steam session is open (the idle release keeps it open): the last name
+   *  stayed with Steam closed or nobody signed in (row 24, approved). */
+  const persona = $derived(servers.steam?.initialized ? (servers.steam.persona ?? null) : null);
   const greeting = $derived(persona ? `${timeOfDay}, ${persona}` : "");
 
   /** The page the player picked to open on, News unless changed (D-100, row 16). */

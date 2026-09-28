@@ -10,6 +10,16 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.95",
+    notes: [
+      { kind: "changed", text: "The News badge counts new game updates only, not sales or dev blogs." },
+      { kind: "changed", text: "Only real game updates are marked Update and get a notification." },
+      { kind: "changed", text: "News posts no longer jump when their pictures arrive." },
+      { kind: "fixed", text: "No update notification for posts more than two weeks old." },
+      { kind: "fixed", text: "The greeting no longer shows your Steam name while Steam is closed." },
+    ],
+  },
+  {
     version: "0.1.94",
     notes: [
       { kind: "fixed", text: "Several new DayZ updates at once now show the newest, with one notification." },

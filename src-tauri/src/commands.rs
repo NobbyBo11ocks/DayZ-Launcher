@@ -1530,12 +1530,16 @@ pub async fn news_cached(state: State<'_, AppState>) -> AppResult<NewsCached> {
     let c = Arc::clone(&state.cache);
     tauri::async_runtime::spawn_blocking(move || {
         let c = c.lock().map_err(|_| saved_data("cache lock poisoned"))?;
-        let items = c
+        let mut items: Vec<crate::news::NewsItem> = c
             .get_meta("news")
             .ok()
             .flatten()
             .and_then(|j| serde_json::from_str(&j).ok())
             .unwrap_or_default();
+        // Stored under an older rule: flagged again as the host flags a fetch (row 24).
+        for n in &mut items {
+            n.update = n.official && crate::news::is_update_title(&n.title);
+        }
         Ok(NewsCached { items })
     })
     .await
