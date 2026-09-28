@@ -669,7 +669,8 @@ export type Favourite = { id: string };
 export type HistoryEntry = { id: string; joinedAt: number; name: string; ip: string; gamePort: number; mods: number };
 export type PopulationSample = { ts: number; players: number; queue: number };
 /** `missing`: the official launcher has no favourites file on this PC (row 14, F7). */
-export type ImportResult = { imported: number; already: number; unreachable: number; missing?: boolean };
+/** `skipped`: entries whose address is not one the launcher can ask (row 23, approved). */
+export type ImportResult = { imported: number; already: number; unreachable: number; skipped: number; missing?: boolean };
 /** Shown when the official launcher has no favourites file (row 14, F7, approved). */
 export const NOTHING_TO_IMPORT = "Nothing to import: the official DayZ launcher has no saved favourites on this PC.";
 

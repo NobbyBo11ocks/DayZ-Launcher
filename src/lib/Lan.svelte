@@ -65,7 +65,7 @@
   <h1 class="sr-only">LAN</h1>
   <div class="top">
     <div class="bar">
-      <button class="btn" onclick={scan} disabled={!servers.steam?.initialized || busy || servers.steam?.refreshing === true} title="Ask Steam's LAN discovery for DayZ servers on your network">
+      <button class="btn" onclick={scan} disabled={!servers.steam?.initialized || busy || servers.steam?.refreshing === true} title={servers.steam?.refreshing && !busy ? "Wait for the server list to finish refreshing" : "Ask Steam's LAN discovery for DayZ servers on your network"}>
         {busy ? "Scanning…" : "Scan LAN"}
       </button>
       <input class="search" type="search" placeholder="Search…" value={typed} bind:this={searchEl} oninput={(e) => (typed = e.currentTarget.value, box.set(typed))} aria-label="Search LAN servers" />

@@ -63,7 +63,7 @@
     imported = r;
     importNote = r.missing
       ? NOTHING_TO_IMPORT
-      : `Imported ${r.imported}, ${r.already} already there${r.unreachable ? `, ${r.unreachable} offline right now` : ""}.`;
+      : `Imported ${r.imported}, ${r.already} already there${r.unreachable ? `, ${r.unreachable} offline right now` : ""}${r.skipped ? `, ${r.skipped} skipped with no usable address` : ""}.`;
   }
 
   // F on the last favourite takes the grid, and the focus in it, away with it: focus
@@ -94,9 +94,11 @@
         {importing ? "Importing…" : "Import from the official launcher"}
       </button>
       <span class="muted">
-        {servers.favouriteRows.length} favourite{servers.favouriteRows.length === 1 ? "" : "s"}
-        {#if imported?.missing}· {NOTHING_TO_IMPORT}{:else if imported}· imported {imported.imported}, {imported.already} already there{#if imported.unreachable}, {imported.unreachable} offline right now{/if}{/if}
+        {servers.favouriteRows.length}{#if servers.favouriteRows.length !== servers.favouriteTotal}{" "}of {servers.favouriteTotal}{/if} favourite{servers.favouriteTotal === 1 ? "" : "s"}
+        {#if imported?.missing}· {NOTHING_TO_IMPORT}{:else if imported}· imported {imported.imported}, {imported.already} already there{#if imported.unreachable}, {imported.unreachable} offline right now{/if}{#if imported.skipped}, {imported.skipped} skipped with no usable address{/if}{/if}
       </span>
+      <!-- Some favourites unread while others show: the page said nothing (row 23, approved). -->
+      {#if servers.favourites.size > 0 && (servers.cache?.inMemory || servers.favouritesUnread)}<span class="warn">Your favourites could not be read this session.</span>{/if}
       {#if importError}<span class="error" role="alert">{importError}</span>{/if}
       {#if servers.error}<span class="error" role="alert">{servers.error}</span>{/if}
     </div>

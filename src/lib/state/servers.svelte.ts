@@ -214,6 +214,8 @@ const NO_ANSWER_RETRY_MS = 5 * 60_000;
 const CACHE_POLL_MS = 60_000;
 /** Title-bar friend count poll (D-103); Steam answers from its local cache. */
 const FRIENDS_POLL_MS = 60_000;
+/** Joins Recent reads; the list says so when it holds this many (row 23, approved). */
+export const HISTORY_LIMIT = 100;
 /** One collator for the whole session: `localeCompare` builds one per call (D-152). */
 const COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 /** Up to this many rows sort by name with the collator itself, ~4 500 comparisons. */
@@ -593,6 +595,13 @@ class ServersStore {
   navigate = $state<string | null>(null);
   /** Friends in DayZ right now, for the title bar (D-103); polled while the Steam session is active. */
   friendsInDayz = $state<number | null>(null);
+  /** The last full friends list and when it was read (ms), for the Friends page and the
+   *  title bar: kept while the session is released for idleness, which the page then
+   *  says, and cleared when Steam goes (row 23, approved). The page read its own copy,
+   *  and a page opened after the release said "No friends found." under the title bar's
+   *  "2 friends in DayZ". */
+  friendsList = $state<FriendInfo[] | null>(null);
+  friendsAt = $state<number | null>(null);
   /** Friend names by the id of the server they play on (D-128); from the same poll. */
   friendsOn = new SvelteMap<string, string[]>();
 
@@ -1090,6 +1099,15 @@ class ServersStore {
     }
   }
 
+  /** Favourites the list holds a row for, before the search: "{shown} of {total}" while a
+   *  search is typed, as LAN says it (row 23, approved). */
+  favouriteTotal = $derived.by(() => {
+    void this.#rowsVersion;
+    let n = 0;
+    for (const id of this.favourites) if (this.rows.has(id)) n++;
+    return n;
+  });
+
   /** Favourite rows, search-filtered and sorted like the main list; trust filters do not apply. */
   favouriteRows = $derived.by(() => {
     void this.#rowsVersion;
@@ -1201,7 +1219,9 @@ class ServersStore {
         this.#statusEvents++;
         this.steam = ev.payload;
         this.maybeAutoRefresh();
-        if (this.friendsInDayz == null) void this.pollFriends();
+        // Steam gone: its friends go with it at once, not at the next minute's poll.
+        if (!ev.payload.initialized) this.#clearFriends();
+        else if (this.friendsInDayz == null) void this.pollFriends();
       }),
     );
     // Only now that `steam:status` is being listened for. The worker emits the
@@ -1301,34 +1321,49 @@ class ServersStore {
     // and rows kept pills naming people who had left, while the Friends page
     // correctly said Steam was not running (D-222).
     if (!s?.initialized) {
-      this.friendsInDayz = null;
-      this.friendsOn.clear();
+      this.#clearFriends();
       return;
     }
     if (s.idle) return;
     try {
-      const list = await invoke<FriendInfo[]>("friends_list");
-      this.friendsInDayz = list.filter((f) => f.inDayz).length;
-      // Servers with friends (D-128): by ip:queryPort when Steam reports the query
-      // port, else by ip + game port against the known rows.
-      const on = new Map<string, string[]>();
-      for (const f of list) {
-        if (!f.server) continue;
-        const direct = f.server.queryPort > 0 ? `${f.server.ip}:${f.server.queryPort}` : null;
-        let id = direct && this.rows.has(direct) ? direct : null;
-        // Without a query port, the servers at that address are few: the best one on
-        // this game port is it. A map of every row by game port was rebuilt each minute
-        // for this, 11 ms at 40 000 rows and 19 ms at 71 000 (D-164, D-284).
-        if (!id) id = this.rowsAtGameAddress(f.server.ip, f.server.gamePort)[0]?.id ?? null;
-        if (id) on.set(id, [...(on.get(id) ?? []), f.name]);
-      }
-      for (const key of [...this.friendsOn.keys()]) if (!on.has(key)) this.friendsOn.delete(key);
-      for (const [key, names] of on) this.friendsOn.set(key, names);
+      await this.loadFriends();
     } catch (e) {
       // Keep the last value on screen, but a friends list that keeps failing is the
       // first visible sign that the Steam session has gone (D-288).
       logWarn("friends", `poll failed: ${describe(e)}`);
     }
+  }
+
+  #clearFriends() {
+    this.friendsInDayz = null;
+    this.friendsOn.clear();
+    this.friendsList = null;
+    this.friendsAt = null;
+  }
+
+  /** Reads the friends list: the page's list, the title bar's count and the rows' markers,
+   *  from one answer. Asking re-opens a released session, so only the poll (never while
+   *  released) and the player's own Refresh call it (D-165). Throws when Steam fails. */
+  async loadFriends() {
+    const list = await invoke<FriendInfo[]>("friends_list");
+    this.friendsList = list;
+    this.friendsAt = Date.now();
+    this.friendsInDayz = list.filter((f) => f.inDayz).length;
+    // Servers with friends (D-128): by ip:queryPort when Steam reports the query
+    // port, else by ip + game port against the known rows.
+    const on = new Map<string, string[]>();
+    for (const f of list) {
+      if (!f.server) continue;
+      const direct = f.server.queryPort > 0 ? `${f.server.ip}:${f.server.queryPort}` : null;
+      let id = direct && this.rows.has(direct) ? direct : null;
+      // Without a query port, the servers at that address are few: the best one on
+      // this game port is it. A map of every row by game port was rebuilt each minute
+      // for this, 11 ms at 40 000 rows and 19 ms at 71 000 (D-164, D-284).
+      if (!id) id = this.rowsAtGameAddress(f.server.ip, f.server.gamePort)[0]?.id ?? null;
+      if (id) on.set(id, [...(on.get(id) ?? []), f.name]);
+    }
+    for (const key of [...this.friendsOn.keys()]) if (!on.has(key)) this.friendsOn.delete(key);
+    for (const [key, names] of on) this.friendsOn.set(key, names);
   }
 
   #dzsaTried = false;
@@ -1877,7 +1912,7 @@ class ServersStore {
 
   async loadHistory() {
     try {
-      this.history = await invoke<HistoryEntry[]>("history_list", { limit: 100 });
+      this.history = await invoke<HistoryEntry[]>("history_list", { limit: HISTORY_LIMIT });
       this.historyLoaded = true;
       this.succeeded("history");
     } catch (e) {
@@ -1968,6 +2003,16 @@ class ServersStore {
     return null;
   }
 
+  /** A friend's server in the list: by Steam's query port, or — Steam gave only the game
+   *  address — the one answering row there. With two ids at one game address, or an
+   *  offline one, the list cannot tell which is live (D-295). The Friends page's Server
+   *  column showed the raw address for the second kind (row 23, approved). */
+  friendRow(s: FriendServer): ServerRow | null {
+    if (s.queryPort > 0) return this.rows.get(`${s.ip}:${s.queryPort}`) ?? null;
+    const at = this.rowsAtGameAddress(s.ip, s.gamePort);
+    return at.length === 1 && at[0]!.verdict !== "offline" ? at[0]! : null;
+  }
+
   /** Join a friend's server: the listed row when there is one, else a probe. Steam's
    *  query port is taken as it is; a game address alone takes only a server on that
    *  game port, where anything answering there was taken before (row 23). Why it
@@ -1976,12 +2021,7 @@ class ServersStore {
     // By game address only when Steam gave no query port: with one, a row missing from
     // the list is a server to probe, not another id at the same game port (D-295). With
     // two ids at one game address, or an offline one, the list cannot tell which is live.
-    let known: ServerRow | null = null;
-    if (s.queryPort > 0) known = this.rows.get(`${s.ip}:${s.queryPort}`) ?? null;
-    else {
-      const at = this.rowsAtGameAddress(s.ip, s.gamePort);
-      known = at.length === 1 && at[0]!.verdict !== "offline" ? at[0]! : null;
-    }
+    const known = this.friendRow(s);
     if (known) {
       if (this.joiningId === null) this.select(known.id);
       this.requestJoin(known.id);

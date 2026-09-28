@@ -10,6 +10,15 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.93",
+    notes: [
+      { kind: "changed", text: "Friends keeps your last list, with its time, while disconnected from Steam." },
+      { kind: "changed", text: "A friend's server shows its name even when Steam gives only its address." },
+      { kind: "changed", text: "Favourites shows how many match your search out of all of them." },
+      { kind: "changed", text: "Recent says when it lists only your last 100 joins." },
+    ],
+  },
+  {
     version: "0.1.92",
     notes: [
       { kind: "fixed", text: "Favourites and Recent show a server's new name, map and version." },

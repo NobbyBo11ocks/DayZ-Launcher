@@ -75,10 +75,11 @@
   };
   const REFRESH_MS = 30_000;
 
-  let friends = $state<FriendInfo[]>([]);
+  /** The store's list, kept while the session is released (row 23, approved). */
+  const friends = $derived(servers.friendsList ?? []);
   let error = $state<string | null>(null);
   let loading = $state(false);
-  let loadedAt = $state("");
+  const loadedAt = $derived(servers.friendsAt == null ? "" : new Date(servers.friendsAt).toLocaleTimeString());
   let joining = $state<string | null>(null);
   let showOffline = $state(false);
 
@@ -88,9 +89,8 @@
     if (loading) return;
     loading = true;
     try {
-      friends = await invoke<FriendInfo[]>("friends_list");
+      await servers.loadFriends();
       error = null;
-      loadedAt = new Date().toLocaleTimeString();
     } catch (e) {
       error = String(e);
     } finally {
@@ -110,9 +110,7 @@
     // session came back released and nothing asked again (row 14, F17).
     if (!steamOk) {
       untrack(() => {
-        friends = [];
         error = null;
-        loadedAt = "";
       });
       return;
     }
@@ -133,8 +131,9 @@
   const inDayz = $derived(friends.filter((f) => f.inDayz).length);
   const online = $derived(friends.filter((f) => f.state !== "offline").length);
 
-  /** The friend's server when it is already in our list (by ip:queryPort). */
-  const serverOf = (f: FriendInfo) => (f.server && servers.rowsTick >= 0 ? (servers.rows.get(`${f.server.ip}:${f.server.queryPort}`) ?? null) : null);
+  /** The friend's server when it is already in the list: by Steam's query port, or the one
+   *  answering row at a game address (`servers.friendRow`, row 23, approved). */
+  const serverOf = (f: FriendInfo) => (f.server && servers.rowsTick >= 0 ? servers.friendRow(f.server) : null);
 
   /** The listed row, or a probe (`servers.joinFriend`: by game address only when Steam
    *  gave no query port, and then only a server on that game port, D-295, row 23). */
@@ -161,7 +160,10 @@
         {friends.length} friend{friends.length === 1 ? "" : "s"} · {online} online · {inDayz} in DayZ
         {#if loadedAt}· updated {loadedAt}{/if}
       </span>
-      {#if servers.steam?.idle && !friends.length}<span class="muted">Disconnected from Steam while idle. Press Refresh to load your friends.</span>{/if}
+      {#if servers.steam?.idle}
+        {#if loadedAt}<span class="muted">Disconnected from Steam while idle; this list is from {loadedAt}. Press Refresh to update it.</span>
+        {:else}<span class="muted">Disconnected from Steam while idle. Press Refresh to load your friends.</span>{/if}
+      {/if}
       {#if error}<span class="error" role="alert">{error}</span>{/if}
       <!-- The line the other list pages share: a join opened from here that closed
            because its server dropped out of the list said so nowhere (row 14, F10,
@@ -175,9 +177,11 @@
       <p class="muted">The friends list comes from Steam; it fills in by itself once Steam is up.</p>
     </div>
   {:else if !loadedAt}
-    <!-- Not read yet (or released while idle before it was): nothing to say "none"
-         about; the line above says why (row 23). -->
-    <div class="empty"></div>
+    <!-- Not read yet: nothing to say "none" about (row 23). Released before it was read,
+         the page says how it will be (row 23, approved). -->
+    <div class="empty">
+      {#if steamIdle}<p>Your friends load when you press Refresh.</p>{/if}
+    </div>
   {:else if visible.length === 0}
     <div class="empty">
       <p>{friends.length ? "Nobody online right now." : "No friends found."}</p>

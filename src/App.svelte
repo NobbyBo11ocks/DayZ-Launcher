@@ -249,7 +249,7 @@
 <!-- `filters` keeps the rail at full width below 1100 px while it carries them (app.css). -->
 <div class="shell" class:filters={active === "servers"}>
   <!-- Title-bar counts (D-103, D-105, D-106): servers with players live from the row cache, friends in DayZ. -->
-  <TitleBar servers={servers.rowsTick >= 0 && servers.rows.size > 0 ? servers.populatedCount : null} friends={servers.friendsInDayz} {greeting} />
+  <TitleBar servers={servers.rowsTick >= 0 && servers.rows.size > 0 ? servers.populatedCount : null} friends={servers.friendsInDayz} friendsIdleAt={servers.steam?.idle ? servers.friendsAt : null} {greeting} />
 
   <div class="rail">
     <nav class="sections" aria-label="Sections">

@@ -267,6 +267,68 @@ test("a name sort of a short list does not rank the whole list, and gives the sa
   assert.deepEqual(servers.favouriteRows.map((r) => r.id), byCollator.map((r) => r.id).reverse(), "descending flips the tie-break too");
 });
 
+test("the friends list is kept while the session is released, and goes with Steam at once (row 23, approved)", async (t) => {
+  const { app, servers } = await started(t);
+  app.mock.handle("servers_refresh", true);
+  app.mock.emit("steam:status", steam());
+  const ada = { steamId: "1", name: "Ada", state: "online", inDayz: true };
+  app.mock.handle("friends_list", [ada]);
+  await servers.pollFriends();
+  assert.deepEqual(servers.friendsList, [ada]);
+  const at = servers.friendsAt;
+  assert.equal(typeof at, "number");
+  // Released: the poll does not ask, and the list and its time stay for the page.
+  app.mock.emit("steam:status", steam({ idle: true }));
+  const asked = app.mock.count("friends_list");
+  await servers.pollFriends();
+  assert.equal(app.mock.count("friends_list"), asked);
+  assert.deepEqual(servers.friendsList, [ada]);
+  assert.equal(servers.friendsAt, at);
+  // The player's Refresh reads it anyway.
+  await servers.loadFriends();
+  assert.equal(app.mock.count("friends_list"), asked + 1);
+  // Steam gone: cleared by the status itself, not a minute later.
+  app.mock.emit("steam:status", steam({ initialized: false }));
+  assert.equal(servers.friendsList, null);
+  assert.equal(servers.friendsAt, null);
+  assert.equal(servers.friendsInDayz, null);
+});
+
+test("the listed row for a friend: by query port, or the one answering row at a game address (row 23, approved)", async (t) => {
+  const { app, servers } = await started(t);
+  const ip = "198.51.100.70";
+  const one = row({ ip, queryPort: 27016, gamePort: 2302, verdict: "verified" });
+  const twinA = row({ ip, queryPort: 27017, gamePort: 2402, verdict: "verified" });
+  const twinB = row({ ip, queryPort: 27018, gamePort: 2402, verdict: "verified" });
+  const down = row({ ip, queryPort: 27019, gamePort: 2502, verdict: "offline" });
+  deliver(app, servers, [one, twinA, twinB, down]);
+  assert.equal(servers.friendRow({ ip, gamePort: 2302, queryPort: 27016 })?.id, one.id);
+  assert.equal(servers.friendRow({ ip, gamePort: 2302, queryPort: 0 })?.id, one.id, "by game address");
+  assert.equal(servers.friendRow({ ip, gamePort: 2402, queryPort: 0 }), null, "two ids: cannot tell");
+  assert.equal(servers.friendRow({ ip, gamePort: 2502, queryPort: 0 }), null, "offline: not live");
+  assert.equal(servers.friendRow({ ip, gamePort: 2302, queryPort: 27099 }), null, "Steam's query port is taken as it is");
+});
+
+test("Favourites count before the search, and Recent reads its named limit (row 23, approved)", async (t) => {
+  const { app, servers } = await started(t);
+  const a = row({ name: "Namalsk Survival" });
+  const b = row({ name: "Chernarus Hardcore" });
+  deliver(app, servers, [a, b]);
+  app.mock.handle("favourite_set", null);
+  await servers.toggleFavourite(a.id);
+  await servers.toggleFavourite(b.id);
+  await servers.toggleFavourite("198.51.100.99:27016"); // a favourite the list holds no row for
+  servers.filters.search = "namalsk";
+  await advance(t, 400);
+  assert.equal(servers.favouriteRows.length, 1);
+  assert.equal(servers.favouriteTotal, 2);
+  const { HISTORY_LIMIT } = await app.load("state/servers.svelte");
+  assert.equal(HISTORY_LIMIT, 100);
+  app.mock.handle("history_list", []);
+  await servers.loadHistory();
+  assert.deepEqual(app.mock.argsOf("history_list").at(-1), { limit: HISTORY_LIMIT });
+});
+
 // ---- Fixes before row 23 that had no test ----
 
 test("the friends count and markers go when Steam goes, and stay while the session is released (D-222)", async (t) => {
@@ -282,7 +344,9 @@ test("the friends count and markers go when Steam goes, and stay while the sessi
   app.mock.emit("steam:status", steam({ idle: true }));
   await servers.pollFriends();
   assert.equal(servers.friendsInDayz, 1, "released on purpose: kept");
-  app.mock.emit("steam:status", steam({ initialized: false }));
+  // Through the poll itself: a status read at start (`steam_status`) comes without an
+  // event, and only the poll sees it.
+  servers.steam = steam({ initialized: false });
   await servers.pollFriends();
   assert.equal(servers.friendsInDayz, null);
   assert.equal(servers.friendsOn.size, 0);

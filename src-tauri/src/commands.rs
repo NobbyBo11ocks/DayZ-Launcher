@@ -2961,6 +2961,8 @@ pub struct ImportResult {
     pub already: usize,
     /// Added from the XML data only because the server did not answer A2S now.
     pub unreachable: usize,
+    /// Entries whose address is not an IP, which the import cannot ask (row 23).
+    pub skipped: usize,
     /// The official launcher has no favourites file on this PC: nothing to import, which
     /// is not an error (row 14, F7).
     pub missing: bool,
@@ -3025,7 +3027,6 @@ pub async fn import_official_favourites(
     let (entries, repeats) = crate::steam::official::distinct(entries);
     // The file listing a server twice counted it as imported twice (row 23).
     result.already += repeats;
-    let mut unreadable = 0usize;
     for e in entries {
         let id = ServerRow::id_for(&e.query_ip, e.query_port);
         if existing.contains(&id) {
@@ -3033,7 +3034,7 @@ pub async fn import_official_favourites(
             continue;
         }
         let Ok(ip) = e.query_ip.parse::<std::net::IpAddr>() else {
-            unreadable += 1;
+            result.skipped += 1;
             continue;
         };
         let client = state.a2s.clone();
@@ -3042,12 +3043,13 @@ pub async fn import_official_favourites(
             (e, id, probed)
         });
     }
-    // Left out of every count before: say so in the log at least (row 23).
-    if unreadable > 0 {
+    // Left out of every count before (row 23): counted for the page, and in the log.
+    if result.skipped > 0 {
         crate::log_warn!(
             "app",
-            "official favourites: {unreadable} entr{} with an address that is not an IP skipped",
-            if unreadable == 1 { "y" } else { "ies" }
+            "official favourites: {} entr{} with an address that is not an IP skipped",
+            result.skipped,
+            if result.skipped == 1 { "y" } else { "ies" }
         );
     }
     while let Some(joined) = probes.join_next().await {

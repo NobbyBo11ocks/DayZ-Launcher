@@ -11,8 +11,16 @@
   let {
     servers = null,
     friends = null,
+    friendsIdleAt = null,
     greeting = "",
-  }: { servers?: number | null; friends?: number | null; greeting?: string } = $props();
+  }: { servers?: number | null; friends?: number | null; friendsIdleAt?: number | null; greeting?: string } = $props();
+  /** While the session is released for idleness the count is from its last read, and
+   *  said so; it read "right now" however old it was (row 23, approved). */
+  const friendsTitle = $derived(
+    friendsIdleAt != null
+      ? `Steam friends in DayZ at ${new Date(friendsIdleAt).toLocaleTimeString()}; the launcher is disconnected from Steam while idle`
+      : "Steam friends playing DayZ right now",
+  );
   const win = getCurrentWindow();
   const fmt = new Intl.NumberFormat();
 </script>
@@ -28,7 +36,7 @@
     </span>
   {/if}
   {#if friends != null}
-    <span class="stat" data-tauri-drag-region title="Steam friends playing DayZ right now">
+    <span class="stat" data-tauri-drag-region title={friendsTitle}>
       <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="5" r="3" /><path d="M2.6 14.4c0-3 2.4-5 5.4-5s5.4 2 5.4 5" /></svg>
       {friends} friend{friends === 1 ? "" : "s"} in DayZ
     </span>

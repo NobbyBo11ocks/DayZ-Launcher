@@ -2,7 +2,7 @@
   // Recent joins from the launch history table. Fits the viewport; the table
   // scrolls on its own when the history is longer than the window (D-094).
   import { tick } from "svelte";
-  import { servers } from "./state/servers.svelte";
+  import { HISTORY_LIMIT, servers } from "./state/servers.svelte";
   import type { HistoryEntry } from "./types";
 
   const uid = $props.id();
@@ -67,13 +67,14 @@
 <section class="recent">
   <header class="row">
     <h1 tabindex="-1" bind:this={headingEl}>Recent</h1>
-    {#if servers.history.length}<span class="muted">{servers.history.length} join{servers.history.length === 1 ? "" : "s"}</span>{/if}
+    <!-- At most HISTORY_LIMIT are read: "100 joins" read as all of them (row 23, approved). -->
+    {#if servers.history.length}<span class="muted">{servers.history.length >= HISTORY_LIMIT ? `Last ${HISTORY_LIMIT} joins` : `${servers.history.length} join${servers.history.length === 1 ? "" : "s"}`}</span>{/if}
     {#if servers.error}<span class="error" role="alert">{servers.error}</span>{/if}
     {#if servers.history.length}
       <span class="spacer"></span>
       {#if confirmClear}
         <span class="confirm" role="group" aria-labelledby="{uid}-clear-q">
-          <span class="muted" id="{uid}-clear-q">Remove all {servers.history.length} join{servers.history.length === 1 ? "" : "s"} from the list?</span>
+          <span class="muted" id="{uid}-clear-q">Remove all joins from the list?</span>
           <button class="btn danger" onclick={clearAll} disabled={clearing}>{clearing ? "Clearing…" : "Clear"}</button>
           <button class="btn ghost" bind:this={keepBtn} onclick={keep} disabled={clearing}>Keep</button>
         </span>
