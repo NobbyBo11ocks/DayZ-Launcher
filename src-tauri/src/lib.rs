@@ -607,6 +607,24 @@ pub fn run() {
                                 d.elapsed_ms,
                                 d.partitions.len()
                             );
+                            // Each partition of a full Refresh, so the Logs page shows which
+                            // ones Steam answered and which it refused (row 19).
+                            if d.partitions.len() > 1 {
+                                for p in &d.partitions {
+                                    let mut filters: Vec<String> =
+                                        p.filters.iter().map(|(k, v)| format!("{k}={v}")).collect();
+                                    filters.sort();
+                                    log_info!(
+                                        "steam",
+                                        "partition {}: {} listed, {} answered, {} in {} ms",
+                                        filters.join(" "),
+                                        p.total,
+                                        p.responded,
+                                        p.response,
+                                        p.elapsed_ms
+                                    );
+                                }
+                            }
                             commands::send_rows(&handle, "done", &d);
                             // A LAN scan is not a list refresh: it must not push the
                             // automatic refresh's throttle or age out cached rows (D-096),
@@ -636,18 +654,12 @@ pub fn run() {
                             // partition that timed out, omitted rows it never listed,
                             // and deleted every fake and DZSA-only row on those maps,
                             // verification history and all (D-271).
-                            let listed_empty = !d.stopped_early && {
-                                let mut empty = d
-                                    .partitions
-                                    .iter()
-                                    .filter(|p| p.filters.contains_key("noplayers"))
-                                    .peekable();
-                                empty.peek().is_some()
-                                    && empty.all(|p| {
-                                        p.response != "NoAnswer"
-                                            && !(p.total == 0 && p.response == "NoServersListedOnMasterServer")
-                                    })
-                            };
+                            let listed_empty =
+                                steam::sdk::empty_listing_complete(&d.partitions, d.stopped_early);
+                            // And map by map: a full Refresh has always stopped early on
+                            // Steam's throttle, so the lane above never ran and the cache
+                            // grew by every Refresh's new farm ids (row 19).
+                            let listed_maps = steam::sdk::answered_empty_maps(&d.partitions);
                             let c = Arc::clone(&cache);
                             let pruned = tauri::async_runtime::spawn_blocking(move || {
                                 let mut pruned = Vec::new();
@@ -673,11 +685,19 @@ pub fn run() {
                                             CACHE_MAX_AGE_SECS,
                                             UNVERIFIED_MAX_AGE_SECS,
                                             listed_empty.then_some(refresh_started),
+                                            Some((refresh_started, listed_maps.as_slice())),
                                         ) {
                                             Ok(ids) => pruned = ids,
                                             Err(e) => log_warn!("cache", "prune failed: {e}"),
                                         }
-                                        let _ = c.population_prune(POPULATION_MAX_AGE_SECS);
+                                        match c.population_prune(POPULATION_MAX_AGE_SECS) {
+                                            Ok(n) if n > 0 => log_info!(
+                                                "cache",
+                                                "{n} population sample(s) older than 7 days removed"
+                                            ),
+                                            Ok(_) => {}
+                                            Err(e) => log_warn!("cache", "population prune failed: {e}"),
+                                        }
                                         // A refresh writes thousands of rows and never
                                         // checkpointed, so the WAL reached 4.5 MB and every
                                         // later start paid recovery over it (D-164).

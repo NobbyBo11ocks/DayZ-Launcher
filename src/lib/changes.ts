@@ -10,6 +10,13 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.86",
+    notes: [
+      { kind: "fixed", text: "Fake servers are cleared out after a full Refresh instead of piling up." },
+      { kind: "changed", text: "The Logs page shows more about each full Refresh and what it removed." },
+    ],
+  },
+  {
     version: "0.1.85",
     notes: [
       { kind: "fixed", text: "Servers no longer drop out of the list right after a full Refresh." },

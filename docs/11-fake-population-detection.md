@@ -34,7 +34,7 @@ Trust is computed per server from cheap signals; the INFO number is never shown 
 
 | # | Rule | Verdict |
 |---|---|---|
-| R0 | Row came from a Steam `noplayers` partition (`steamEmpty = true`) and INFO `players > 0` | **Inflated** — badge, hidden by the default "Hide untrusted" filter, sorted by its head-count when it has one and as 0 otherwise |
+| R0 | Row came from a Steam `noplayers` partition (`steamEmpty = true`) and INFO `players > 0` | **Inflated** — retired from the cache when its map's next empty listing leaves it out (D-309); badge, hidden by the default "Hide untrusted" filter, sorted by its head-count when it has one and as 0 otherwise |
 | R1 | INFO `players` = 0 | the automatic pass leaves it alone (Steam did not list it as populated); a check of the rows on screen still reads it. Show 0 |
 | R2 | PLAYER answers; `verified = entries`; `INFO − verified ≤ 4` on every path — a slack of two was shipped for an afternoon on the reasoning that a fresh INFO sits 50 ms from PLAYER, and a 245-address live probe found ~70 honest servers on one hosting provider whose INFO is an edge cache and whose PLAYER is a 100-second snapshot, disagreeing by a few for ~15 minutes around every restart; the 20 % clause needs at least three ghosts, since one or two connecting players on a ten-slot server tripped it four times in 102 (D-233). When there is no count to compare — the stored one is over 60 s old and INFO did not answer — the head-count stands on its own (D-245) | **Verified** — show `verified` |
 | R3 | PLAYER answers; `INFO − verified ≥ 5`, or ≥ 20 % of `max_players` with at least three missing (D-233) | **Inflated** — show `verified`, badge, hidden by the default "Hide untrusted" filter |

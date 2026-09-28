@@ -917,15 +917,31 @@ impl Cache {
     /// source in the hour before. A LAN address is never a DZSA row and stays (D-247).
     /// 172.16/12 is matched exactly: read as the two characters after `172.`, the test
     /// also counted the public 172.160 to 172.255 as private (D-256).
+    ///
+    /// The fake-at-listing lane also runs map by map: `fakes_on_maps` is a listing's start
+    /// and the maps whose empty-server partition answered (`answered_empty_maps`). A
+    /// full Refresh always stopped early on Steam's throttle, so the lane above never
+    /// ran, and every Refresh left its ~6 700 new farm ids for the 3-day lane: 0 to
+    /// 109 960 rows in three days on the reference PC (row 19). A map whose partition
+    /// did not answer keeps its rows (D-271), and so does a fake that was ever
+    /// verified, the heartbeat race docs/11 describes.
     pub fn prune(
         &self,
         max_age_secs: i64,
         unverified_max_age_secs: i64,
         stale_fakes_before: Option<i64>,
+        fakes_on_maps: Option<(i64, &[String])>,
     ) -> rusqlite::Result<Vec<String>> {
         let now = ServerRow::now_unix();
         let cutoff = now - max_age_secs;
         let unverified_cutoff = now - unverified_max_age_secs;
+        // ",chernarusplus,enoch," — matched with `instr`; map names hold no commas.
+        let (maps_started, maps) = match fakes_on_maps {
+            Some((started, maps)) if !maps.is_empty() => {
+                (Some(started), format!(",{},", maps.join(",")))
+            }
+            _ => (None, String::new()),
+        };
         // Never prune a favourite (D-159): dropping the row emptied the Favourites
         // view for any server that was offline, or simply absent from the populated
         // partition, for 30 days.
@@ -942,25 +958,57 @@ impl Cache {
                             AND steam_id = 0 AND verified_at IS NULL AND steam_empty IS NULL
                             AND NOT (ip LIKE '10.%' OR ip LIKE '192.168.%' OR ip LIKE '127.%'
                                      OR ip GLOB '172.1[6-9].*' OR ip GLOB '172.2[0-9].*'
-                                     OR ip GLOB '172.3[01].*')))
-                 RETURNING id",
+                                     OR ip GLOB '172.3[01].*'))
+                        OR (?4 IS NOT NULL AND last_seen < ?4
+                            AND steam_empty = 1 AND players > 0 AND verdict IS NOT 'verified'
+                            AND instr(?5, ',' || lower(map) || ',') > 0))
+                 RETURNING id, CASE
+                     WHEN last_seen < ?1 THEN 0
+                     WHEN verified_at IS NULL AND last_seen < ?2 THEN 1
+                     WHEN ?3 IS NOT NULL AND last_seen < ?3
+                          AND ((steam_empty = 1 AND players > 0) OR players > 127) THEN 2
+                     WHEN ?4 IS NOT NULL AND last_seen < ?4 AND steam_empty = 1 AND players > 0
+                          AND verdict IS NOT 'verified'
+                          AND instr(?5, ',' || lower(map) || ',') > 0 THEN 4
+                     ELSE 3 END",
             )?
             .query_map(
-                params![cutoff, unverified_cutoff, stale_fakes_before],
-                |r| r.get::<_, String>(0),
+                params![
+                    cutoff,
+                    unverified_cutoff,
+                    stale_fakes_before,
+                    maps_started,
+                    maps
+                ],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
             )?
             .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut lanes = [0usize; 5];
+        for (_, lane) in &ids {
+            lanes[(*lane).clamp(0, 4) as usize] += 1;
+        }
+        let ids: Vec<String> = ids.into_iter().map(|(id, _)| id).collect();
         let n = ids.len();
+        // Every call says what each lane took, zeros included, and whether the listing
+        // lanes could run at all: that they never did went unseen from v0.1.60 to row 19.
+        // Row loss has been a mystery before (Q22), so this comes before the sweep, which
+        // used to skip the line and lose the ids with it when it failed (D-236).
+        crate::log_info!(
+            "cache",
+            "prune: {n} removed: {} unseen for 30 days, {} never counted in 3, {} fakes left out of their map's listing ({} map(s) answered), {} fakes and {} DZSA-only rows left out of a complete empty listing{}",
+            lanes[0],
+            lanes[1],
+            lanes[4],
+            fakes_on_maps.map_or(0, |(_, m)| m.len()),
+            lanes[2],
+            lanes[3],
+            if stale_fakes_before.is_some() {
+                ""
+            } else {
+                " (no complete listing, so those two did not run)"
+            }
+        );
         if n > 0 {
-            // Row loss has been a mystery before (Q22), so every deletion is recorded —
-            // before the sweep, which used to skip the line and lose the ids with it
-            // when it failed after the rows were already gone (D-236).
-            // Most go by the three-day and listing lanes, not the 30-day cutoff the line
-            // used to name (D-271).
-            crate::log_info!(
-                "cache",
-                "pruned {n} server(s): unseen for 30 days, never counted in 3, or left out of the latest empty-list listing"
-            );
             // `prune` is the only DELETE on `servers`, so nothing can be orphaned unless
             // it deleted something — and the sweep measured 23.6 ms over 127 000 mod rows
             // every completed refresh (D-175). The one other way to orphan them is a
@@ -1310,7 +1358,7 @@ mod tests {
         assert_eq!(c.get_meta("last_refresh").unwrap().as_deref(), Some("123"));
         assert_eq!(c.get_meta("missing").unwrap(), None);
         assert_eq!(
-            c.prune(-1, -1, None).unwrap().len(),
+            c.prune(-1, -1, None, None).unwrap().len(),
             2,
             "everything is older than 'now + 1 s'"
         );
@@ -1432,7 +1480,7 @@ mod tests {
         c.favourite_set(&keep.id, true).unwrap();
 
         assert_eq!(
-            c.prune(-1, -1, None).unwrap(),
+            c.prune(-1, -1, None, None).unwrap(),
             vec![drop_me.id.clone()],
             "only the unfavourited row goes, and its id is reported"
         );
@@ -1473,12 +1521,70 @@ mod tests {
         ])
         .unwrap();
 
-        let mut gone = c.prune(30 * 86_400, 3 * 86_400, Some(now - 600)).unwrap();
+        let mut gone = c
+            .prune(30 * 86_400, 3 * 86_400, Some(now - 600), None)
+            .unwrap();
         gone.sort();
         let mut want = vec![idle.id, old_fake.id];
         want.sort();
         assert_eq!(gone, want);
         assert_eq!(c.row_counts().unwrap().servers, 3);
+    }
+
+    /// Row 19: a fake a map's own listing left out goes, whatever the other maps did; a
+    /// fake on a map that did not answer, a fake listed this time, a verified one, a
+    /// favourite and an honest empty server all stay. Map names match without case.
+    #[test]
+    fn a_map_that_answered_retires_the_fakes_it_left_out() {
+        let mut c = Cache::open_in_memory().unwrap();
+        let now = ServerRow::now_unix();
+        let fake = |port: u16, map: &str, seen: i64| {
+            let mut r = row(port, 60);
+            r.map = map.into();
+            r.steam_empty = Some(true);
+            r.last_seen = seen;
+            r
+        };
+        let left_out = fake(27001, "Namalsk", now - 3_600);
+        let other_map = fake(27003, "pripyat", now - 3_600);
+        let listed_now = fake(27005, "namalsk", now);
+        let verified = fake(27007, "namalsk", now - 3_600);
+        let favourite = fake(27009, "namalsk", now - 3_600);
+        let mut honest_empty = fake(27011, "namalsk", now - 3_600);
+        honest_empty.players = 0;
+        c.upsert(&[
+            left_out.clone(),
+            other_map,
+            listed_now,
+            verified.clone(),
+            favourite.clone(),
+            honest_empty,
+        ])
+        .unwrap();
+        c.conn
+            .execute(
+                "UPDATE servers SET verdict = 'verified' WHERE id = ?1",
+                params![verified.id],
+            )
+            .unwrap();
+        c.favourite_set(&favourite.id, true).unwrap();
+
+        let maps = vec!["namalsk".to_string(), "enoch".to_string()];
+        let gone = c
+            .prune(
+                30 * 86_400,
+                3 * 86_400,
+                None,
+                Some((now - 600, maps.as_slice())),
+            )
+            .unwrap();
+        assert_eq!(gone, vec![left_out.id]);
+        assert_eq!(c.row_counts().unwrap().servers, 5);
+        // No answered map, no listing lane: nothing of the kind goes.
+        assert!(c
+            .prune(30 * 86_400, 3 * 86_400, None, Some((now - 600, &[])))
+            .unwrap()
+            .is_empty());
     }
 
     /// The DZSA-only lane spares LAN rows by the exact private ranges: read two
@@ -1520,7 +1626,9 @@ mod tests {
             .collect();
         c.upsert(&rows).unwrap();
 
-        let mut gone = c.prune(30 * 86_400, 3 * 86_400, Some(now - 600)).unwrap();
+        let mut gone = c
+            .prune(30 * 86_400, 3 * 86_400, Some(now - 600), None)
+            .unwrap();
         gone.sort();
         let mut want: Vec<String> = public
             .iter()

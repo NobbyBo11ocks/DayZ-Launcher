@@ -1790,6 +1790,19 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
             // Start the next partition when none is running and the gap has passed.
             if r.current.is_none() && Instant::now() >= r.next_allowed {
                 if r.consecutive_empty >= MAX_CONSECUTIVE_EMPTY && !r.pending.is_empty() {
+                    // Named, so the log shows which maps Steam's throttle left unlisted
+                    // (row 19). `pending` is popped from the end.
+                    let skipped: Vec<String> = r
+                        .pending
+                        .iter()
+                        .rev()
+                        .map(|f| f.get("map").cloned().unwrap_or_else(|| "(all maps)".into()))
+                        .collect();
+                    crate::log_info!(
+                        "steam",
+                        "refresh stopped after {MAX_CONSECUTIVE_EMPTY} empty answers in a row; not asked: {}",
+                        skipped.join(", ")
+                    );
                     r.pending.clear();
                     r.stopped_early = true;
                 }
@@ -2244,6 +2257,43 @@ fn row_from(item: GameServerItem, steam_empty: Option<bool>) -> ServerRow {
 /// partitions of the empty list cap at Steam's 10 000 on every full refresh, so only the
 /// populated-only start refresh ever withdrew anything; a throttled empty partition
 /// blocked it the same way though the populated answer was whole (D-271).
+/// Whether this refresh listed every empty-server partition to the end, the condition
+/// for retiring what such a listing left out on every map at once (D-271). A throttled
+/// refresh stopped early, or a partition that timed out or answered with nothing,
+/// omitted rows it never listed. No full Refresh has met it on the reference PC:
+/// Steam stops answering after about ten list requests and a full one sends fifteen
+/// (row 19).
+pub fn empty_listing_complete(results: &[PartitionResult], stopped_early: bool) -> bool {
+    let mut empty = results
+        .iter()
+        .filter(|p| p.filters.contains_key("noplayers"))
+        .peekable();
+    !stopped_early
+        && empty.peek().is_some()
+        && empty.all(|p| {
+            p.response != "NoAnswer"
+                && !(p.total == 0 && p.response == "NoServersListedOnMasterServer")
+        })
+}
+
+/// The maps whose empty-server partition Steam answered with rows this refresh,
+/// lower-cased (Steam's `map` filter ignores case), capped ones included: their
+/// follow-ups carry the same map. Each can retire the fakes it left out whatever
+/// became of the others, where waiting for all of them retired nothing (row 19).
+/// A partition with no map, the catch-all, names no map it covers.
+pub fn answered_empty_maps(results: &[PartitionResult]) -> Vec<String> {
+    let mut maps: Vec<String> = results
+        .iter()
+        .filter(|p| {
+            p.filters.contains_key("noplayers") && p.total > 0 && p.response == "ServerResponded"
+        })
+        .filter_map(|p| p.filters.get("map").map(|m| m.to_lowercase()))
+        .collect();
+    maps.sort();
+    maps.dedup();
+    maps
+}
+
 fn vouch_complete(results: &[PartitionResult], lan_only: bool) -> bool {
     let mut populated = results
         .iter()
@@ -2314,6 +2364,55 @@ mod tests {
         // No populated partition, or a LAN scan: nothing to decide from.
         assert!(!vouch_complete(&[capped_map], false));
         assert!(!vouch_complete(&[populated], true));
+    }
+
+    /// Row 19: a full Refresh as it went live on 2026-09-28 — the populated partition,
+    /// three maps at Steam's cap, four more answered, two refused by the throttle and the
+    /// rest never asked (stopped early).
+    #[test]
+    fn a_stopped_listing_still_names_the_maps_that_answered() {
+        let map = |m: &str, total: usize, response: &str| PartitionResult {
+            filters: HashMap::from([
+                ("noplayers".to_string(), "1".to_string()),
+                ("map".to_string(), m.to_string()),
+            ]),
+            total,
+            responded: total,
+            failed: 0,
+            inflated: 0,
+            elapsed_ms: 1,
+            response: response.to_string(),
+            capped: total == STEAM_LIST_CAP,
+        };
+        let mut populated = map("", 2_975, "ServerResponded");
+        populated.filters = HashMap::from([("hasplayers".to_string(), "1".to_string())]);
+        let mut catch_all = map("", 812, "ServerResponded");
+        catch_all.filters.remove("map");
+        let results = vec![
+            populated,
+            map("chernarusplus", STEAM_LIST_CAP, "ServerResponded"),
+            map("chernarusplus", 4_210, "ServerResponded"), // its follow-up
+            map("enoch", STEAM_LIST_CAP, "ServerResponded"),
+            map("Namalsk", STEAM_LIST_CAP, "ServerResponded"),
+            map("sakhal", 2_300, "ServerResponded"),
+            map("deerisle", 1_100, "ServerResponded"),
+            map("bitterroot", 0, "NoServersListedOnMasterServer"),
+            map("pripyat", 0, "NoServersListedOnMasterServer"),
+            map("banov", 12, "NoAnswer"),
+            catch_all,
+        ];
+        assert_eq!(
+            answered_empty_maps(&results),
+            ["chernarusplus", "deerisle", "enoch", "namalsk", "sakhal"],
+            "each answered map once, lower-cased; refused, silent and map-less ones left out"
+        );
+        assert!(!empty_listing_complete(&results, true), "stopped early");
+        assert!(
+            !empty_listing_complete(&results, false),
+            "a refused map still blocks the listing lanes"
+        );
+        let whole: Vec<PartitionResult> = results[..7].to_vec();
+        assert!(empty_listing_complete(&whole, false));
     }
 
     #[test]
