@@ -1593,7 +1593,7 @@ pub fn logs_path() -> Option<String> {
 /// origin is never ambiguous in the file. `async` because the entry is appended to
 /// launcher.log, and a plain command runs on the main thread (D-239).
 #[tauri::command(async)]
-pub fn log_ui(level: String, target: String, message: String) {
+pub fn log_ui(level: String, target: String, message: String, at: Option<u64>) {
     let lvl = match level.as_str() {
         "error" => crate::log::Level::Error,
         "warn" => crate::log::Level::Warn,
@@ -1608,7 +1608,9 @@ pub fn log_ui(level: String, target: String, message: String) {
             .collect()
     };
     let target = format!("ui:{}", flatten(&target, 24));
-    crate::log::write(lvl, &target, flatten(&message, 2000));
+    // At the page's own time when it sends one, so its lines keep their order (row 25);
+    // cut to 8 000 here and to the log's own cap after the profile folder is out (row 25).
+    crate::log::write_from_page(lvl, &target, flatten(&message, 8000), at);
 }
 
 /// Steam friends with presence and, for those in DayZ, their server (D-092).

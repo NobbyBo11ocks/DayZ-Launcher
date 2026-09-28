@@ -399,6 +399,15 @@ fn sweep_updater_leftovers(product: &str) {
     }
 }
 
+/// The log's line for a panic: what, where and on which thread.
+fn panic_line(what: &str, location: Option<&str>, thread: Option<&str>) -> String {
+    format!(
+        "panic: {what} at {} on thread {}",
+        location.unwrap_or("an unknown place"),
+        thread.unwrap_or("without a name")
+    )
+}
+
 pub fn run() {
     let _ = STARTED.set(Instant::now());
     let previous = std::panic::take_hook();
@@ -409,7 +418,17 @@ pub fn run() {
             .map(|s| (*s).to_string())
             .or_else(|| info.payload().downcast_ref::<String>().cloned())
             .unwrap_or_else(|| "no further detail".into());
-        log_error!("app", "panic: {what}");
+        // Where it happened, and past a muted App: the dialog sends the player to this
+        // line, a release build has no console, and the line had neither (row 25).
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()));
+        let thread = std::thread::current().name().map(str::to_string);
+        crate::log::write_unmuted(
+            crate::log::Level::Error,
+            "app",
+            panic_line(&what, location.as_deref(), thread.as_deref()),
+        );
         fatal_dialog(&format!(
             "The launcher stopped unexpectedly.\n\n{what}\n\nIf this keeps happening, \
              the log is at %LOCALAPPDATA%\\com.dayzlauncher.desktop\\logs\\launcher.log."
@@ -1003,6 +1022,23 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    /// Row 25: the panic line says where and on which thread.
+    #[test]
+    fn a_panic_line_says_where() {
+        assert_eq!(
+            super::panic_line(
+                "boom",
+                Some("src/lib.rs:10:5"),
+                Some("tokio-runtime-worker")
+            ),
+            "panic: boom at src/lib.rs:10:5 on thread tokio-runtime-worker"
+        );
+        assert_eq!(
+            super::panic_line("boom", None, None),
+            "panic: boom at an unknown place on thread without a name"
+        );
+    }
+
     use super::{first_size, move_aside, sweep_updater_leftovers, with_suffix};
 
     /// Row 16: the first window fits the work area it is centred in.

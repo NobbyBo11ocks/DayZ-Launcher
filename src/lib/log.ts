@@ -9,7 +9,8 @@ type Level = "info" | "warn" | "error";
 
 /** Never throws and never awaits the caller: logging must not change behaviour. */
 export function log(level: Level, target: string, message: string): void {
-  void invoke("log_ui", { level, target, message }).catch(() => {});
+  // The page's own time: stamped on arrival, two lines sent in order could swap (row 25).
+  void invoke("log_ui", { level, target, message, at: Date.now() }).catch(() => {});
 }
 
 export const logInfo = (target: string, message: string) => log("info", target, message);
@@ -21,7 +22,9 @@ export function describe(e: unknown): string {
   if (e instanceof Error) return `${e.name}: ${e.message}`;
   if (typeof e === "string") return e;
   try {
-    return JSON.stringify(e);
+    // `undefined`, a function or a symbol stringify to nothing, and a line without a
+    // message was refused by the host: `Promise.reject()` left no trace (row 25).
+    return JSON.stringify(e) ?? String(e);
   } catch {
     return String(e);
   }
@@ -57,6 +60,8 @@ export function installErrorHooks(): void {
   const original = console.error.bind(console);
   console.error = (...args: unknown[]) => {
     original(...args);
-    logError("console", args.map(describe).join(" ").slice(0, 500));
+    // The host cuts it after taking the profile folder out; cut here first, a path
+    // across the cut kept part of the account name (row 25).
+    logError("console", args.map(describe).join(" ").slice(0, 8000));
   };
 }

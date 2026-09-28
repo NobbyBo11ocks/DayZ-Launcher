@@ -260,6 +260,10 @@ const MUTATIONS = [
   ["pages", "Favourites count before the search", "row 23 (6)", S,
     "    for (const id of this.favourites) if (this.rows.has(id)) n++;",
     "    for (const id of this.favourites) n++;", "a favourite without a row counted"],
+  // log.test.mjs
+  ["log", "anything thrown becomes a line", "row 25", "src/lib/log.ts",
+    "    return JSON.stringify(e) ?? String(e);",
+    "    return JSON.stringify(e);", "a rejection without a reason leaves no line"],
   // news.test.mjs
   ["news", "no alert for an update post older than two weeks", "row 24 (1)", N,
     " && n.date >= recent && !known.has(n.gid)",
