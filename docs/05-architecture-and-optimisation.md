@@ -87,6 +87,9 @@ Apply whenever a file of that type is created or patched; note deviations in [09
 - No `unwrap()` on I/O or network paths; typed errors with `thiserror`.
 - Every parser has a unit test with the live fixture bytes captured by `tools/a2s_capture.js` (into `src-tauri/tests/fixtures/a2s`; `tools/a2s_probe.js` only prints).
 
+### Stores and helpers (`src/lib/**/*.ts`, `*.svelte.ts`)
+- A fix to a store or a helper gets a test in `tests/front/` when it can be pinned down without a DOM, and the test is shown to fail with the fix reverted (`node tests/front/mutations.mjs` for the existing ones). `node tools/front_test.mjs` runs them in about a second; CI runs it on every commit (D-311).
+
 ### Svelte (`*.svelte`)
 - Runes only (`$state`, `$derived`, `$effect`); no legacy stores.
 - One component per concern; the table's rows are plain markup in `ServerTable.svelte`'s keyed `{#each}`, with no effects of their own.

@@ -44,6 +44,11 @@ jobs:
       - name: Type-check the frontend
         run: npm run check
 
+      # The front end's fixes kept fixed (row 20): the real stores, built with the
+      # project's Svelte against a stand-in host, under Node's own test runner.
+      - name: Front-end tests
+        run: node tools/front_test.mjs
+
       # Every release says what changed in the window after the update, in a player's
       # words; the version being built must have its notes (D-301).
       - name: Change notes

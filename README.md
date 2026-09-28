@@ -382,10 +382,14 @@ npm install
 npm run tauri dev
 ```
 
-The eight checks CI runs, in order — `cargo fmt --check` is the one that catches people out:
+The nine checks CI runs, in order — `cargo fmt --check` is the one that catches people out:
 
 ```bash
 npm run check
+```
+
+```bash
+node tools/front_test.mjs
 ```
 
 ```bash
