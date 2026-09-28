@@ -882,9 +882,11 @@ mod tests {
             continuity_at(id, &fake(2, 20), false, at(120)).is_none(),
             "one strike"
         );
+        let why = continuity_at(id, &fake(3, 20), false, at(240)).expect("two strikes");
+        // The details pane keys its sentence on this wording (src/lib/verdict.ts).
         assert!(
-            continuity_at(id, &fake(3, 20), false, at(240)).is_some(),
-            "two strikes"
+            why.contains("sessions older than the gap were missing from the list"),
+            "{why}"
         );
         // Inside the minimum gap: nothing to compare, the verdict stands.
         assert!(continuity_at(id, &fake(4, 20), false, at(250)).is_some());
@@ -1045,6 +1047,8 @@ mod tests {
         let over = players(&over, "");
         let (v, n, why) = judge(Some(&i), Ok(&over), 0, 0);
         assert_eq!((v, n), (Verdict::Synthetic, Some(11)), "{why}");
+        // The details pane keys its sentence on this wording (src/lib/verdict.ts).
+        assert_eq!(why, "11 entries on a server of 10 slots");
         // A fresh listing's slot count is as current as INFO; a stale one is not used.
         assert_eq!(judge(None, Ok(&over), 10, 10).0, Verdict::Synthetic);
         assert_eq!(judge(None, Ok(&over), -1, 10).0, Verdict::Verified);
@@ -1061,6 +1065,7 @@ mod tests {
         let burst = players(&[2400.0, 830.0, 312.0, 0.4, 0.2, 0.05], "");
         let (v, _, why) = judge(Some(&i), Ok(&burst), 0, 0);
         assert_eq!(v, Verdict::Synthetic, "{why}");
+        assert_eq!(why, "3 sessions under a second beside one of 2400 s");
         let back = players(&[4.1, 2.2, 1.3, 0.8, 0.5, 0.3], "");
         assert_eq!(judge(Some(&i), Ok(&back), 0, 0).0, Verdict::Verified);
         let duo = players(&[2400.0, 830.0, 312.0, 95.0, 0.6, 0.4], "");

@@ -17,6 +17,7 @@ const UP = "src/lib/state/updates.svelte.ts";
 const N = "src/lib/state/news.svelte.ts";
 const T = "src/lib/types.ts";
 const C = "src/lib/changes.ts";
+const VD = "src/lib/verdict.ts";
 
 /** [test file, the test's name as it starts, the fix, the source, text, replacement, what the revert does] */
 const MUTATIONS = [
@@ -155,6 +156,15 @@ const MUTATIONS = [
     "return seen ? toCurrent <= 0 && compareVersions(r.version, seen) > 0 : toCurrent === 0;", "return toCurrent <= 0 && compareVersions(r.version, seen) > 0;", "a file without the mark gets every release"],
   ["changes", "What's new shows", "D-301", C, "  }).slice(0, MAX_SHOWN);", "  });", "no limit of five"],
   ["changes", "What's new shows", "D-301", C, '.split("-")[0]!.split(".")', '.split(".")', "a pre-release suffix read as a newer version"],
+  // verdict.test.mjs
+  ["verdict", "every rule's reason has its sentence", "D-315", VD,
+    '      if (v.reason.includes("entries on a server of")) return "The player list looks fake: it lists more players than the server has slots.";\n', "", "R13 shows the general line"],
+  ["verdict", "every rule's reason has its sentence", "D-315", VD,
+    '      if (v.reason.includes("under a second beside")) return "The player list looks fake: several players joined within the same second as long-running ones.";\n', "", "R14 shows the general line"],
+  ["verdict", "every rule's reason has its sentence", "D-315", VD,
+    '      if (v.reason.includes("missing from the list")) return "The player list looks fake: players it lists as older were not there at the previous check.";\n', "", "R11's invariant shows the general line"],
+  ["verdict", "every rule's reason has its sentence", "D-268", VD,
+    '  v.verdict === "verified" && v.reason.startsWith("INFO reports 0") ? "Empty server" : LABEL[v.verdict];', "  LABEL[v.verdict];", "an empty server headed as a verified count"],
   // news.test.mjs
   ["news", "a failed news fetch is tried again", "D-302 (11)", N,
     '    window.addEventListener("online", this.#retryIfFailed);\n    window.addEventListener("focus", this.#retryIfFailed);', "", "no retry on reconnect (before row 14)"],
