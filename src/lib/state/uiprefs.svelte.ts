@@ -7,6 +7,7 @@
 // command name before it is rethrown (D-158).
 import { invokeLogged as invoke } from "../log";
 import type { Settings, UiPrefs } from "../types";
+import { beforeClose } from "./closing";
 
 const FLUSH_MS = 150;
 /** A write that failed is tried again after this long (row 14, H9). */
@@ -57,6 +58,7 @@ class UiPrefsStore {
   constructor() {
     this.ready = this.read();
     window.addEventListener("beforeunload", () => void this.flush());
+    beforeClose(() => this.flush());
   }
 
   /**
@@ -85,12 +87,15 @@ class UiPrefsStore {
     return this.current;
   }
 
-  /** Merges a partial update; no-op keys are dropped, the rest is written shortly. */
+  /** Merges a partial update; no-op keys are dropped, the rest is written shortly. A
+   *  copy that is not the file — the defaults standing in for one that could not be read —
+   *  is no measure of "no change": switching News back on matched the default and was
+   *  never sent, and the file kept it off (row 15, F4). */
   patch(p: Partial<UiPrefs>) {
     const cur = this.current;
     let changed = false;
     for (const [k, v] of Object.entries(p) as [keyof UiPrefs, UiPrefs[keyof UiPrefs]][]) {
-      if (cur && stable(cur[k]) === stable(v)) continue;
+      if (cur && this.readOk && stable(cur[k]) === stable(v)) continue;
       (this.#pending as Record<string, unknown>)[k] = v;
       changed = true;
     }
@@ -103,10 +108,14 @@ class UiPrefsStore {
 
   async flush() {
     clearTimeout(this.#timer);
+    // The read first, the pending changes after: taken before a slow first read had
+    // finished, they were missing from the copy `read` builds, and the stores that
+    // reconcile against it put the old theme or News choice back on screen while the
+    // file got the new one (row 15, F4).
+    await this.ready;
     const p = this.#pending;
     if (Object.keys(p).length === 0) return;
     this.#pending = {};
-    await this.ready;
     try {
       const saved = await invoke<UiPrefs>("ui_prefs_set", { patch: p });
       // The file as saved, plus whatever changed while that was in flight. Taking the

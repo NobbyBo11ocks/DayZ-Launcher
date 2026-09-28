@@ -331,9 +331,23 @@ impl tauri::Resource for ExitGuard {}
 
 impl Drop for ExitGuard {
     fn drop(&mut self) {
+        // The window's size and place as well: the window-state plugin writes them only on
+        // RunEvent::Exit, which this way out never reaches, so "Install and restart" lost
+        // the session's window (row 15, H6; tauri-plugin-window-state 2.4.1 `on_event`).
+        // The resource table is cleared before the windows are hidden, so they still
+        // report where they are; after a normal exit this is a second, identical save.
+        use tauri_plugin_window_state::AppHandleExt;
+        let _ = self.0.save_window_state(WINDOW_STATE);
         close_down(&self.0);
     }
 }
+
+/// What the window-state plugin keeps (D-098): visibility, decorations and fullscreen are
+/// left alone (frameless window).
+const WINDOW_STATE: tauri_plugin_window_state::StateFlags =
+    tauri_plugin_window_state::StateFlags::SIZE
+        .union(tauri_plugin_window_state::StateFlags::POSITION)
+        .union(tauri_plugin_window_state::StateFlags::MAXIMIZED);
 
 /// The updater leaves every setup it downloads in `%TEMP%\<product>-<version>-updater-*\`:
 /// it keeps the folder and exits before the file's own clean-up runs (tauri-plugin-updater
@@ -429,17 +443,24 @@ pub fn run() {
         // visibility, decorations and fullscreen are left alone (frameless window).
         .plugin(
             tauri_plugin_window_state::Builder::new()
-                .with_state_flags(
-                    tauri_plugin_window_state::StateFlags::SIZE
-                        | tauri_plugin_window_state::StateFlags::POSITION
-                        | tauri_plugin_window_state::StateFlags::MAXIMIZED,
-                )
+                .with_state_flags(WINDOW_STATE)
                 .build(),
         )
         .setup(|app| {
             let data_dir = app.path().app_local_data_dir()?;
             // Before anything else that can fail, so a failure is in the log (D-158).
             log::init(&data_dir);
+            // The player's Recording choice before the first line: loaded after the start-up
+            // lines, it let "start v…", the DayZ-running line and any cache warnings into
+            // the file at every start with Recording off, which the Logs page says never
+            // happens (row 15, H7). The settings file's own read errors are still written,
+            // since recording stays on until the file has been read (D-169).
+            let settings = SettingsStore::load(&app.path().app_config_dir()?.join("settings.json"));
+            {
+                let s = settings.get();
+                log::set_enabled(s.logging);
+                log::set_muted(s.log_muted);
+            }
             log_info!(
                 "app",
                 "start v{} · elevation {:?}",
@@ -460,14 +481,6 @@ pub fn run() {
             let db_path = data_dir.join("cache.db");
             let (cache, cache_opened) = open_cache(&db_path);
             let cache = Arc::new(Mutex::new(cache));
-            let settings = SettingsStore::load(&app.path().app_config_dir()?.join("settings.json"));
-            // Start-up logs before this point are kept deliberately: they are the ones
-            // that explain a failure to start. From here the user's choice applies (D-169).
-            {
-                let s = settings.get();
-                log::set_enabled(s.logging);
-                log::set_muted(s.log_muted);
-            }
 
             // Q22 and Q25 are both "the user's own rows are gone and nothing says when".
             // One line per start, before anything can write, is the before-and-after the

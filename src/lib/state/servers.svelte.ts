@@ -135,19 +135,61 @@ export const defaultFilters = (): Filters => ({
   friendsOnly: false,
 });
 
+const PERSPECTIVES: readonly Perspective[] = ["any", "1pp", "3pp"];
+const MOD_FILTERS: readonly ModFilter[] = ["any", "modded", "vanilla"];
+const HIVES: readonly HiveFilter[] = ["any", "official", "community"];
+const STYLES: readonly StyleFilter[] = ["any", "pve", "pvp", "rp"];
+
+/**
+ * A saved filter set as this build can use it: each known key of the right type and
+ * range, anything else back to that key's default, and keys this build does not know
+ * kept for the version that wrote them. Taken as it came, a value from another version
+ * or a hand edit counted in "Reset · N" and filtered nothing, showed the wrong servers,
+ * emptied the list, or threw and lost every saved filter (row 15, F8).
+ */
+export function sanitizeFilters(raw: unknown): Filters {
+  const d = defaultFilters();
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return d;
+  const r = raw as Record<string, unknown>;
+  const oneOf = <T extends string>(v: unknown, all: readonly T[], dflt: T): T => (all.includes(v as T) ? (v as T) : dflt);
+  const bool = (v: unknown, dflt: boolean): boolean => (typeof v === "boolean" ? v : dflt);
+  const text = (v: unknown): string => (typeof v === "string" ? v : "");
+  // A Workshop id or a ping limit: a whole number from 0, as a number or in digits.
+  const count = (v: unknown): number => {
+    const n = typeof v === "string" && /^\d+$/.test(v) ? Number(v) : v;
+    return typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? n : 0;
+  };
+  return {
+    ...r,
+    search: "",
+    perspective: oneOf(r.perspective, PERSPECTIVES, d.perspective),
+    // Saved before D-195 the map could be any capitalisation the server used, and the
+    // filter compares against the lower-cased id now.
+    map: text(r.map).toLowerCase(),
+    country: text(r.country),
+    mod: count(r.mod),
+    notFull: bool(r.notFull, d.notFull),
+    notEmpty: bool(r.notEmpty, d.notEmpty),
+    hasQueue: bool(r.hasQueue, d.hasQueue),
+    noPassword: bool(r.noPassword, d.noPassword),
+    mods: oneOf(r.mods, MOD_FILTERS, d.mods),
+    hive: oneOf(r.hive, HIVES, d.hive),
+    style: oneOf(r.style, STYLES, d.style),
+    dayOnly: bool(r.dayOnly, d.dayOnly),
+    maxPing: count(r.maxPing),
+    versionMine: bool(r.versionMine, d.versionMine),
+    hideUntrusted: bool(r.hideUntrusted, d.hideUntrusted),
+    friendsOnly: bool(r.friendsOnly, d.friendsOnly),
+  };
+}
+
 /** localStorage cache for an instant start; the settings file wins once read (D-070). */
 function loadFilters(): Filters {
   try {
     const raw = localStorage.getItem(FILTERS_KEY);
-    if (raw) {
-      const f = { ...defaultFilters(), ...(JSON.parse(raw) as Partial<Filters>), search: "" };
-      // Saved before D-195 the map could be any capitalisation the server used, and
-      // the filter compares against the lower-cased id now.
-      f.map = f.map.toLowerCase();
-      return f;
-    }
+    if (raw) return sanitizeFilters(JSON.parse(raw));
   } catch {
-    /* storage unavailable */
+    /* storage unavailable, or not JSON */
   }
   return defaultFilters();
 }
@@ -528,11 +570,7 @@ class ServersStore {
   constructor() {
     void uiPrefs.ready.then((u) => {
       if (!u.filters || this.#filtersTouched) return;
-      const f = { ...defaultFilters(), ...(u.filters as Partial<Filters>), search: this.filters.search };
-      // Same migration as `loadFilters`: before D-195 this held whatever capitalisation
-      // the server used, and the predicate compares against the lower-cased id.
-      f.map = f.map.toLowerCase();
-      this.filters = f;
+      this.filters = { ...sanitizeFilters(u.filters), search: this.filters.search };
     });
   }
 

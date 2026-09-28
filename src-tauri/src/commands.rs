@@ -208,7 +208,10 @@ pub fn steam_status(state: State<'_, AppState>) -> SteamStatus {
     state.steam.status()
 }
 
-#[tauri::command]
+/// Off the main thread like its two siblings: it waited there on the lock `persist`
+/// holds through its rename retries, and since D-302 may read and copy a file that
+/// could not be read at start (row 15, H5).
+#[tauri::command(async)]
 pub fn settings_get(state: State<'_, AppState>) -> SettingsView {
     let (settings, health) = state.settings.get_checked();
     // Adopted late, the file's idle timeout never reached the Steam thread, which kept
@@ -270,10 +273,18 @@ pub fn settings_set(state: State<'_, AppState>, settings: Settings) -> AppResult
 /// Off the main thread for the same reason as `settings_set` (D-239).
 #[tauri::command(async)]
 pub fn ui_prefs_set(state: State<'_, AppState>, patch: serde_json::Value) -> AppResult<UiPrefs> {
-    state
+    let saved = state
         .settings
         .patch_ui(patch)
-        .map_err(|e| AppError::Internal(format!("ui prefs: {e}")))
+        .map_err(|e| AppError::Internal(format!("ui prefs: {e}")));
+    // A file that could not be read at start is often first read by a preference save
+    // (the update check's time), which took it over silently: the Steam thread kept the
+    // default idle release for the session, and someone who chose 0 was released after
+    // five minutes (row 15, H2). Cheap: the worker only stores the value.
+    state
+        .steam
+        .set_idle_timeout(state.settings.get().steam_idle_timeout());
+    saved
 }
 
 #[derive(Serialize)]
@@ -2010,7 +2021,7 @@ pub async fn join_plan(
 
     let settings = state.settings.get();
     let profile_name = if settings.profile_name.trim().is_empty() {
-        worker_persona(&state).unwrap_or_default()
+        join_persona(&state).await.unwrap_or_default()
     } else {
         settings.profile_name.clone()
     };
@@ -2055,8 +2066,15 @@ pub async fn join_plan(
     })
 }
 
-fn worker_persona(state: &State<'_, AppState>) -> Option<String> {
-    state.steam.status().persona
+/// The name a join sends when Settings sets none: the account signed in to Steam now,
+/// or the status's copy when Steam cannot be asked (row 15, H8).
+async fn join_persona(state: &State<'_, AppState>) -> Option<String> {
+    let steam = state.steam.clone_handle();
+    let live = tauri::async_runtime::spawn_blocking(move || steam.persona())
+        .await
+        .ok()
+        .flatten();
+    live.or_else(|| state.steam.status().persona)
 }
 
 /// Subscribe + download the given Workshop items; progress via `mods:progress`,
@@ -2172,7 +2190,11 @@ pub async fn launch_game(
         }
         s
     };
-    let persona = worker_persona(&state);
+    let persona = if settings.profile_name.trim().is_empty() {
+        join_persona(&state).await
+    } else {
+        None
+    };
 
     let row_for_spec = row.clone();
     let (game_dir, links, spec) = tauri::async_runtime::spawn_blocking(move || {

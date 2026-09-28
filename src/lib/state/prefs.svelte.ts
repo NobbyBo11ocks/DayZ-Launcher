@@ -62,7 +62,22 @@ class Prefs {
       // after its retries, and the default is `news: true` — so a backend slow past
       // ~2 s used to switch the News page back on for someone who had turned it off,
       // and with it the fetches Settings promises never happen (D-194).
-      if (uiPrefs.readOk) this.news = u.news !== false;
+      if (uiPrefs.readOk) {
+        this.news = u.news !== false;
+        // The start-up copy follows the file. Only a change made here ever wrote it, so a
+        // News page the installer had switched off (D-206) was drawn and taken away
+        // again at every start (row 15, F3).
+        try {
+          localStorage.setItem(NEWS_KEY, this.news ? "on" : "off");
+        } catch {
+          /* storage unavailable */
+        }
+      } else if (uiPrefs.health.reset) {
+        // A damaged file was set aside and its defaults are being written: they get this
+        // copy's choice, as theme and accent do below, or News came back at the next
+        // start with its feed, pictures and videos (row 15, F1).
+        uiPrefs.patch({ news: this.news });
+      }
       this.#fromFile = true;
       uiPrefs.patch({ theme: this.theme, accent: this.accent });
     });

@@ -10,6 +10,16 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.81",
+    notes: [
+      { kind: "fixed", text: "Joining after you switch Steam accounts uses the right name." },
+      { kind: "fixed", text: "The window keeps its size and place after an update." },
+      { kind: "fixed", text: "One bad value in your settings file no longer resets all of it." },
+      { kind: "fixed", text: "Settings changes are kept when you close the launcher right away." },
+      { kind: "fixed", text: "Two launch profiles with the same name no longer break Settings." },
+    ],
+  },
+  {
     version: "0.1.80",
     notes: [
       { kind: "added", text: "The Servers page tells you when your connection seems to be down." },

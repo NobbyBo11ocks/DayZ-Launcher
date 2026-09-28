@@ -64,6 +64,10 @@ class Updates {
     } catch {
       /* storage unavailable */
     }
+    // A time later than now is a clock that was wrong and has been put right: taken at
+    // its word, it held off the check at every start and on focus until the clock
+    // caught up (row 15, F5).
+    if (!(last <= Date.now())) last = 0;
     if (Date.now() - last < minGapMs || !settled()) return;
     await this.checkNow(true);
   }

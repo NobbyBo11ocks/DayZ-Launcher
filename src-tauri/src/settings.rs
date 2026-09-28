@@ -48,6 +48,12 @@ pub struct UiPrefs {
     /// The launcher version whose "What's new" notes were last shown (D-301). Empty in
     /// a file written before 0.1.78, which the front end reads as an update to this one.
     pub last_seen_version: String,
+    /// Keys this build does not know, kept as they came: a newer version's, which an
+    /// older one dropped at its first write — a downgrade and an upgrade again lost them,
+    /// and one-time moves ran twice (row 15, H4). Never rename a key or change its type;
+    /// add a new one (docs/05 §2).
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, Value>,
 }
 
 impl Default for UiPrefs {
@@ -63,6 +69,7 @@ impl Default for UiPrefs {
             accent_default_v2: false,
             news: true,
             last_seen_version: String::new(),
+            extra: serde_json::Map::new(),
         }
     }
 }
@@ -100,6 +107,9 @@ pub struct LaunchProfile {
     pub skip_intro: bool,
     pub no_splash: bool,
     pub no_pause: bool,
+    /// Keys this build does not know (row 15, H4).
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, Value>,
 }
 
 impl Default for LaunchProfile {
@@ -111,6 +121,7 @@ impl Default for LaunchProfile {
             skip_intro: true,
             no_splash: true,
             no_pause: false,
+            extra: serde_json::Map::new(),
         }
     }
 }
@@ -144,6 +155,9 @@ pub struct Settings {
     #[serde(default)]
     pub idle_default_v2: bool,
     pub ui: UiPrefs,
+    /// Keys this build does not know (row 15, H4).
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, Value>,
 }
 
 impl Default for Settings {
@@ -163,6 +177,7 @@ impl Default for Settings {
             log_muted: Vec::new(),
             idle_default_v2: false,
             ui: UiPrefs::default(),
+            extra: serde_json::Map::new(),
         }
     }
 }
@@ -173,11 +188,31 @@ impl Settings {
     /// own and stays (D-299).
     fn normalise(&mut self) {
         self.ui.normalise();
+        self.drop_view_keys();
+        // One profile per name, the last as Save keeps it: two of one name, from a hand
+        // edit, took the Settings page and every join window down (row 15, F2).
+        let mut seen = std::collections::HashSet::new();
+        let mut kept: Vec<LaunchProfile> = self
+            .launch_profiles
+            .drain(..)
+            .rev()
+            .filter(|p| seen.insert(p.name.clone()))
+            .collect();
+        kept.reverse();
+        self.launch_profiles = kept;
         if !self.idle_default_v2 {
             if self.steam_idle_minutes == 15 {
                 self.steam_idle_minutes = 5;
             }
             self.idle_default_v2 = true;
+        }
+    }
+
+    /// `settings_get` adds these to what it hands the page, and Settings sends the object
+    /// back: kept as unknown keys, they were written into the file (D-303).
+    fn drop_view_keys(&mut self) {
+        for key in ["unreadable", "reset", "keptAs"] {
+            self.extra.remove(key);
         }
     }
 
@@ -215,41 +250,163 @@ pub struct SettingsHealth {
     pub kept_as: Option<String>,
 }
 
-/// A settings file is a JSON object. Anything else is corruption, whatever serde is
-/// willing to make of it.
-fn parse_settings(bytes: &[u8]) -> Result<Settings, String> {
-    let value: Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
-    if !value.is_object() {
-        return Err("the file is not a JSON object".into());
-    }
-    if let Some(ui) = value.get("ui") {
-        if !ui.is_object() {
-            return Err("\"ui\" is not a JSON object".into());
-        }
-    }
-    serde_json::from_value(value).map_err(|e| e.to_string())
+/// What a settings file held that this build could use.
+struct Parsed {
+    settings: Settings,
+    /// Where values were that this build could not take (`steamIdleMinutes`, `ui.news`,
+    /// `launchProfiles[1].name`): each is back to its default.
+    dropped: Vec<String>,
 }
 
-/// Keeps a copy of a file that could not be parsed, stamped so a second bad start
-/// cannot overwrite the first copy.
-/// Returns the copy's file name when it was written, for the page to name (D-303).
-fn set_aside(path: &Path, bytes: &[u8], e: &str) -> Option<String> {
+/// The file's text: UTF-8 with or without a byte-order mark, or UTF-16 with one. Notepad
+/// and PowerShell 5.1 write all three, and a file edited by hand read as damaged for its
+/// mark alone (row 15, H3).
+fn decode(bytes: &[u8]) -> Result<String, String> {
+    let utf16 = |rest: &[u8], little: bool| -> Result<String, String> {
+        if !rest.len().is_multiple_of(2) {
+            return Err("the file is UTF-16 with an odd number of bytes".into());
+        }
+        let units = rest.as_chunks::<2>().0.iter().map(|&p| {
+            if little {
+                u16::from_le_bytes(p)
+            } else {
+                u16::from_be_bytes(p)
+            }
+        });
+        char::decode_utf16(units)
+            .collect::<Result<String, _>>()
+            .map_err(|e| e.to_string())
+    };
+    if let Some(rest) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
+        return String::from_utf8(rest.to_vec()).map_err(|e| e.to_string());
+    }
+    if let Some(rest) = bytes.strip_prefix(&[0xFF, 0xFE]) {
+        return utf16(rest, true);
+    }
+    if let Some(rest) = bytes.strip_prefix(&[0xFE, 0xFF]) {
+        return utf16(rest, false);
+    }
+    String::from_utf8(bytes.to_vec()).map_err(|e| e.to_string())
+}
+
+/// The keys of `map` that `T` takes, one at a time over those already kept; the others
+/// are named in `dropped` under `at`.
+fn keep_valid<T: serde::de::DeserializeOwned>(
+    map: serde_json::Map<String, Value>,
+    at: &str,
+    dropped: &mut Vec<String>,
+) -> serde_json::Map<String, Value> {
+    let mut kept = serde_json::Map::new();
+    for (key, value) in map {
+        let mut trial = kept.clone();
+        trial.insert(key.clone(), value);
+        if serde_json::from_value::<T>(Value::Object(trial.clone())).is_ok() {
+            kept = trial;
+        } else {
+            dropped.push(format!("{at}{key}"));
+        }
+    }
+    kept
+}
+
+/// A settings file is a JSON object; anything else is corruption, whatever serde is
+/// willing to make of it (D-187). Within the object, a value this build cannot take —
+/// minutes of -1, `"news": "no"`, a profile name of `null`, a type a future version
+/// changed — costs that value alone: taken whole, one of them sent the launch profiles,
+/// the News choice and Recording back to their defaults (row 15, H3).
+fn read_settings(bytes: &[u8]) -> Result<Parsed, String> {
+    let text = decode(bytes)?;
+    let value: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    let Value::Object(mut file) = value else {
+        return Err("the file is not a JSON object".into());
+    };
+    // The whole file when it can be: every file this app writes.
+    if let Ok(settings) = serde_json::from_value::<Settings>(Value::Object(file.clone())) {
+        return Ok(Parsed {
+            settings,
+            dropped: Vec::new(),
+        });
+    }
+    let mut dropped = Vec::new();
+    match file.remove("ui") {
+        Some(Value::Object(ui)) => {
+            let ui = keep_valid::<UiPrefs>(ui, "ui.", &mut dropped);
+            file.insert("ui".into(), Value::Object(ui));
+        }
+        Some(_) => dropped.push("ui".into()),
+        None => {}
+    }
+    match file.remove("launchProfiles") {
+        Some(Value::Array(items)) => {
+            let mut kept = Vec::with_capacity(items.len());
+            for (i, item) in items.into_iter().enumerate() {
+                match item {
+                    Value::Object(p) => {
+                        let at = format!("launchProfiles[{i}].");
+                        kept.push(Value::Object(keep_valid::<LaunchProfile>(
+                            p,
+                            &at,
+                            &mut dropped,
+                        )));
+                    }
+                    _ => dropped.push(format!("launchProfiles[{i}]")),
+                }
+            }
+            file.insert("launchProfiles".into(), Value::Array(kept));
+        }
+        Some(_) => dropped.push("launchProfiles".into()),
+        None => {}
+    }
+    let kept = keep_valid::<Settings>(file, "", &mut dropped);
+    let settings = serde_json::from_value(Value::Object(kept)).map_err(|e| e.to_string())?;
+    Ok(Parsed { settings, dropped })
+}
+
+#[cfg(test)]
+fn parse_settings(bytes: &[u8]) -> Result<Settings, String> {
+    read_settings(bytes).map(|p| p.settings)
+}
+
+/// A copy of the file as it was, stamped so a second bad start cannot overwrite the
+/// first. Its file name when it was written.
+fn keep_copy(path: &Path, bytes: &[u8]) -> Option<PathBuf> {
     let aside = path.with_extension(format!(
         "json.unreadable-{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs())
     ));
-    let saved = std::fs::write(&aside, bytes).is_ok();
+    std::fs::write(&aside, bytes).is_ok().then_some(aside)
+}
+
+/// Keeps a copy of a file that could not be parsed at all. Returns the copy's file name
+/// when it was written, for the page to name (D-303).
+fn set_aside(path: &Path, bytes: &[u8], e: &str) -> Option<String> {
+    let aside = keep_copy(path, bytes);
     crate::log_error!(
         "settings",
-        "{} is unreadable ({e}); starting from defaults, copy kept: {saved} ({})",
+        "{} is unreadable ({e}); starting from defaults, copy kept: {}",
         path.display(),
-        aside.display()
+        aside
+            .as_deref()
+            .map_or("no".into(), |a| a.display().to_string())
     );
-    saved
-        .then(|| aside.file_name().map(|n| n.to_string_lossy().into_owned()))
-        .flatten()
+    aside.and_then(|a| a.file_name().map(|n| n.to_string_lossy().into_owned()))
+}
+
+/// A file read in part: the values that could not be taken are named in the log and a
+/// copy of the file as it was is kept; everything else stands (row 15, H3).
+fn note_partial(path: &Path, bytes: &[u8], dropped: &[String]) {
+    let aside = keep_copy(path, bytes);
+    crate::log_warn!(
+        "settings",
+        "{} has values this version cannot take ({}); they are back to their defaults, the rest was kept; copy kept: {}",
+        path.display(),
+        dropped.join(", "),
+        aside
+            .as_deref()
+            .map_or("no".into(), |a| a.display().to_string())
+    );
 }
 
 impl SettingsStore {
@@ -261,8 +418,13 @@ impl SettingsStore {
         let mut reset = false;
         let mut kept_as = None;
         let mut current = match std::fs::read(path) {
-            Ok(bytes) => match parse_settings(&bytes) {
-                Ok(s) => s,
+            Ok(bytes) => match read_settings(&bytes) {
+                Ok(p) => {
+                    if !p.dropped.is_empty() {
+                        note_partial(path, &bytes, &p.dropped);
+                    }
+                    p.settings
+                }
                 Err(e) => {
                     kept_as = set_aside(path, &bytes, &e);
                     reset = true;
@@ -348,8 +510,12 @@ impl SettingsStore {
             return Ok(false);
         }
         let adopted = match std::fs::read(&self.path) {
-            Ok(bytes) => match parse_settings(&bytes) {
-                Ok(mut s) => {
+            Ok(bytes) => match read_settings(&bytes) {
+                Ok(p) => {
+                    if !p.dropped.is_empty() {
+                        note_partial(&self.path, &bytes, &p.dropped);
+                    }
+                    let mut s = p.settings;
                     s.normalise();
                     // Adopted means applied: start-up applied the defaults the failed
                     // read left, and nothing else re-read the flags (D-245).
@@ -419,6 +585,7 @@ impl SettingsStore {
             ));
         }
         s.ui = cur.ui.clone();
+        s.drop_view_keys();
         // A value saved from Settings is the player's own: the move off the old default
         // must not run over it at the next start (D-299).
         s.idle_default_v2 = true;
@@ -776,6 +943,91 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A byte-order mark or UTF-16 is still the file, and a value this build cannot take
+    /// costs that value alone (row 15, H3).
+    #[test]
+    fn a_file_is_read_in_part_rather_than_reset() {
+        let body = r#"{"profileName":"Survivor","steamIdleMinutes":-1,"logging":false,
+            "ui":{"news":"no","accent":"teal"},
+            "launchProfiles":[{"name":null,"extraArgs":"-x"},{"name":"night"},7]}"#;
+        let p = read_settings(body.as_bytes()).unwrap();
+        let s = &p.settings;
+        assert_eq!(s.profile_name, "Survivor");
+        assert!(!s.logging, "a good value beside a bad one stays");
+        assert_eq!(s.steam_idle_minutes, 5, "-1 minutes is back to the default");
+        assert!(s.ui.news, "\"no\" is not a switch");
+        assert_eq!(s.ui.accent, "teal");
+        assert_eq!(s.launch_profiles.len(), 2);
+        assert_eq!(
+            (
+                s.launch_profiles[0].name.as_str(),
+                s.launch_profiles[0].extra_args.as_str()
+            ),
+            ("", "-x")
+        );
+        assert_eq!(s.launch_profiles[1].name, "night");
+        for at in [
+            "steamIdleMinutes",
+            "ui.news",
+            "launchProfiles[0].name",
+            "launchProfiles[2]",
+        ] {
+            assert!(
+                p.dropped.iter().any(|d| d == at),
+                "{at} named: {:?}",
+                p.dropped
+            );
+        }
+
+        let plain = br#"{"profileName":"Survivor"}"#;
+        let mut bom = vec![0xEF, 0xBB, 0xBF];
+        bom.extend_from_slice(plain);
+        let mut utf16 = vec![0xFF, 0xFE];
+        for u in std::str::from_utf8(plain).unwrap().encode_utf16() {
+            utf16.extend_from_slice(&u.to_le_bytes());
+        }
+        for bytes in [bom, utf16] {
+            let p = read_settings(&bytes).unwrap();
+            assert_eq!(p.settings.profile_name, "Survivor");
+            assert!(p.dropped.is_empty());
+        }
+    }
+
+    /// Keys a newer version wrote survive this one's writes, the page's own additions
+    /// to `settings_get` do not reach the file, and a name holds one profile (row 15, H4,
+    /// F2).
+    #[test]
+    fn unknown_keys_survive_and_profiles_are_one_per_name() {
+        let path = temp_path("extra");
+        std::fs::write(
+            &path,
+            r#"{"futureKey":1,"ui":{"futureUi":"x"},
+                "launchProfiles":[{"name":"Low","futureP":true},{"name":"Low","extraArgs":"-b"}]}"#,
+        )
+        .unwrap();
+        let store = SettingsStore::load(&path);
+        let got = store.get();
+        assert_eq!(got.launch_profiles.len(), 1, "one profile per name");
+        assert_eq!(
+            got.launch_profiles[0].extra_args, "-b",
+            "the last of the name, as Save keeps"
+        );
+        // Settings sends back what `settings_get` handed out, view keys included.
+        let mut sent = serde_json::to_value(&got).unwrap();
+        sent["unreadable"] = json!(false);
+        sent["keptAs"] = json!("x");
+        store
+            .set_launch(serde_json::from_value(sent).unwrap())
+            .unwrap();
+        store.patch_ui(json!({ "theme": "light" })).unwrap();
+        let file: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(file["futureKey"], json!(1));
+        assert_eq!(file["ui"]["futureUi"], json!("x"));
+        assert_eq!(file["ui"]["theme"], json!("light"));
+        assert!(file.get("unreadable").is_none() && file.get("keptAs").is_none());
+        let _ = std::fs::remove_file(&path);
     }
 
     /// A file from before 0.1.78 has no version in it and reads as empty, which the

@@ -32,7 +32,7 @@ One window, no tray icon by default, no background service. Minimising does not 
 | `browser/{model,cache,verify,dzsa}.rs` | server row, SQLite cache, trust rules R2–R5, R11 and R12 (R0, R6 and R8–R10 live in `src/lib/types.ts` and the store), DZSA fallback list | `rusqlite` (bundled, WAL) |
 | `launch/{args,mods,process}.rs` | `-mod=` builder, junction creation, `DayZ_BE.exe` spawn (the exit is awaited in `commands.rs`' `launch_game`) | `std::process`, `junction` |
 | `commands.rs` | Tauri IPC surface (typed, camelCase); events are emitted from `lib.rs` and `commands.rs` | `tauri`, `serde` |
-| `settings.rs` | JSON settings in `%APPDATA%\<app>\settings.json`, written temp + rename | `serde_json` |
+| `settings.rs` | JSON settings in `%APPDATA%\<app>\settings.json`, written temp + rename; read whole, or key by key when a value cannot be taken; keys it does not know are kept (D-304). **Never rename a key or change its type: add a new one**, or an older build drops it and a newer one misreads it | `serde_json` |
 | `hardware.rs` | processor threads, memory and video memory for `-cpuCount`/`-maxMem`/`-maxVRAM` (D-267) | `windows` (DXGI), `windows-sys` |
 | `icon.rs` | the window's icons at the window's DPI, from the exe's own icon group (D-264) | `windows-sys` |
 | `news.rs`, `geoip.rs`, `proc.rs`, `log.rs`, `http.rs`, `error.rs` | Steam news and thumbnails, offline IP→country, priority and elevation, the app's own log, capped HTTP bodies, the error type | `reqwest`, `image`, `windows-sys` |

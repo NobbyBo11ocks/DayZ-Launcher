@@ -151,7 +151,9 @@
     if (seen === version) return;
     const releases = onboarded ? unseenChanges(seen, version) : [];
     if (releases.length > 0) whatsNew = { version, releases };
-    else markSeen(version);
+    // Never lowered: an older version started after a newer one wrote its own number,
+    // and the next update showed the same notes again (row 15, F6).
+    else if (!seen || compareVersions(version, seen) > 0) markSeen(version);
   }
   function markSeen(version: string) {
     uiPrefs.patch({ lastSeenVersion: version });

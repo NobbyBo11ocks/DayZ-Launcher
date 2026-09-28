@@ -41,6 +41,8 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_UI_HiDpi",
     # This PC's threads and memory for the launch's performance arguments (D-267).
     "Win32_System_SystemInformation",
+    # The player name as DayZ's ANSI command line receives it (row 15, H1).
+    "Win32_Globalization",
 ] }
 # The GPU's dedicated memory through DXGI (D-267); tauri already builds this version.
 windows = { version = "0.61.3", features = ["Win32_Graphics_Dxgi"] }

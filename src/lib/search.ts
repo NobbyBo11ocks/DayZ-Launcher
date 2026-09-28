@@ -17,14 +17,15 @@ export function searchBox(delayMs = 180) {
   return {
     set(value: string) {
       clearTimeout(timer);
+      // The search is never saved, so it saves nothing: through `saveFilters` it marked
+      // the filters as the player's own, and a term typed before the settings file had
+      // been read replaced the file's saved filters with the defaults (row 15, F4).
       if (value === "") {
         servers.filters.search = "";
-        servers.saveFilters();
         return;
       }
       timer = setTimeout(() => {
         servers.filters.search = value;
-        servers.saveFilters();
       }, delayMs);
     },
     dispose() {

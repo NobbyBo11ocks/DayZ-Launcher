@@ -12,6 +12,51 @@ use std::path::PathBuf;
 /// The fixed BattlEye launcher prefix; meaning of `0 1 1` is undocumented, kept verbatim (D-010).
 pub const BE_PREFIX: [&str; 5] = ["0", "1", "1", "-exe", "DayZ_x64.exe"];
 
+/// The part of a player name DayZ receives as written. DayZ reads its command line in
+/// the ANSI code page (D-283), where a character outside it arrives as `?` and a
+/// look-alike is converted by best fit: on this PC's code page 1252 "Ab＂ -filePatching
+/// ＂x" reached the game as three arguments, the fullwidth quotes turned into `"` (row
+/// 15, H1, measured). Only characters that convert exactly are kept — Microsoft's advice
+/// for user names (S-99) — and an ASCII quote or a control character never is. A PC
+/// whose ANSI code page is UTF-8 keeps everything.
+pub fn ansi_exact(name: &str) -> String {
+    use windows_sys::Win32::Globalization::{
+        GetACP, WideCharToMultiByte, CP_ACP, WC_NO_BEST_FIT_CHARS,
+    };
+    const CP_UTF8: u32 = 65001;
+    // SAFETY: takes no arguments and only reads the system setting.
+    let utf8 = unsafe { GetACP() } == CP_UTF8;
+    name.chars()
+        .filter(|&c| c != '"' && !c.is_control())
+        .filter(|&c| {
+            if c.is_ascii() || utf8 {
+                return true;
+            }
+            let mut wide = [0u16; 2];
+            let units = c.encode_utf16(&mut wide);
+            let mut out = [0u8; 8];
+            let mut used_default: windows_sys::core::BOOL = 0;
+            // SAFETY: `units` and `out` are live buffers of the lengths passed, the
+            // default character is the system's (null), and `used_default` is a valid
+            // place for the flag. WC_NO_BEST_FIT_CHARS is valid for every ANSI code page
+            // but UTF-8, which is handled above.
+            let written = unsafe {
+                WideCharToMultiByte(
+                    CP_ACP,
+                    WC_NO_BEST_FIT_CHARS,
+                    units.as_ptr(),
+                    units.len() as i32,
+                    out.as_mut_ptr(),
+                    out.len() as i32,
+                    std::ptr::null(),
+                    &mut used_default,
+                )
+            };
+            written > 0 && used_default == 0
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct LaunchSpec {
     /// Absolute junction paths in load order: the server's RULES list reversed by
@@ -53,7 +98,20 @@ pub fn build_args(spec: &LaunchSpec) -> Vec<String> {
         .map(str::trim)
         .filter(|n| !n.is_empty())
     {
-        v.push(format!("-name={name}"));
+        let sent = ansi_exact(name);
+        let sent = sent.trim();
+        if sent != name {
+            crate::log_info!(
+                "launch",
+                "the name keeps {} of its {} characters: the rest cannot reach DayZ in this PC's code page{}",
+                sent.chars().count(),
+                name.chars().count(),
+                if sent.is_empty() { ", so no -name is passed" } else { "" }
+            );
+        }
+        if !sent.is_empty() {
+            v.push(format!("-name={sent}"));
+        }
     }
     if spec.skip_intro {
         v.push("-skipintro".into());
@@ -150,6 +208,32 @@ pub fn display_command_line(exe: &str, args: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ASCII passes whatever the code page, quotes and control characters never do, and
+    /// nothing that leaves can come back as a quote (row 15, H1). Characters outside
+    /// ASCII depend on the PC's code page, so the test only asks that what stays is a
+    /// subset of what went in.
+    #[test]
+    fn a_name_keeps_only_what_dayz_receives_as_written() {
+        assert_eq!(ansi_exact("Survivor 2"), "Survivor 2");
+        assert_eq!(ansi_exact("Ab\"c\u{7}d"), "Abcd");
+        let spoof = ansi_exact("Ab\u{FF02} -filePatching \u{FF02}x");
+        assert!(
+            !spoof.contains('"'),
+            "a fullwidth quote never becomes one: {spoof:?}"
+        );
+        assert!(spoof
+            .chars()
+            .all(|c| "Ab\u{FF02} -filePatching x".contains(c)));
+        let args = build_args(&LaunchSpec {
+            profile_name: Some("\"\u{7}".into()),
+            ..LaunchSpec::default()
+        });
+        assert!(
+            !args.iter().any(|a| a.starts_with("-name=")),
+            "nothing left is no -name at all: {args:?}"
+        );
+    }
 
     #[test]
     fn matches_official_launcher_form() {

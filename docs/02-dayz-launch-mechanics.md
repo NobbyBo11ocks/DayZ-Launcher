@@ -160,4 +160,4 @@ Without Steamworks: `appworkshop_221100.acf` and folder existence tell what is i
 
 Game data: `%LOCALAPPDATA%\DayZ\` (RPT and crash logs), `%USERPROFILE%\Documents\DayZ\` (`<user>.core.xml`, `chars.DayZProfile`, `DayZ.cfg`, `profile.vars.DayZProfile`).
 
-Default `-name`: the Steam persona from the running Steamworks session (`friends().name()`), used when Settings and the chosen launch profile leave the name empty; with no name at all, `-name` is left out (D-052, Q13 closed; `loginusers.vdf` is not read).
+Default `-name`: the Steam persona from the running Steamworks session (`friends().name()`), used when Settings and the chosen launch profile leave the name empty; with no name at all, `-name` is left out (D-052, Q13 closed; `loginusers.vdf` is not read). The persona is asked for at the join, opening a released session, so an account switch is followed (D-304). Whatever the name, only the characters that reach DayZ's ANSI command line exactly are passed: a name outside the code page arrived as question marks, and a look-alike quote could add arguments (D-283, D-304).

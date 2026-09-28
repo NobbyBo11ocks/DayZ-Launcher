@@ -668,7 +668,8 @@
           · launch with
           <select class="pick" bind:value={profile} disabled={busy || phase === "waiting" || phase === "running"} aria-label="Launch with profile">
             <option value="">current settings</option>
-            {#each profiles as p (p.name)}<option value={p.name}>{p.name}</option>{/each}
+            <!-- By position: two profiles of one name threw on a duplicate key (row 15, F2). -->
+            {#each profiles as p, i (i)}<option value={p.name}>{p.name}</option>{/each}
           </select>
         {/if}
       </p>

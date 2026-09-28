@@ -486,6 +486,11 @@ enum Cmd {
         steam_id: u64,
         reply: mpsc::Sender<Option<Avatar>>,
     },
+    /// The signed-in account's name, from a session opened for it if need be (row 15,
+    /// H8).
+    Persona {
+        reply: mpsc::Sender<Option<String>>,
+    },
     Shutdown,
 }
 
@@ -500,6 +505,7 @@ impl Cmd {
             Cmd::Unsubscribe { .. } => "an unsubscribe",
             Cmd::Friends { .. } => "the friends list",
             Cmd::FriendAvatar { .. } => "a friend's avatar",
+            Cmd::Persona { .. } => "the Steam name for a join",
             Cmd::Shutdown => "shutdown",
         }
     }
@@ -699,6 +705,21 @@ impl SteamWorker {
             .map_err(|_| "steamworks thread has stopped".to_string())?;
         rx.recv_timeout(UNSUBSCRIBE_TIMEOUT + Duration::from_secs(5))
             .map_err(|_| "Steam did not answer the unsubscribe request".to_string())?
+    }
+
+    /// The name of the account signed in to Steam now, for a join that sends it as
+    /// `-name`. The status's persona is the one the session was last opened with: after
+    /// Steam closed and came back — an account switch — it stayed until a Workshop
+    /// command re-opened the session, so a vanilla join went in under the previous
+    /// account's name (row 15, H8). This opens the session if it was released; the player
+    /// is about to play. `None` when Steam is not there or does not answer. Blocking.
+    pub fn persona(&self) -> Option<String> {
+        if !self.status().initialized {
+            return None;
+        }
+        let (reply, rx) = mpsc::channel();
+        self.cmd.send(Cmd::Persona { reply }).ok()?;
+        rx.recv_timeout(Duration::from_secs(10)).ok().flatten()
     }
 
     /// The friends list with presence and game server (D-092); Steam answers from
@@ -1184,6 +1205,9 @@ fn reject(cmd: Cmd, events: &UnboundedSender<SteamEvent>, e: String) {
         Cmd::FriendAvatar { reply, .. } => {
             let _ = reply.send(None);
         }
+        Cmd::Persona { reply } => {
+            let _ = reply.send(None);
+        }
         Cmd::Sync { job, .. } => {
             let _ = events.send(SteamEvent::SyncDone(SyncDone {
                 job,
@@ -1433,6 +1457,9 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                         .filter(|rgba| rgba.len() == 32 * 32 * 4)
                         .map(|rgba| Avatar { rgba });
                     let _ = reply.send(avatar);
+                }
+                Cmd::Persona { reply } => {
+                    let _ = reply.send(Some(s.client.friends().name()));
                 }
                 // `refresh()` guards on `status.refreshing`, which the worker only
                 // sets when it dequeues, so two calls inside one tick both pass it. The

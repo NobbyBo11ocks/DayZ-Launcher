@@ -12,6 +12,7 @@
   import { updates } from "./state/updates.svelte";
   import { modUpdates } from "./state/mods.svelte";
   import type { Settings } from "./types";
+  import { beforeClose } from "./state/closing";
 
   type AppInfo = { name: string; version: string; tauri: string; os: string; elevated?: boolean };
   let app = $state<AppInfo | null>(null);
@@ -70,8 +71,11 @@
       .catch((e) => (saveError = String(e)));
   });
 
-  // Launch profiles (D-088): presets of the flat launch options.
-  let pick = $state("");
+  // Launch profiles (D-088): presets of the flat launch options. Picked by position, not
+  // name: a hand-edited file with two profiles of one name threw on a duplicate key and
+  // took this page and every join window down, and a blank name could be neither loaded
+  // nor deleted (row 15, F2).
+  let pick = $state(-1);
   let newName = $state("");
   function saveProfile() {
     if (!launch) return;
@@ -80,11 +84,11 @@
     const p = { name, profileName: launch.profileName, extraArgs: launch.extraArgs, skipIntro: launch.skipIntro, noSplash: launch.noSplash, noPause: launch.noPause };
     launch.launchProfiles = [...launch.launchProfiles.filter((x) => x.name !== name), p];
     newName = "";
-    pick = name;
+    pick = launch.launchProfiles.length - 1;
     scheduleSave();
   }
   function loadProfile() {
-    const p = launch?.launchProfiles.find((x) => x.name === pick);
+    const p = launch?.launchProfiles[pick];
     if (!launch || !p) return;
     launch.profileName = p.profileName;
     launch.extraArgs = p.extraArgs;
@@ -94,24 +98,43 @@
     scheduleSave();
   }
   function deleteProfile() {
-    if (!launch || !pick) return;
-    launch.launchProfiles = launch.launchProfiles.filter((x) => x.name !== pick);
-    pick = "";
+    if (!launch || pick < 0) return;
+    launch.launchProfiles = launch.launchProfiles.filter((_, i) => i !== pick);
+    pick = -1;
     scheduleSave();
   }
 
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
+  /** A save failed and has not been made good since. It was tried once: a file held by a
+   *  scanner for a second lost the edit, which left with the page without a word and
+   *  was not what the next join used (row 15, F9). Now it is tried again every few
+   *  seconds while the page is open, and once more when it closes. */
+  let unsaved = false;
+  let saveRetries = 0;
+  let closed = false;
+  const SAVE_RETRY_MS = 3_000;
+  const MAX_SAVE_RETRIES = 5;
   async function saveNow() {
     saveTimer = undefined;
     if (!launch) return;
     try {
       await invoke("settings_set", { settings: launch });
+      unsaved = false;
+      saveRetries = 0;
       // A failure from an earlier save stayed on screen beside "Saved" (D-240).
       saveError = null;
       saved = true;
       setTimeout(() => (saved = false), 1200);
     } catch (e) {
       saveError = String(e);
+      unsaved = true;
+      // Not after the page has gone: a copy retried then could land over a Recording
+      // switch changed on the Logs page since.
+      if (!closed && saveRetries < MAX_SAVE_RETRIES) {
+        saveRetries++;
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => void saveNow(), SAVE_RETRY_MS);
+      }
     }
   }
   function scheduleSave() {
@@ -120,9 +143,18 @@
   }
   // A change still waiting when the page closes is saved at once. The timer outlived the
   // page, and Logs, opened inside those 300 ms, read the file before the save and later
-  // wrote its older copy back over the edit (D-281).
+  // wrote its older copy back over the edit (D-281). The same for one that failed.
+  // The close button waits for this too (row 15, F11).
+  $effect(() =>
+    beforeClose(async () => {
+      if (saveTimer === undefined && !unsaved) return;
+      clearTimeout(saveTimer);
+      await saveNow();
+    }),
+  );
   $effect(() => () => {
-    if (saveTimer !== undefined) {
+    closed = true;
+    if (saveTimer !== undefined || unsaved) {
       clearTimeout(saveTimer);
       void saveNow();
     }
@@ -308,11 +340,11 @@
               <span class="label">Saved</span>
               <span class="inline wrap">
                 <select class="text" bind:value={pick} aria-label="Saved launch profiles">
-                  <option value="">Saved profiles…</option>
-                  {#each launch.launchProfiles as p (p.name)}<option value={p.name}>{p.name}</option>{/each}
+                  <option value={-1}>Saved profiles…</option>
+                  {#each launch.launchProfiles as p, i (i)}<option value={i}>{p.name}</option>{/each}
                 </select>
-                <button class="chip" onclick={loadProfile} disabled={!pick} title="Copy this profile into the launch options above">Load</button>
-                <button class="chip" onclick={deleteProfile} disabled={!pick}>Delete</button>
+                <button class="chip" onclick={loadProfile} disabled={pick < 0} title="Copy this profile into the launch options above">Load</button>
+                <button class="chip" onclick={deleteProfile} disabled={pick < 0}>Delete</button>
               </span>
             </div>
             <div class="row">
