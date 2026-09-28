@@ -71,21 +71,59 @@
       .catch((e) => (saveError = String(e)));
   });
 
+  // A file that could not be read left this page with the defaults, and a save of them
+  // over the file, once it read again, replaced the player's launch options and profiles
+  // (D-239). Nothing is saved while that lasts; the page asks every few seconds and shows
+  // the file as soon as it can be read (row 15, F9, approved).
+  const UNREADABLE = "Your settings file could not be read, so these are the defaults. Changes cannot be saved until it can be read.";
+  const SAVE_FAILED = "Could not save your settings. They are tried again in a few seconds; until then DayZ starts with the ones saved before.";
+  const REREAD_MS = 5_000;
+  $effect(() => {
+    if (!launch?.unreadable) return;
+    const t = setInterval(() => {
+      invoke<Settings>("settings_get")
+        .then((s) => {
+          if (!s.unreadable) {
+            launch = s;
+            saveError = null;
+          }
+        })
+        .catch(() => {});
+    }, REREAD_MS);
+    return () => clearInterval(t);
+  });
+
   // Launch profiles (D-088): presets of the flat launch options. Picked by position, not
   // name: a hand-edited file with two profiles of one name threw on a duplicate key and
   // took this page and every join window down, and a blank name could be neither loaded
   // nor deleted (row 15, F2).
   let pick = $state(-1);
   let newName = $state("");
+  /** The saved profile the typed name already names, without regard to case: Save then
+   *  replaces it and says so. It replaced a profile of the same name without a word, and
+   *  "night" and "Night" lived side by side (row 15, F10, approved). */
+  const replacing = $derived(launch?.launchProfiles.find((x) => x.name.toLowerCase() === newName.trim().toLowerCase()) ?? null);
   function saveProfile() {
     if (!launch) return;
     const name = newName.trim();
     if (!name) return;
     const p = { name, profileName: launch.profileName, extraArgs: launch.extraArgs, skipIntro: launch.skipIntro, noSplash: launch.noSplash, noPause: launch.noPause };
-    launch.launchProfiles = [...launch.launchProfiles.filter((x) => x.name !== name), p];
+    launch.launchProfiles = [...launch.launchProfiles.filter((x) => x.name.toLowerCase() !== name.toLowerCase()), p];
     newName = "";
     pick = launch.launchProfiles.length - 1;
     scheduleSave();
+  }
+  /** Delete asks first, in place of the two buttons (row 15, F10, approved). */
+  let confirmingDelete = $state(false);
+  let pickEl = $state<HTMLSelectElement | null>(null);
+  let noEl = $state<HTMLButtonElement | null>(null);
+  $effect(() => {
+    if (confirmingDelete) noEl?.focus();
+  });
+  function endConfirm(del: boolean) {
+    confirmingDelete = false;
+    if (del) deleteProfile();
+    void tick().then(() => pickEl?.focus());
   }
   function loadProfile() {
     const p = launch?.launchProfiles[pick];
@@ -116,7 +154,7 @@
   const MAX_SAVE_RETRIES = 5;
   async function saveNow() {
     saveTimer = undefined;
-    if (!launch) return;
+    if (!launch || launch.unreadable) return;
     try {
       await invoke("settings_set", { settings: launch });
       unsaved = false;
@@ -126,7 +164,20 @@
       saved = true;
       setTimeout(() => (saved = false), 1200);
     } catch (e) {
-      saveError = String(e);
+      // The host refuses once when the file has just been read after all: this copy is
+      // older than it, and a retry would write it over the file (D-239). The file is
+      // what the page shows instead.
+      if (/has just been read/.test(String(e))) {
+        unsaved = false;
+        saveError = null;
+        invoke<Settings>("settings_get")
+          .then((s) => (launch = s))
+          .catch(() => {});
+        return;
+      }
+      // The reason goes to the log with the failed command (D-158); the page says what
+      // happens next (row 15, F9, approved).
+      saveError = SAVE_FAILED;
       unsaved = true;
       // Not after the page has gone: a copy retried then could land over a Recording
       // switch changed on the Logs page since.
@@ -204,7 +255,7 @@
     </div>
     <div class="state" role="status" aria-live="polite">
       {#if saved}<span class="ok">Saved</span>{/if}
-      {#if saveError}<span class="error">{saveError}</span>{/if}
+      {#if launch?.unreadable}<span class="error">{UNREADABLE}</span>{:else if saveError}<span class="error">{saveError}</span>{/if}
     </div>
   </header>
 
@@ -339,19 +390,29 @@
             <div class="row">
               <span class="label">Saved</span>
               <span class="inline wrap">
-                <select class="text" bind:value={pick} aria-label="Saved launch profiles">
+                <select class="text" bind:value={pick} bind:this={pickEl} onchange={() => (confirmingDelete = false)} aria-label="Saved launch profiles">
                   <option value={-1}>Saved profiles…</option>
                   {#each launch.launchProfiles as p, i (i)}<option value={i}>{p.name}</option>{/each}
                 </select>
-                <button class="chip" onclick={loadProfile} disabled={pick < 0} title="Copy this profile into the launch options above">Load</button>
-                <button class="chip" onclick={deleteProfile} disabled={pick < 0}>Delete</button>
+                {#if confirmingDelete && pick >= 0}
+                  <!-- Escape answers No from either button (a group, so the keys are its own). -->
+                  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+                  <span class="inline" role="group" aria-label="Confirm delete" onkeydown={(e) => e.key === "Escape" && (e.stopPropagation(), endConfirm(false))}>
+                    Delete “{launch.launchProfiles[pick]?.name ?? ""}”?
+                    <button class="chip" onclick={() => endConfirm(true)}>Yes</button>
+                    <button class="chip" bind:this={noEl} onclick={() => endConfirm(false)}>No</button>
+                  </span>
+                {:else}
+                  <button class="chip" onclick={loadProfile} disabled={pick < 0} title="Copy this profile into the launch options above">Load</button>
+                  <button class="chip" onclick={() => (confirmingDelete = true)} disabled={pick < 0}>Delete</button>
+                {/if}
               </span>
             </div>
             <div class="row">
               <span class="label">New</span>
               <span class="inline wrap">
                 <input class="text" type="text" placeholder="Profile name" bind:value={newName} aria-label="New profile name" />
-                <button class="chip" onclick={saveProfile} disabled={!newName.trim()} title="Save the launch options above under this name">Save as profile</button>
+                <button class="chip" onclick={saveProfile} disabled={!newName.trim()} title="Save the launch options above under this name">{replacing ? `Replace “${replacing.name}”` : "Save as profile"}</button>
               </span>
             </div>
           {:else}

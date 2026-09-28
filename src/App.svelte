@@ -90,9 +90,13 @@
       // A settings file the host could not read, or had to set aside, is said once: the
       // defaults stood in for it with nothing on screen (row 14, F8/H4, approved).
       const h = uiPrefs.health;
-      if (h.unreadable || h.reset) {
-        const kept = h.reset && h.keptAs ? ` The damaged file was kept as ${h.keptAs}.` : "";
-        notices.push("Settings", `The settings file could not be read, so the defaults are in use.${kept}`);
+      // After a reset it says what came through: the page keeps its own theme, filters and
+      // News choice and writes them into the new file (row 15, F1, approved).
+      if (h.reset) {
+        const kept = h.keptAs ? ` The damaged file was kept as ${h.keptAs}.` : "";
+        notices.push("Settings", `The settings file could not be read, so your launch options and profiles are back to their defaults; your theme, filters and News choice were kept.${kept}`);
+      } else if (h.unreadable) {
+        notices.push("Settings", "The settings file could not be read, so the defaults are in use.");
       }
       // Only a settings file that was actually read and says "not onboarded" opens
       // the overlay; an unreadable backend must not look like a first run (D-112).

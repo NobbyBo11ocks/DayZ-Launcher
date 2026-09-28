@@ -10,6 +10,16 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.82",
+    notes: [
+      { kind: "added", text: "The join window says when your name has letters DayZ cannot show." },
+      { kind: "changed", text: "Saving a profile over one with the same name now says Replace." },
+      { kind: "changed", text: "Deleting a launch profile asks first." },
+      { kind: "changed", text: "Settings says clearly when your changes could not be saved." },
+      { kind: "fixed", text: "Settings no longer saves defaults over a file it could not read." },
+    ],
+  },
+  {
     version: "0.1.81",
     notes: [
       { kind: "fixed", text: "Joining after you switch Steam accounts uses the right name." },

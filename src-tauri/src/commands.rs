@@ -208,6 +208,15 @@ pub fn steam_status(state: State<'_, AppState>) -> SteamStatus {
     state.steam.status()
 }
 
+/// The part of a name DayZ receives as written (`launch::args::ansi_exact`), for the join
+/// dialog to say when characters are lost on the way (row 15, H1, approved).
+#[tauri::command]
+pub fn name_as_sent(name: String) -> String {
+    crate::launch::args::ansi_exact(name.trim())
+        .trim()
+        .to_string()
+}
+
 /// Off the main thread like its two siblings: it waited there on the lock `persist`
 /// holds through its rename retries, and since D-302 may read and copy a file that
 /// could not be read at start (row 15, H5).

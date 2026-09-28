@@ -888,6 +888,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::rows_subscribe,
             commands::cache_status,
+            commands::name_as_sent,
             commands::app_info,
             commands::diagnostics,
             commands::local_game_version,

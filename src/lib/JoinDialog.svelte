@@ -83,6 +83,30 @@
     const picked = profile ? profiles.find((p) => p.name === profile) : undefined;
     return picked ? picked.profileName.trim() : (plan?.profileName ?? "");
   });
+  // DayZ reads the name through this PC's code page, and only the characters it takes as
+  // written are sent (D-304); what is lost is said here (row 15, H1, approved).
+  let sentName = $state<string | null>(null);
+  $effect(() => {
+    const name = shownProfileName.trim();
+    sentName = null;
+    if (!name) return;
+    let live = true;
+    invokeQuiet<string>("name_as_sent", { name })
+      .then((s) => {
+        if (live) sentName = s;
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  });
+  const nameNote = $derived.by(() => {
+    const name = shownProfileName.trim();
+    if (!name || sentName === null || sentName === name) return "";
+    return sentName
+      ? `Some characters of “${name}” cannot reach DayZ on this PC, so you join as “${sentName}”.`
+      : `“${name}” has no characters DayZ can take on this PC, so no name is passed to the game. Set a profile name in Settings to choose one.`;
+  });
   $effect(() => {
     invoke<Settings>("settings_get")
       .then((s) => (profiles = s.launchProfiles ?? []))
@@ -673,6 +697,7 @@
           </select>
         {/if}
       </p>
+      {#if nameNote}<p class="small warn">{nameNote}</p>{/if}
 
       {#if phase === "syncing" && syncInfo}
         <!-- A progress bar a screen reader can ask about, rather than a hidden line: the

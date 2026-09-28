@@ -82,6 +82,9 @@ A column in the left rail, under the sections, while the Servers page is open (D
 | Steam signed out | the Servers header: "Steam is running but nobody is signed in; the launcher connects once you sign in."; Settings shows Steam's own reason (D-303) |
 | Cache in memory, damaged or not saving | the start-up box titled "…is running without its cache"; Favourites "Your favourites could not be read this session."; a notice once where a damaged cache went; the Servers header while writes fail (D-303) |
 | One-off notices | settings file unreadable, saved data moved, a join not added to Recent: cards in the toast corner with a dismiss button, beside the update posts (D-303) |
+| A name DayZ cannot take whole | a line under the join dialog's profile name: which characters are lost and the name sent, or that none is (D-305) |
+| Settings not saved | the Settings header: a failed save is tried again and says so; while the file cannot be read, nothing is saved and the header says why (D-305) |
+| Launch profiles | "Replace “{name}”" when the typed name exists; Delete asks inline "Delete “{name}”? Yes / No" (D-305) |
 
 The banner with "Open Steam", the "Locate DayZ_x64.exe" card, the bar inside the Join button and the grey retry row specified here were never built.
 
