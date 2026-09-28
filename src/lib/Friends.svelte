@@ -8,6 +8,7 @@
   import { untrack } from "svelte";
   import { SvelteMap } from "svelte/reactivity";
   import { avatarDataUrl } from "./avatar";
+  import { mapLabel } from "./maps";
   import { servers } from "./state/servers.svelte";
   import { trustedPlayers, type FriendInfo, type FriendState, type ServerRow } from "./types";
 
@@ -200,7 +201,7 @@
   </div>
   {#if !steamOk}
     <div class="empty">
-      <p>Steam is not running.</p>
+      <p>{servers.steam?.signedOut ? "Steam is running but nobody is signed in; the launcher connects once you sign in." : "Steam is not running."}</p>
       <p class="muted">The friends list comes from Steam; it fills in by itself once Steam is up.</p>
     </div>
   {:else if visible.length === 0}
@@ -232,7 +233,7 @@
               <td class={f.inDayz ? "accent" : "muted"}>{f.inDayz ? "In DayZ" : LABEL[f.state]}</td>
               <td>
                 {#if row}
-                  {row.name} <span class="muted">· {row.map} · {trustedPlayers(row)}/{row.maxPlayers}</span>
+                  {row.name} <span class="muted">· {mapLabel(row.map)} · {trustedPlayers(row)}/{row.maxPlayers}</span>
                 {:else if f.server}
                   <span class="mono">{f.server.ip}:{f.server.gamePort}</span>
                 {:else if f.inDayz}

@@ -130,7 +130,7 @@
   const announcement = $derived.by(() => {
     if (servers.error) return servers.error;
     // The header's notice, said once when it appears (D-291).
-    if (servers.steam && !servers.steam.initialized) return "Steam is not running; the launcher connects as soon as it starts.";
+    if (servers.steam && !servers.steam.initialized) return servers.steam.signedOut ? "Steam is running but nobody is signed in; the launcher connects once you sign in." : "Steam is not running; the launcher connects as soon as it starts.";
     const v = servers.verifySummary;
     if (v?.skipped) return "Verification deferred; a pass is already running.";
     if (v) return `${fmt.format(v.verified)} verified, ${fmt.format(v.inflated + v.unverifiable + v.synthetic)} fake, ${v.offline} offline.`;

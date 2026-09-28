@@ -67,10 +67,10 @@
       <input class="search" type="search" placeholder="Search…" value={typed} bind:this={searchEl} oninput={(e) => (typed = e.currentTarget.value, box.set(typed))} aria-label="Search LAN servers" />
       <!-- A scan's result is said when it lands (D-291). -->
       <span class="muted" role="status">
-        {servers.lanRows.length}{#if servers.lanRows.length !== servers.lanTotal} of {servers.lanTotal}{/if} server{servers.lanTotal === 1 ? "" : "s"} on your network
-        {#if lastScan}· scan answered {lastScan.responded} in {(lastScan.elapsedMs / 1000).toFixed(1)} s{#if scannedAt} at {scannedAt}{/if}{/if}
+        {servers.lanRows.length}{#if servers.lanRows.length !== servers.lanTotal}{" "}of {servers.lanTotal}{/if} server{servers.lanTotal === 1 ? "" : "s"} on your network
+        {#if lastScan}· scan answered {lastScan.responded} in {(lastScan.elapsedMs / 1000).toFixed(1)} s{#if scannedAt}{" "}at {scannedAt}{/if}{/if}
       </span>
-      {#if servers.steam && !servers.steam.initialized}<span class="warn">Steam is not running; LAN discovery needs it and works once it is up.</span>{/if}
+      {#if servers.steam && !servers.steam.initialized}<span class="warn">{servers.steam.signedOut ? "Steam is running but nobody is signed in; the launcher connects once you sign in." : "Steam is not running; LAN discovery needs it and works once it is up."}</span>{/if}
       {#if servers.error}<span class="error" role="alert">{servers.error}</span>{/if}
     </div>
   </div>

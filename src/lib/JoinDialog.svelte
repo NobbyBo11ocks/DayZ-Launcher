@@ -619,7 +619,7 @@
       <span class="muted">
         {#if plan}{plan.ip}:{plan.gamePort} · v{plan.serverVersion}{/if}
         {#if slots}
-          · <span class:warn={full}>{slots.players}/{slots.maxPlayers}{#if queue} · {queue} in queue{/if}</span>
+          · <span class:warn={full}>{slots.players}/{slots.maxPlayers}{#if queue}{" "}· {queue} in queue{/if}</span>
         {/if}
       </span>
     </header>
@@ -641,7 +641,7 @@
         <section class="mods">
           <h3>
             Mods ({plan.mods.length})
-            {#if toSync.length}<span class="warn"> · {toSync.length} to download{#if plan.downloadBytes} ({fmtBytes(plan.downloadBytes)}){/if}</span>{:else}<span class="ok"> · all installed</span>{/if}
+            {#if toSync.length}<span class="warn"> · {toSync.length} to download{#if plan.downloadBytes}{" "}({fmtBytes(plan.downloadBytes)}){/if}</span>{:else}<span class="ok"> · all installed</span>{/if}
           </h3>
           <!-- Focusable, so a list longer than its box scrolls from the keyboard (D-291). -->
           <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -712,8 +712,8 @@
             aria-valuemax={syncInfo.total}
             aria-valuenow={syncInfo.installed}
             aria-valuetext="{syncInfo.installed} of {syncInfo.total} installed{totalBytes > 0 ? `, ${fmtBytes(downloadedBytes)} of ${fmtBytes(totalBytes)}` : ''}{etaText ? `, about ${etaText} left` : ''}"
-            >{syncInfo.installed}/{syncInfo.total} installed{#if totalBytes > 0} · {fmtBytes(downloadedBytes)} of {fmtBytes(totalBytes)}{/if}{#if rate >
-              0} · {fmtBytes(rate)}/s{#if etaText} · about {etaText} left{/if}{/if}</span
+            >{syncInfo.installed}/{syncInfo.total} installed{#if totalBytes > 0}{" "}· {fmtBytes(downloadedBytes)} of {fmtBytes(totalBytes)}{/if}{#if rate >
+              0}{" "}· {fmtBytes(rate)}/s{#if etaText}{" "}· about {etaText} left{/if}{/if}</span
           >
         </p>
         {#if stalled}<p class="status warn" role="status">Steam has not moved the download for a minute.</p>{/if}
@@ -725,7 +725,7 @@
           {:else}
             Waiting for a free slot…
             <span aria-hidden="true"
-              >{#if slots}{slots.players}/{slots.maxPlayers}{#if queue} · {queue} in queue{/if} · {/if}{checks} check{checks === 1 ? "" : "s"} · {mmss(waitedSecs)}</span
+              >{#if slots}{slots.players}/{slots.maxPlayers}{#if queue}{" "}· {queue} in queue{/if}{" "}·{" "}{/if}{checks} check{checks === 1 ? "" : "s"} · {mmss(waitedSecs)}</span
             >
           {/if}
         </p>

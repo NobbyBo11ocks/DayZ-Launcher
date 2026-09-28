@@ -245,8 +245,8 @@
         <button class="rail-item" class:active={active === s.id} aria-current={active === s.id ? "page" : undefined} onclick={() => (active = s.id)} title={s.label}>
           <RailIcon name={s.id} />
           <span class="text">{s.label}</span>
-          {#if s.id === "news" && news.unread > 0}<span class="badge" aria-label="{news.unread} new posts">{news.unread > 99 ? "99+" : news.unread}</span>{/if}
-          {#if s.id === "mods" && modUpdates.count > 0}<span class="badge" aria-label="{modUpdates.count} mods have an update waiting" title="{modUpdates.count} mod{modUpdates.count === 1 ? "" : "s"} can be updated">{modUpdates.count > 99 ? "99+" : modUpdates.count}</span>{/if}
+          {#if s.id === "news" && news.unread > 0}<span class="badge" aria-label="{news.unread} new post{news.unread === 1 ? "" : "s"}">{news.unread > 99 ? "99+" : news.unread}</span>{/if}
+          {#if s.id === "mods" && modUpdates.count > 0}<span class="badge" aria-label="{modUpdates.count} mod{modUpdates.count === 1 ? " has" : "s have"} an update waiting" title="{modUpdates.count} mod{modUpdates.count === 1 ? "" : "s"} can be updated">{modUpdates.count > 99 ? "99+" : modUpdates.count}</span>{/if}
         </button>
       {/each}
     </nav>

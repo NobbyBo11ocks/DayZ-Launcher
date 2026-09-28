@@ -398,7 +398,7 @@
             <div role="gridcell" class="cell c-map" title={r.map}>{mapLabel(r.map)}</div>
             <!-- Mod count from the last scan (D-146); a dash means this server has not
                  been scanned yet, which is not the same as "no mods". -->
-            <div role="gridcell" class="cell c-num mods" class:muted={mods === undefined} title={mods === undefined ? "Mod list not scanned yet" : mods === 0 ? "Vanilla" : `${mods} mods`}>
+            <div role="gridcell" class="cell c-num mods" class:muted={mods === undefined} title={mods === undefined ? "Mod list not scanned yet" : mods === 0 ? "Vanilla" : `${mods} mod${mods === 1 ? "" : "s"}`}>
               {mods ?? "–"}
             </div>
             <div

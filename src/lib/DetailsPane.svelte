@@ -328,7 +328,7 @@
       <div class="meta">
         {#if row.country}<span class="chip"><Flag code={row.country} decorative /> {countryName(row.country)}</span>{/if}
         <span class="chip" title={row.map}>{mapLabel(row.map)}</span>
-        <span class="chip" class:bad={!versionOk} title={versionOk ? "Server version" : `Server version differs from your DayZ_x64.exe (${localVersion})`}>v{row.version}{#if !versionOk} ≠ mine{/if}</span>
+        <span class="chip" class:bad={!versionOk} title={versionOk ? "Server version" : `Server version differs from your DayZ_x64.exe (${localVersion})`}>v{row.version}{#if !versionOk}{" "}≠ mine{/if}</span>
         {#if row.password}<span class="chip">🔒 password</span>{/if}
       </div>
       <div class="addr">
@@ -479,7 +479,7 @@
         <h3>Connected <span class="count">{sessions.count}</span></h3>
         <p class="sum">
           Median session <strong>{fmtDur(sessions.median)}</strong> · longest <strong>{fmtDur(sessions.longest)}</strong>
-          {#if sessions.recent} · <strong>{sessions.recent}</strong> joined in the last 10 min{/if}
+          {#if sessions.recent}{" "}· <strong>{sessions.recent}</strong> joined in the last 10 min{/if}
         </p>
         <ul class="hist" aria-label="Session lengths">
           {#each sessions.buckets as b (b.label)}

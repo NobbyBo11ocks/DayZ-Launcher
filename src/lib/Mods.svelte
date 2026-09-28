@@ -286,7 +286,7 @@
   <header class="bar">
     <h1 tabindex="-1" bind:this={headingEl}>Mods</h1>
     {#if data?.workshop}
-      <span class="muted">{all.length} installed · {fmtBytes(totalSize)}{#if dangling} · {dangling} stale junction{dangling === 1 ? "" : "s"}{/if}</span>
+      <span class="muted">{all.length} installed · {fmtBytes(totalSize)}{#if dangling}{" "}· {dangling} stale junction{dangling === 1 ? "" : "s"}{/if}</span>
     {/if}
     <span class="spacer"></span>
     {#if dangling}
