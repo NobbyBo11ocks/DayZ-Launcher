@@ -634,11 +634,20 @@ impl Cache {
     /// Every cached row, unordered: the browser puts them in a map and sorts by the
     /// column the user picked, so sorting here only cost a temp b-tree (D-164).
     pub fn load_all(&self) -> rusqlite::Result<Vec<ServerRow>> {
+        // Sized up front: collected blind, the vector doubled from ~47 to ~94 MB past
+        // 131 072 rows, the start-up spike with it (row 19). The count costs under a
+        // millisecond.
+        let n: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM servers", [], |r| r.get(0))?;
+        let mut out = Vec::with_capacity(usize::try_from(n).unwrap_or(0));
         let mut stmt = self
             .conn
             .prepare_cached(&format!("SELECT {SELECT_COLUMNS} FROM servers"))?;
-        let rows = stmt.query_map([], Self::row_from)?;
-        rows.collect()
+        for row in stmt.query_map([], Self::row_from)? {
+            out.push(row?);
+        }
+        Ok(out)
     }
 
     /// Addresses a mod scan should query. Building a full `ServerRow` for all ~19 000

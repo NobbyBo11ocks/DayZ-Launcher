@@ -972,9 +972,14 @@ class ServersStore {
     void this.#rowsVersion;
     let n = 0;
     for (const r of this.rows.values()) {
-      if (!r.tags.modded || this.modsByServer.has(r.id) || this.modsUnreadable.has(r.id)) continue;
+      if (!r.tags.modded) continue;
       if (r.steamEmpty === true && r.players > 0) continue; // rule R0
-      if (r.verifiedPlayers != null ? r.verifiedPlayers > 0 : r.steamEmpty === false && r.players > 0) n++;
+      if (!(r.verifiedPlayers != null ? r.verifiedPlayers > 0 : r.steamEmpty === false && r.players > 0)) continue;
+      // The reactive maps last, for the rows that can count: read first, they were asked
+      // for every modded farm row and were most of a flush with a mod picked, 31 of 18 ms
+      // at 105 000 rows (row 19).
+      if (this.modsByServer.has(r.id) || this.modsUnreadable.has(r.id)) continue;
+      n++;
     }
     return n;
   });

@@ -496,8 +496,8 @@ pub fn run() {
             // Q22 and Q25 are both "the user's own rows are gone and nothing says when".
             // One line per start, before anything can write, is the before-and-after the
             // investigation has never had — and it costs four counting queries, each under
-            // a tenth of a millisecond on a 71 000-server cache with 78 000 population
-            // samples (D-193, D-287).
+            // a millisecond (0.7–0.9 ms measured at 105 000 servers and 135 000 population
+            // samples, row 19; D-193, D-287).
             if let Ok(c) = cache.lock() {
                 match c.row_counts() {
                     Ok(n) => log_info!(
