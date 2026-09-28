@@ -120,7 +120,7 @@
         friendsOn={servers.friendsOn}
         modsByServer={servers.modsByServer}
         empty={servers.filters.search.trim()
-          ? `No favourite matches "${servers.filters.search.trim()}". The search box is shared with the Servers page.`
+          ? `No favourite matches “${servers.filters.search.trim()}”. The search box is shared with the Servers page.`
           : "These favourites are not in the list yet. They appear after the next refresh, or once Steam answers."}
         label="Favourites"
         onSearch={() => {

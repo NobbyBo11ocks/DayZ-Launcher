@@ -349,6 +349,17 @@ const WINDOW_STATE: tauri_plugin_window_state::StateFlags =
         .union(tauri_plugin_window_state::StateFlags::POSITION)
         .union(tauri_plugin_window_state::StateFlags::MAXIMIZED);
 
+/// The first start's window in logical pixels: 1440×900, or 90 % of the work area where
+/// that is smaller, never below the minimum. The runtime centres it in the same work
+/// area (tauri-runtime-wry 2.11.4 `calculate_window_center_position`).
+fn first_size(work: tauri::PhysicalSize<u32>, scale: f64, min: (f64, f64)) -> (f64, f64) {
+    let fit = |px: u32, cap: f64, min: f64| (f64::from(px) / scale * 0.9).floor().min(cap).max(min);
+    (
+        fit(work.width, 1440.0, min.0),
+        fit(work.height, 900.0, min.1),
+    )
+}
+
 /// The updater leaves every setup it downloads in `%TEMP%\<product>-<version>-updater-*\`:
 /// it keeps the folder and exits before the file's own clean-up runs (tauri-plugin-updater
 /// 2.12.0 `make_temp_dir`, `write_to_temp`), 7.5 MB per update. They go at the next start;
@@ -869,7 +880,7 @@ pub fn run() {
             // the windows of tauri.conf.json before this hook (app.rs 2525 vs 2531,
             // S-73), and on a slow start the page's first IPC call raced ahead of
             // `manage` and read default settings (D-112). `create: false` in the config.
-            let main = app
+            let mut main = app
                 .config()
                 .app
                 .windows
@@ -877,6 +888,15 @@ pub fn run() {
                 .find(|w| w.label == "main")
                 .cloned()
                 .ok_or("tauri.conf.json has no window labelled main")?;
+            // The first start's size fits the screen: at the config's 1280×800 the
+            // details pane floated over five columns, and on a 1366×768 screen the
+            // window was taller than the work area, so centring put the title bar
+            // above it (row 16). A saved size and place still win: the window-state
+            // plugin restores them once the window is ready (S-115).
+            if let Ok(Some(m)) = app.primary_monitor() {
+                let min = (main.min_width.unwrap_or(960.0), main.min_height.unwrap_or(600.0));
+                (main.width, main.height) = first_size(m.work_area().size, m.scale_factor(), min);
+            }
             let window = tauri::WebviewWindowBuilder::from_config(app.handle(), &main)?.build()?;
             // The taskbar's icon from the exe's own icon group, at the right size: tao
             // only sets the small one, which the taskbar scaled up soft (Q31, D-264).
@@ -893,6 +913,8 @@ pub fn run() {
             commands::diagnostics,
             commands::local_game_version,
             commands::steam_status,
+            commands::steam_start,
+            commands::perf_args,
             commands::settings_get,
             commands::settings_set,
             commands::ui_prefs_set,
@@ -955,7 +977,20 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{move_aside, sweep_updater_leftovers, with_suffix};
+    use super::{first_size, move_aside, sweep_updater_leftovers, with_suffix};
+
+    /// Row 16: the first window fits the work area it is centred in.
+    #[test]
+    fn the_first_window_fits_the_screen() {
+        let size = tauri::PhysicalSize::new;
+        let min = (960.0, 600.0);
+        assert_eq!(first_size(size(1920, 1032), 1.0, min), (1440.0, 900.0));
+        // 1366×768 with the taskbar: 800 px was taller than the 728 left.
+        assert_eq!(first_size(size(1366, 728), 1.0, min), (1229.0, 655.0));
+        // 1920×1080 at 150 %: 1280×688 logical.
+        assert_eq!(first_size(size(1920, 1032), 1.5, min), (1152.0, 619.0));
+        assert_eq!(first_size(size(1024, 600), 1.0, min), (960.0, 600.0));
+    }
 
     /// D-279: the updater's own leftovers go; anything else in the temp folder stays.
     #[test]

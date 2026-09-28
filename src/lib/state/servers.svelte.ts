@@ -76,6 +76,10 @@ const WATCHDOG_MS = 30_000;
 type Hay = { n: string; d: string | null; m: string; text: string; style: number; map: string };
 
 /** One message of the host's row stream (`send_rows` in commands.rs, D-297). */
+/** How long "Start Steam" waits before it can be pressed again: Steam's own start, then
+ *  the worker's next 10 s try (D-125). */
+const STEAM_START_MS = 30_000;
+
 type RowsMsg =
   | { kind: "batch"; data: ServerRow[] }
   | { kind: "dzsa-batch"; data: ServerRow[] }
@@ -518,6 +522,26 @@ class ServersStore {
    *  that was waiting, downloading or holding a typed password (D-295). */
   requestJoin(id: string) {
     if (this.joiningId === null) this.joiningId = id;
+  }
+
+  /** Set from a "Start Steam" press until Steam has had time to come up (row 16). */
+  steamStarting = $state(false);
+  #steamStartTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Starts Steam; the reason it could not, or null. The session opens on the worker's
+   *  next try, every 10 s (D-125), and the notice that offered this goes with it. */
+  async startSteam(): Promise<string | null> {
+    if (this.steamStarting) return null;
+    this.steamStarting = true;
+    clearTimeout(this.#steamStartTimer);
+    try {
+      await invoke("steam_start");
+    } catch (e) {
+      this.steamStarting = false;
+      return String(e);
+    }
+    this.succeeded("steam-start");
+    this.#steamStartTimer = setTimeout(() => (this.steamStarting = false), STEAM_START_MS);
+    return null;
   }
   /** Mod ids per scanned server and the mod catalogue with server counts (D-080). */
   modsByServer = new SvelteMap<string, number[]>();
@@ -1247,6 +1271,10 @@ class ServersStore {
   #dzsaTried = false;
   /** Ids delivered by the refresh in flight, or null when none is (D-233). */
   #seenThisRefresh: Set<string> | null = null;
+  /** Every server Steam has listed so far in the refresh this page started, empty ones
+   *  too, for the button's "Refreshing… N listed" (row 16). */
+  #listedThisRefresh: Set<string> | null = null;
+  refreshListed = $state(0);
   dzsaLoading = $state(false);
 
   private maybeAutoRefresh() {
@@ -1332,6 +1360,8 @@ class ServersStore {
       // this time lose their vouch when the refresh completes (D-233).
       if (started) this.#seenThisRefresh = new Set();
       if (started) {
+        this.#listedThisRefresh = new Set();
+        this.refreshListed = 0;
         this.done = null;
         this.verifySummary = null;
         this.verifying = true;
@@ -1422,6 +1452,9 @@ class ServersStore {
     // waiting, not as a result: keeping it would replace a real summary with
     // "0 of 0 shown · 0 from Steam in 0 s" and read as a success.
     this.flushRows();
+    // The count ends with Steam's refresh, or with one that never started; a DZSA import
+    // or a second press ("busy") finishing meanwhile is not the end of it.
+    if (d.rejected ? d.reason !== "busy" : d.source === "steam") this.#listedThisRefresh = null;
     if (d.rejected) {
       // "Busy" is not a failure: a refresh is already running and will report for
       // itself. Treating the two the same put a permanent red "Steam did not answer
@@ -1514,7 +1547,9 @@ class ServersStore {
       // DZSA, LAN and probed rows arriving during a refresh are not Steam's answer.
       if (r.steamEmpty === false) this.#seenThisRefresh?.add(r.id);
       if (r.steamEmpty === true && !this.hasEmptyServers) this.hasEmptyServers = true;
+      if (!dzsa && r.steamEmpty != null) this.#listedThisRefresh?.add(r.id);
     }
+    if (this.#listedThisRefresh) this.refreshListed = this.#listedThisRefresh.size;
     this.rowsChanged();
   }
 

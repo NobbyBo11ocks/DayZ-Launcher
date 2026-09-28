@@ -236,9 +236,30 @@ pub fn note_write<T>(r: &rusqlite::Result<T>) {
                 Some(DiskFull | ReadOnly | SystemIoFailure | CannotOpen)
             ) =>
         {
-            *failure = Some(e.to_string());
+            if failure.is_none() {
+                crate::log_warn!("cache", "writes failing: {e}");
+            }
+            *failure = Some(plain_reason(e).to_string());
         }
         Err(_) => {}
+    }
+}
+
+/// Why a write failed, in the player's words: SQLite's own ("database or disk is full",
+/// "attempt to write a readonly database") reached the screen (row 16). The error itself
+/// goes to the log.
+pub fn plain_reason(e: &rusqlite::Error) -> &'static str {
+    file_reason(e).unwrap_or("the saved data could not be written")
+}
+
+/// `plain_reason` when the file itself refused: full, read-only or unwritable.
+pub fn file_reason(e: &rusqlite::Error) -> Option<&'static str> {
+    use rusqlite::ErrorCode::{CannotOpen, DiskFull, ReadOnly, SystemIoFailure};
+    match e.sqlite_error_code()? {
+        DiskFull => Some("the disk is full"),
+        ReadOnly => Some("the file is read-only"),
+        SystemIoFailure | CannotOpen => Some("Windows could not write the file"),
+        _ => None,
     }
 }
 
@@ -1184,7 +1205,11 @@ mod tests {
             ))
         };
         note_write(&fail(rusqlite::ffi::SQLITE_FULL));
-        assert!(write_failure().is_some(), "a full disk is noted");
+        assert_eq!(
+            write_failure().as_deref(),
+            Some("the disk is full"),
+            "a full disk is noted, in words"
+        );
         note_write(&fail(rusqlite::ffi::SQLITE_BUSY));
         assert!(write_failure().is_some(), "a busy moment changes nothing");
         note_write(&Ok::<(), rusqlite::Error>(()));

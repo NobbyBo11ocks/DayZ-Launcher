@@ -22,6 +22,8 @@ const DOWNLOAD_STALL_MS = 60_000;
  *  refused, unresolved or timed-out request (S-111). */
 const OFFLINE_ERROR = /error sending request|timed out|dns error|connection (?:refused|reset|closed)/i;
 const CHECK_OFFLINE = "Could not reach GitHub to check for updates. Check your connection and try again.";
+/** Why the stall watchdog stopped a download (row 14, H13b). */
+const DOWNLOAD_STALLED = "nothing arrived for a minute";
 
 class Updates {
   state = $state<"idle" | "checking" | "none" | "available" | "downloading" | "ready" | "error">("idle");
@@ -153,7 +155,7 @@ class Updates {
     // A plain string: `describe` prints an Error as "Error: …" inside the message.
     let stalled: ((reason: string) => void) | undefined;
     const watchdog = setInterval(() => {
-      if (Date.now() - lastData > DOWNLOAD_STALL_MS) stalled?.("nothing arrived for a minute");
+      if (Date.now() - lastData > DOWNLOAD_STALL_MS) stalled?.(DOWNLOAD_STALLED);
     }, 5_000);
     // Download, then install, as two steps: a failure in the first leaves the launcher as
     // it was, one in the second does not (below, D-280).
@@ -180,7 +182,14 @@ class Updates {
       // Back to "available", not "error" (D-184): the update is still there and still
       // installable, and the error card offered only "Check for updates", which is
       // not what failed. The message says which step it was.
-      this.error = `Could not install ${u.version}: ${describe(e)}`;
+      // In words, the request's own text (with its URL) in the log below (row 16).
+      const why = describe(e);
+      this.error =
+        why === DOWNLOAD_STALLED
+          ? `Could not download ${u.version}: nothing arrived for a minute. Press Install and restart to try again.`
+          : OFFLINE_ERROR.test(why)
+            ? `Could not download ${u.version}: no connection to GitHub. Press Install and restart to try again.`
+            : `Could not install ${u.version}. Press Install and restart to try again; the details are on the Logs page.`;
       this.state = "available";
       this.progress = 0;
       logWarn("update", `install of ${u.version} failed: ${describe(e)}`);

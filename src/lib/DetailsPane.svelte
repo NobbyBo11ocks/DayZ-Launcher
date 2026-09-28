@@ -220,8 +220,8 @@
     const secs = (details?.players?.players ?? []).map((p) => p.durationSecs).sort((a, b) => a - b);
     if (!secs.length) return null;
     const buckets = [
-      { label: "< 15 m", max: 15 * 60, n: 0 },
-      { label: "15–60 m", max: 60 * 60, n: 0 },
+      { label: "< 15 min", max: 15 * 60, n: 0 },
+      { label: "15–60 min", max: 60 * 60, n: 0 },
       { label: "1–3 h", max: 3 * 3600, n: 0 },
       { label: "3–6 h", max: 6 * 3600, n: 0 },
       { label: "6 h +", max: Infinity, n: 0 },
@@ -257,23 +257,23 @@
     const n = v.verified ?? 0;
     switch (v.verdict) {
       case "verified":
-        if (v.reason.startsWith("INFO reports 0")) return "The server reports nobody on it and did not answer the player-list query.";
+        if (v.reason.startsWith("INFO reports 0")) return "The server reports nobody on it and did not share its player list.";
         if (v.reason.includes("INFO did not answer")) return `${n} counted; the server's own number did not arrive.`;
-        return claim != null ? `${n} counted; the server advertises ${claim}.` : `${n} counted.`;
+        return claim != null ? `${n} counted; the server claims ${claim}.` : `${n} counted.`;
       case "inflated":
-        if (v.reason.includes("zero-length")) return `${n} real session${n === 1 ? "" : "s"}; the rest of the list are entries no clock produced.`;
-        return `The server advertises ${claim ?? "more"} players; ${n} ${n === 1 ? "is" : "are"} actually connected.`;
+        if (v.reason.includes("zero-length")) return `${n} real player${n === 1 ? "" : "s"}; the rest of its list are fake entries with no play time.`;
+        return `The server claims ${claim ?? "more"} players; ${n} ${n === 1 ? "is" : "are"} actually connected.`;
       case "unverifiable":
-        return `The server advertises ${claim ?? "some"} players but did not answer the player-list query.`;
+        return `The server claims ${claim ?? "some"} players but does not share its player list.`;
       case "offline":
         return "The server did not answer at all.";
       case "synthetic": {
-        if (v.reason.includes("named=true")) return "The player list looks generated: its entries carry names, which real DayZ lists never do.";
-        if (v.reason.includes("carried over between checks")) return "The player list looks generated: the sessions seen at the previous check did not carry over.";
+        if (v.reason.includes("named=true")) return "The player list looks fake: its entries carry names, which real DayZ lists never do.";
+        if (v.reason.includes("carried over between checks")) return "The player list looks fake: the sessions seen at the previous check did not carry over.";
         if (v.reason.includes("earlier checks")) return "Sessions did not carry over at earlier checks; waiting for a check close enough to compare.";
         const m = /^(\d+) entries, (\d+) distinct/.exec(v.reason);
-        if (m) return `The player list looks generated: ${m[1]} entries with only ${m[2]} different session length${m[2] === "1" ? "" : "s"}.`;
-        return "The player list looks generated.";
+        if (m) return `The player list looks fake: ${m[1]} entries with only ${m[2]} different session length${m[2] === "1" ? "" : "s"}.`;
+        return "The player list looks fake.";
       }
       default:
         return v.reason;
@@ -281,17 +281,17 @@
   }
 
   const verdictLabel: Record<string, string> = {
-    verified: "Verified head-count",
+    verified: "Verified player count",
     inflated: "Inflated player count",
-    unverifiable: "Refuses player queries",
-    synthetic: "Fabricated player list",
+    unverifiable: "Player list not shared",
+    synthetic: "Fake player list",
     offline: "Not answering",
   };
-  /** "Verified head-count" over a check that counted nobody, because the player list
+  /** "Verified player count" over a check that counted nobody, because the player list
    *  never came and the server said 0, promised a count there was not (D-268). */
   const heading = (v: Verification) =>
     v.verdict === "verified" && v.reason.startsWith("INFO reports 0") ? "Empty server" : verdictLabel[v.verdict];
-  const fmtDur = (s: number) => (s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} m` : `${Math.floor(s / 60)} m`);
+  const fmtDur = (s: number) => (s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min` : `${Math.floor(s / 60)} min`);
 
   /** A refused copy said nothing at all; its button's name says so now (D-291). */
   let copyFailed = $state(false);
@@ -334,7 +334,7 @@
       <div class="addr">
         <code>{row.ip}:{row.gamePort}</code>
         <button class="link" onclick={copyAddress} aria-label={copied ? "Address copied" : copyFailed ? "Copy address; the clipboard refused it" : "Copy address"}>{copied ? "copied" : "copy"}</button>
-        <span class="muted">· query {row.queryPort}</span>
+        <span class="muted">· query port {row.queryPort}</span>
       </div>
       <div class="actions">
         <button class="join" onclick={() => servers.requestJoin(row.id)} title="Check mods, download what is missing, and start DayZ">Join</button>
@@ -356,10 +356,10 @@
         <span class="muted">A server with this name has verified players at another address; this copy's own check has not verified it.</span>
       {:else if r0}
         <!-- R0 hides the row whatever a later check counts. This branch used to give way
-             to the pane's own check, which then showed a green "Verified head-count"
+             to the pane's own check, which then showed a green "Verified player count"
              beside a row the list still hid (D-268). -->
         <strong>Inflated player count</strong>
-        <span class="muted">Steam reports 0 authenticated players; the server claims {row.players}{#if listed != null}, and its player list shows {listed}{/if}.</span>
+        <span class="muted">Steam sees nobody on it; the server claims {row.players}{#if listed != null}, and its player list shows {listed}{/if}.</span>
       {:else if r8}
         <!-- R8 hid the row with nothing here to say why. The wording stays on what was
              measured (the largest head-count ever verified here is 116), not on an engine
@@ -368,16 +368,16 @@
         <span class="muted">The server claims {row.players} players, more than any DayZ server this launcher has counted.</span>
       {:else if v && vouched && counted}
         <strong>Last counted {row.verifiedPlayers}</strong>
-        <span class="muted">The server has stopped answering player queries; Steam still sees players on it. Showing the last head-count, not the server's claim.</span>
+        <span class="muted">The server has stopped sharing its player list; Steam still sees players on it. Showing the last count, not the server's claim.</span>
       {:else if v && vouched}
         <strong>Player count unconfirmed</strong>
-        <span class="muted">The server does not answer player queries. Steam sees at least one session, which does not confirm the {row.players} it claims.</span>
+        <span class="muted">The server does not share its player list. Steam sees at least one session, which does not confirm the {row.players} it claims.</span>
       {:else if v}
         <strong>{heading(v)}</strong>
         <!-- The rule's own words stay on hover; the sentence is for the player (D-248). -->
         <span class="muted" title={v.reason}>{explain(v)}</span>
       {:else}
-        <strong class="muted">{loading ? "Querying server…" : "Not verified yet"}</strong>
+        <strong class="muted">{loading ? "Checking the server…" : "Not verified yet"}</strong>
       {/if}
     </section>
 
@@ -390,8 +390,8 @@
       </dd>
       <dt>Ping</dt>
       <dd>{details?.infoRttMs != null ? `${details.infoRttMs} ms` : pingUnmeasured(row) ? "—" : `${row.pingMs} ms`}</dd>
-      <dt>View</dt>
-      <dd>{row.tags.firstPersonOnly ? "First person only" : "First and third person"}</dd>
+      <dt>Perspective</dt>
+      <dd>{row.tags.firstPersonOnly ? "1PP only" : "1PP and 3PP"}</dd>
       <dt>Time</dt>
       <dd>
         {clock(row.tags.timeMinutes)}
@@ -453,7 +453,8 @@
       {#if loading && !details}
         <p class="muted">Loading…</p>
       {:else if details?.rulesError}
-        <p class="muted">Rules unavailable: {details.rulesError}</p>
+        <!-- In words; the reason stays on hover (row 16). -->
+        <p class="muted" title={details.rulesError}>The server did not send its mod list.</p>
       {:else if details?.rules?.dayz && mods.length === 0}
         <p class="muted">Vanilla, no mods required.</p>
       {:else if mods.length}

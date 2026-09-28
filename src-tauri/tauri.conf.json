@@ -72,7 +72,10 @@
         "sidebarImage": "nsis/sidebar.bmp",
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico",
-        "installerHooks": "nsis/hooks.nsh"
+        "installerHooks": "nsis/hooks.nsh",
+        "customLanguageFiles": {
+          "English": "nsis/English.nsh"
+        }
       }
     },
     "homepage": "https://github.com/NobbyBo11ocks/DayZ-Launcher",

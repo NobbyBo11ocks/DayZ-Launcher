@@ -98,7 +98,7 @@
         onFavourite={(id) => servers.toggleFavourite(id)}
         friendsOn={servers.friendsOn}
         modsByServer={servers.modsByServer}
-        empty={`No LAN server matches "${servers.filters.search.trim()}". The search box is shared with the Servers page.`}
+        empty={`No LAN server matches “${servers.filters.search.trim()}”. The search box is shared with the Servers page.`}
         label="LAN servers"
         onSearch={() => {
           searchEl?.focus();

@@ -24,6 +24,7 @@ export const defaultUiPrefs = (): UiPrefs => ({
   newsSeen: 0,
   news: true,
   lastSeenVersion: "",
+  openOn: "news",
 });
 
 /** Attempts to read the settings before giving up on the backend (D-112). */

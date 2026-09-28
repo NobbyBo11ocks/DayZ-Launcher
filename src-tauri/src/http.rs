@@ -37,14 +37,10 @@ pub fn offline(e: &reqwest::Error) -> bool {
     e.is_connect() || e.is_timeout()
 }
 
-/// The error the page shows for a request that failed: `no_connection`'s sentence when
-/// there was no connection, the raw text only in the log (row 14, F6, approved); any
-/// other failure as "{what} failed: {e}", as before.
-pub fn request_error(e: reqwest::Error, what: &str, no_connection: &str) -> String {
-    if offline(&e) {
-        crate::log_warn!("app", "{what} failed: {e}");
-        no_connection.to_string()
-    } else {
-        format!("{what} failed: {e}")
-    }
+/// The error the page shows for a request that failed, a sentence either way with the
+/// raw text only in the log: `no_connection` when there was no connection (row 14, F6,
+/// approved), `failed` when the other end answered badly (row 16).
+pub fn request_error(e: reqwest::Error, what: &str, no_connection: &str, failed: &str) -> String {
+    crate::log_warn!("app", "{what} failed: {e}");
+    if offline(&e) { no_connection } else { failed }.to_string()
 }

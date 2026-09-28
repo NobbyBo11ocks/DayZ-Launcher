@@ -114,10 +114,15 @@
         onboarded = legacy;
       }
       void checkWhatsNew(u.lastSeenVersion ?? "", onboarded);
+      // The start-up copy of the start page is usually the file's; when it was not (storage
+      // cleared), the file's choice applies unless another page was opened meanwhile.
+      if (active === openedOn && prefs.openOn !== openedOn) active = prefs.openOn;
     });
   });
   function finishWelcome() {
     showWelcome = false;
+    // "Start browsing" opens the server list, not the page behind the welcome (row 16).
+    active = "servers";
     uiPrefs.patch({ onboarded: true });
     try {
       localStorage.setItem(ONBOARDED_KEY, String(Date.now()));
@@ -125,8 +130,9 @@
       /* ignore */
     }
     // The overlay took the focused button with it, and the next Tab started at the
-    // title bar's window buttons: the open section takes the focus instead (D-291).
-    void tick().then(() => document.querySelector<HTMLElement>('.rail-item[aria-current="page"]')?.focus());
+    // title bar's window buttons: the list takes the focus instead, or the open section
+    // before the list is drawn (D-291).
+    void tick().then(() => (mainEl?.querySelector<HTMLElement>('[role="grid"]') ?? document.querySelector<HTMLElement>('.rail-item[aria-current="page"]'))?.focus());
   }
 
   // What changed, once after each update (user request, D-301). A first run has the
@@ -208,8 +214,9 @@
   const persona = $derived(servers.steam?.persona ?? null);
   const greeting = $derived(persona ? `${timeOfDay}, ${persona}` : "");
 
-  /** News is the landing page (D-100); the server list is one click away. */
-  let active = $state<Section>("news");
+  /** The page the player picked to open on, News unless changed (D-100, row 16). */
+  const openedOn: Section = prefs.openOn;
+  let active = $state<Section>(openedOn);
   $effect(() => {
     if (!prefs.news && active === "news") active = "servers";
   });
@@ -258,10 +265,9 @@
     {#if active === "servers"}
       <svelte:boundary onerror={(e) => logError("view", `filters failed to render: ${describe(e)}`)}>
         <FilterPanel />
-        {#snippet failed(error, reset)}
+        {#snippet failed(_, reset)}
           <div class="rail-crashed">
-            <p>The filters stopped working.</p>
-            <p class="crashed-why">{describe(error)}</p>
+            <p>The filters stopped working. The details are on the Logs page.</p>
             <button class="crashed-retry" onclick={reset}>Try again</button>
           </div>
         {/snippet}
@@ -278,10 +284,10 @@
         class="rail-item update"
         onclick={() => (active = "settings")}
         title="Version {updates.version} is ready to install — opens Settings"
-        aria-label="Update Available: version {updates.version}, opens Settings"
+        aria-label="Update available: version {updates.version}, opens Settings"
       >
         <RailIcon name="update" />
-        <span class="text">Update Available</span>
+        <span class="text">Update available</span>
       </button>
     {/if}
   </div>
@@ -313,10 +319,9 @@
     {:else if active === "logs"}
       <Logs />
     {/if}
-      {#snippet failed(error, reset)}
+      {#snippet failed(_, reset)}
         <div class="crashed">
-          <p>This page stopped working.</p>
-          <p class="crashed-why">{describe(error)}</p>
+          <p>This page stopped working. The details are on the Logs page.</p>
           <button class="crashed-retry" onclick={reset}>Try again</button>
         </div>
       {/snippet}

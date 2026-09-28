@@ -105,7 +105,7 @@
     if (!name || sentName === null || sentName === name) return "";
     return sentName
       ? `Some characters of “${name}” cannot reach DayZ on this PC, so you join as “${sentName}”.`
-      : `“${name}” has no characters DayZ can take on this PC, so no name is passed to the game. Set a profile name in Settings to choose one.`;
+      : `“${name}” has no characters DayZ can take on this PC, so no name is passed to the game. Set an in-game name in Settings to choose one.`;
   });
   $effect(() => {
     invoke<Settings>("settings_get")
@@ -322,7 +322,13 @@
     };
   });
 
-  const exitText = (e: LaunchExited) => `DayZ exited${e.code != null ? ` with code ${e.code}` : ""}.`;
+  /** "DayZ has closed." after a normal quit; a code only when it says something went wrong (row 16). */
+  async function startSteam() {
+    const why = await servers.startSteam();
+    if (why) error = why;
+  }
+
+  const exitText = (e: LaunchExited) => (e.code == null || e.code === 0 ? "DayZ has closed." : `DayZ closed with error code ${e.code}.`);
   // The server stopped answering while the dialog waited: said once, when it happens.
   $effect(() => {
     if (phase === "waiting" && slotMisses === 3) say("The server has stopped answering. Still trying.");
@@ -636,6 +642,9 @@
           {#each plan.warnings as w, i (i)}<li>{w}</li>{/each}
         </ul>
       {/if}
+      {#if !plan.steamRunning}
+        <p><button class="btn secondary small" onclick={startSteam} disabled={servers.steamStarting}>{servers.steamStarting ? "Starting Steam…" : "Start Steam"}</button></p>
+      {/if}
 
       {#if plan.mods.length}
         <section class="mods">
@@ -681,13 +690,17 @@
         <label class="wait">
           <input type="checkbox" bind:checked={waitForSlot} />
           <span>
-            <strong>The server is full.</strong> Wait here for a free slot and join automatically (checked every 10 s). Leave this off to join now and stand in DayZ's own login queue.
+            {#if queue}
+              <strong>The server is full and {queue} player{queue === 1 ? " is" : "s are"} queued.</strong> Wait here for a free slot and join automatically (checked every 10 s), or leave this off to join now and take your place in DayZ's queue; waiting here holds no place.
+            {:else}
+              <strong>The server is full.</strong> Wait here for a free slot and join automatically (checked every 10 s). Leave this off to join now and stand in DayZ's own login queue.
+            {/if}
           </span>
         </label>
       {/if}
 
       <p class="muted small">
-        Profile name: <strong>{shownProfileName || "(Steam persona)"}</strong> · change it in Settings
+        In-game name: <strong>{shownProfileName || "(your Steam name)"}</strong> · change it in Settings
         {#if profiles.length}
           · launch with
           <select class="pick" bind:value={profile} disabled={busy || phase === "waiting" || phase === "running"} aria-label="Launch with profile">
@@ -736,7 +749,7 @@
         <p class="status ok">DayZ is running. You can close this window.</p>
         <details class="cmd"><summary class="muted small">Command line · process {launched.pid}</summary><code>{launched.commandLine}</code></details>
       {:else if phase === "exited" && exit}
-        <p class="status" class:warn={exit.code !== 0}>DayZ exited{exit.code != null ? ` with code ${exit.code}` : ""}.</p>
+        <p class="status" class:warn={exit.code != null && exit.code !== 0}>{exitText(exit)}</p>
       {/if}
     {/if}
 

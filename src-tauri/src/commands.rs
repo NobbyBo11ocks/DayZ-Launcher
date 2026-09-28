@@ -171,7 +171,12 @@ pub fn app_info() -> AppInfo {
 pub async fn diagnostics() -> AppResult<Diagnostics> {
     let result = tauri::async_runtime::spawn_blocking(diagnostics::collect)
         .await
-        .map_err(|e| AppError::Internal(format!("diagnostics task failed: {e}")))?;
+        .map_err(|e| {
+            AppError::logged(
+                "The check of Steam and DayZ did not finish",
+                format!("diagnostics task failed: {e}"),
+            )
+        })?;
     #[cfg(debug_assertions)]
     if let Ok(d) = &result {
         eprintln!(
@@ -199,13 +204,95 @@ pub async fn local_game_version() -> AppResult<Option<String>> {
         version::read(&game.exe()).map(|v| v.game_string())
     })
     .await
-    .map_err(|e| AppError::Internal(format!("version task failed: {e}")))
+    .map_err(|e| {
+        AppError::logged(
+            "The installed DayZ version could not be read",
+            format!("version task failed: {e}"),
+        )
+    })
+}
+
+/// The saved data (the cache) could not do what was asked: a poisoned lock or a lost
+/// worker task. One sentence on screen, the detail in the log (row 16).
+fn saved_data(detail: impl std::fmt::Display) -> AppError {
+    AppError::logged("The launcher's saved data could not be used", detail)
+}
+
+/// SQLite refused: a file that cannot be written is said in words ("the disk is full"),
+/// anything else as `saved_data` (row 16).
+fn saved_data_sql(e: rusqlite::Error) -> AppError {
+    match crate::browser::cache::file_reason(&e) {
+        Some(why) => {
+            crate::log_error!("cache", "{e}");
+            AppError::Internal(format!(
+                "The launcher's saved data could not be written: {why}."
+            ))
+        }
+        None => saved_data(e),
+    }
+}
+
+/// Recent's line when the join could not be recorded because the saved data was not there.
+const SAVED_DATA_UNREADABLE: &str = "the launcher's saved data could not be opened";
+
+/// Steam sent no names or sizes for the mods; joining is not affected (row 16).
+const NO_DETAILS: &str = "Steam did not send the mods' names and sizes; downloading still works.";
+
+/// Direct connect to a name that does not resolve (row 16).
+fn not_found(host: &str) -> AppError {
+    AppError::Internal(format!(
+        "Could not find a server called “{host}”. Check the name, or use its IP address."
+    ))
 }
 
 /// Steamworks thread status (M3).
 #[tauri::command]
 pub fn steam_status(state: State<'_, AppState>) -> SteamStatus {
     state.steam.status()
+}
+
+/// "Start Steam" (row 16). Nothing while a Steam runs: a second `steam.exe` only hands
+/// its arguments to the first. The Steamworks session put `SteamAppId` and `SteamGameId`
+/// in this process (steamworks 0.13.1 `init_app`); Steam does not inherit them. The
+/// session opens on the worker's next try once Steam is up (D-125).
+#[tauri::command(async)]
+pub fn steam_start() -> Result<(), String> {
+    let steam = registry::detect();
+    if steam.running {
+        return Ok(());
+    }
+    let Some(exe) = steam.exe.filter(|p| p.is_file()) else {
+        crate::log_warn!("steam", "start: no steam.exe (registry {})", steam.source);
+        return Err(
+            "Steam is not installed on this PC, or Windows does not know where it is.".into(),
+        );
+    };
+    let mut cmd = std::process::Command::new(&exe);
+    if let Some(dir) = exe.parent() {
+        cmd.current_dir(dir);
+    }
+    match cmd
+        .env_remove("SteamAppId")
+        .env_remove("SteamGameId")
+        .spawn()
+    {
+        Ok(child) => {
+            crate::log_info!("steam", "start: {} (pid {})", exe.display(), child.id());
+            Ok(())
+        }
+        Err(e) => {
+            crate::log_warn!("steam", "start: {}: {e}", exe.display());
+            Err("Steam could not be started. The details are on the Logs page.".into())
+        }
+    }
+}
+
+/// The `-cpuCount`, `-maxMem` and `-maxVRAM` a launch adds for this PC beside `extra`,
+/// for Settings to show (row 16). The same call the launch makes (D-267); off the main
+/// thread, as the first reading asks DXGI for the video memory.
+#[tauri::command(async)]
+pub fn perf_args(extra: String) -> Vec<String> {
+    crate::hardware::launch_args(&crate::hardware::detect(), &extra)
 }
 
 /// The part of a name DayZ receives as written (`launch::args::ansi_exact`), for the join
@@ -314,10 +401,8 @@ pub async fn servers_cached(state: State<'_, AppState>) -> AppResult<CachedServe
     let out = tauri::async_runtime::spawn_blocking(move || {
         let c = cache
             .lock()
-            .map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
-        let rows = c
-            .load_all()
-            .map_err(|e| AppError::Internal(format!("cache: {e}")))?;
+            .map_err(|_| saved_data("cache lock poisoned"))?;
+        let rows = c.load_all().map_err(saved_data_sql)?;
         let last_refresh = c
             .get_meta("last_refresh")
             .ok()
@@ -331,7 +416,7 @@ pub async fn servers_cached(state: State<'_, AppState>) -> AppResult<CachedServe
         })
     })
     .await
-    .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))??;
+    .map_err(|e| saved_data(format!("cache task failed: {e}")))??;
     #[cfg(debug_assertions)]
     eprintln!(
         "[ipc] servers_cached: {} rows, last refresh {:?}, {} ms after start",
@@ -439,7 +524,7 @@ pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResu
             }
         })
         .await
-        .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?;
+        .map_err(|e| saved_data(format!("cache task failed: {e}")))?;
         wrote.map_err(AppError::Internal)?;
         // Its own event: the store keeps measured values over these placeholders, as
         // `upsert_keeping_measured` does, and every other batch is a measurement (D-271).
@@ -925,7 +1010,7 @@ pub async fn servers_verify(
     let targets: Vec<Target> = tauri::async_runtime::spawn_blocking(move || {
         let c = lookup
             .lock()
-            .map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
+            .map_err(|_| saved_data("cache lock poisoned"))?;
         Ok::<_, AppError>(
             ids.iter()
                 .filter_map(|id| c.get(id).ok().flatten())
@@ -934,7 +1019,7 @@ pub async fn servers_verify(
         )
     })
     .await
-    .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))??;
+    .map_err(|e| saved_data(format!("cache task failed: {e}")))??;
     Ok(run_verification(app, cache, state.a2s.clone(), targets, false).await)
 }
 
@@ -1140,7 +1225,12 @@ pub async fn mods_stale(state: State<'_, AppState>, ids: Vec<u64>) -> AppResult<
     let steam = state.steam.clone_handle();
     tauri::async_runtime::spawn_blocking(move || steam.stale_items(ids))
         .await
-        .map_err(|e| AppError::Internal(format!("stale check failed: {e}")))
+        .map_err(|e| {
+            AppError::logged(
+                "Steam could not be asked about mod updates",
+                format!("stale check failed: {e}"),
+            )
+        })
 }
 
 /// Stored mod lists and the mod catalogue for the browser's mod filter (D-080).
@@ -1150,12 +1240,16 @@ pub async fn mods_index(state: State<'_, AppState>) -> AppResult<crate::browser:
     tauri::async_runtime::spawn_blocking(move || {
         let c = cache
             .lock()
-            .map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
-        c.mods_index()
-            .map_err(|e| AppError::Internal(format!("cache: {e}")))
+            .map_err(|_| saved_data("cache lock poisoned"))?;
+        c.mods_index().map_err(saved_data_sql)
     })
     .await
-    .map_err(|e| AppError::Internal(format!("mods index task failed: {e}")))?
+    .map_err(|e| {
+        AppError::logged(
+            "The servers' mod lists could not be loaded",
+            format!("mods index task failed: {e}"),
+        )
+    })?
 }
 
 /// Starts a mod scan now, by the automatic scan's rules: the lists missing or a day old,
@@ -1203,7 +1297,12 @@ pub async fn mods_unsubscribe(
     let steam = state.steam.clone_handle();
     let results = tauri::async_runtime::spawn_blocking(move || steam.unsubscribe(&ids))
         .await
-        .map_err(|e| AppError::Internal(format!("unsubscribe task failed: {e}")))?
+        .map_err(|e| {
+            AppError::logged(
+                "The unsubscribe did not finish",
+                format!("unsubscribe task failed: {e}"),
+            )
+        })?
         .map_err(AppError::Internal)?;
     let out: Vec<UnsubscribeResult> = results
         .into_iter()
@@ -1255,7 +1354,7 @@ pub async fn junctions_remove_dangling() -> AppResult<JunctionCleanup> {
         let steam = registry::detect();
         let path = steam
             .path
-            .ok_or_else(|| AppError::Internal("Steam is not installed".into()))?;
+            .ok_or_else(|| AppError::Internal("Steam is not installed on this PC.".into()))?;
         let libs = locate::libraries(&path)?;
         let game = locate::find_dayz(&libs)?.ok_or_else(|| {
             let gone = locate::unreachable_dayz_libraries(&libs);
@@ -1264,7 +1363,7 @@ pub async fn junctions_remove_dangling() -> AppResult<JunctionCleanup> {
                     "Steam has DayZ in {}, but that folder is not reachable; connect the drive and try again.",
                     p.display()
                 ),
-                None => "DayZ is not installed".into(),
+                None => "DayZ is not installed on this PC.".into(),
             })
         })?;
         let mut out = JunctionCleanup {
@@ -1297,7 +1396,7 @@ pub async fn junctions_remove_dangling() -> AppResult<JunctionCleanup> {
         Ok(out)
     })
     .await
-    .map_err(|e| AppError::Internal(format!("junction task failed: {e}")))?
+    .map_err(|e| AppError::logged("The mod links could not be checked", format!("junction task failed: {e}")))?
 }
 
 #[derive(Serialize)]
@@ -1365,9 +1464,7 @@ pub async fn news_thumb(
 pub async fn news_cached(state: State<'_, AppState>) -> AppResult<NewsCached> {
     let c = Arc::clone(&state.cache);
     tauri::async_runtime::spawn_blocking(move || {
-        let c = c
-            .lock()
-            .map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
+        let c = c.lock().map_err(|_| saved_data("cache lock poisoned"))?;
         let items = c
             .get_meta("news")
             .ok()
@@ -1377,7 +1474,12 @@ pub async fn news_cached(state: State<'_, AppState>) -> AppResult<NewsCached> {
         Ok(NewsCached { items })
     })
     .await
-    .map_err(|e| AppError::Internal(format!("news task failed: {e}")))?
+    .map_err(|e| {
+        AppError::logged(
+            "The news could not be loaded",
+            format!("news task failed: {e}"),
+        )
+    })?
 }
 
 /// A friend's 32×32 Steam avatar for the Friends tab (D-115); `None` until Steam has it.
@@ -1392,7 +1494,12 @@ pub async fn friend_avatar(
     let steam = state.steam.clone_handle();
     let avatar = tauri::async_runtime::spawn_blocking(move || steam.friend_avatar(id))
         .await
-        .map_err(|e| AppError::Internal(format!("avatar task failed: {e}")))?
+        .map_err(|e| {
+            AppError::logged(
+                "A Steam picture could not be loaded",
+                format!("avatar task failed: {e}"),
+            )
+        })?
         .map_err(AppError::Internal)?;
     // Raw RGBA, always 32x32; empty means Steam has not cached it yet (D-181).
     Ok(tauri::ipc::Response::new(
@@ -1441,7 +1548,12 @@ pub async fn friends_list(state: State<'_, AppState>) -> AppResult<Vec<FriendInf
     let steam = state.steam.clone_handle();
     tauri::async_runtime::spawn_blocking(move || steam.friends())
         .await
-        .map_err(|e| AppError::Internal(format!("friends task failed: {e}")))?
+        .map_err(|e| {
+            AppError::logged(
+                "Your friends could not be loaded",
+                format!("friends task failed: {e}"),
+            )
+        })?
         .map_err(AppError::Internal)
 }
 
@@ -1460,14 +1572,17 @@ pub struct ServerSlots {
 /// slot" join option (D-074). One datagram each way, safe to poll every 10 s.
 #[tauri::command]
 pub async fn server_slots(state: State<'_, AppState>, id: String) -> AppResult<ServerSlots> {
-    let addr: SocketAddr = id
-        .parse()
-        .map_err(|_| AppError::Internal(format!("bad server id {id}")))?;
+    let addr: SocketAddr = id.parse().map_err(|_| {
+        AppError::logged(
+            "That server could not be found",
+            format!("bad server id {id}"),
+        )
+    })?;
     let reply = state
         .a2s
         .info(addr)
         .await
-        .map_err(|e| AppError::Internal(format!("{addr}: {e}")))?;
+        .map_err(|_| AppError::Internal("The server did not answer.".into()))?;
     Ok(ServerSlots {
         players: reply.value.players as i32,
         max_players: reply.value.max_players as i32,
@@ -1483,9 +1598,12 @@ pub async fn server_details(
     state: State<'_, AppState>,
     id: String,
 ) -> AppResult<ServerDetails> {
-    let addr: SocketAddr = id
-        .parse()
-        .map_err(|_| AppError::Internal(format!("bad server id {id}")))?;
+    let addr: SocketAddr = id.parse().map_err(|_| {
+        AppError::logged(
+            "That server could not be found",
+            format!("bad server id {id}"),
+        )
+    })?;
     let client = state.a2s.clone();
     let cache = Arc::clone(&state.cache);
     let cached = cached_row(&cache, &id).await;
@@ -1737,10 +1855,13 @@ pub async fn join_plan(
 ) -> AppResult<JoinPlan> {
     let row = cached_row(&state.cache, &id)
         .await
-        .ok_or_else(|| AppError::Internal(format!("unknown server {id}")))?;
-    let addr: SocketAddr = id
-        .parse()
-        .map_err(|_| AppError::Internal(format!("bad server id {id}")))?;
+        .ok_or_else(|| AppError::Internal("That server is no longer in the server list.".into()))?;
+    let addr: SocketAddr = id.parse().map_err(|_| {
+        AppError::logged(
+            "That server could not be found",
+            format!("bad server id {id}"),
+        )
+    })?;
     // INFO beside RULES: the cached row's game port, password flag and version are
     // only as fresh as the last listing, and verification never updates them, so a
     // server that moved its game port or added a password was planned — and joined —
@@ -1749,7 +1870,12 @@ pub async fn join_plan(
     let info = info.ok().map(|r| r.value);
     let diag = tauri::async_runtime::spawn_blocking(diagnostics::collect)
         .await
-        .map_err(|e| AppError::Internal(format!("diagnostics task failed: {e}")))??;
+        .map_err(|e| {
+            AppError::logged(
+                "The check of Steam and DayZ did not finish",
+                format!("diagnostics task failed: {e}"),
+            )
+        })??;
     // The list this plan read becomes the cached one: a launch whose own RULES read
     // drops falls back to the cache, which could be a day-old scan rather than the
     // list the player was shown seconds earlier (D-265). In the scan's shape, and sent
@@ -1804,9 +1930,10 @@ pub async fn join_plan(
         // recorded and say how old it is rather than inventing an empty one (D-209).
         Err(e) => match cached_mods(&state.cache, &id).await {
             Some((scanned_at, mods)) if !mods.is_empty() => {
+                crate::log_warn!("join", "{id}: no mod list ({e}); using the scan's");
                 let age = ServerRow::now_unix().saturating_sub(scanned_at);
                 warnings.push(format!(
-                    "The server did not answer the mod query ({e}); using the list from the last scan, {}.",
+                    "The server did not send its mod list, so the one read {} is used.",
                     humanise_age(age)
                 ));
                 mods
@@ -1815,15 +1942,17 @@ pub async fn join_plan(
             // What `launch_game` will do with it: a modded server with nothing stored is
             // refused there, so the plan must not promise a launch without mods (D-289).
             None if row.tags.modded => {
-                warnings.push(format!(
-                    "Could not read the server's mod list ({e}) and it has never been scanned; Join will not start the game until the list can be read. Try again in a moment."
-                ));
+                crate::log_warn!("join", "{id}: no mod list ({e}) and none scanned");
+                warnings.push(
+                    "Could not read the server's mod list, and it has never been scanned; Join will not start the game until the list can be read. Try again in a moment.".into(),
+                );
                 Vec::new()
             }
             None => {
-                warnings.push(format!(
-                    "Could not read the server's mod list ({e}) and it has never been scanned; launching without mods."
-                ));
+                crate::log_warn!("join", "{id}: no mod list ({e}) and none scanned");
+                warnings.push(
+                    "Could not read the server's mod list, and it has never been scanned; launching without mods.".into(),
+                );
                 Vec::new()
             }
         },
@@ -1893,11 +2022,18 @@ pub async fn join_plan(
                     }
                     // Some pages answered and one did not (D-295).
                     if let Some(e) = missed {
-                        warnings.push(format!("Workshop details unavailable: {e}"));
+                        crate::log_warn!("join", "workshop details: {e}");
+                        warnings.push(NO_DETAILS.into());
                     }
                 }
-                Ok(Err(e)) => warnings.push(format!("Workshop details unavailable: {e}")),
-                Err(e) => warnings.push(format!("Workshop details task failed: {e}")),
+                Ok(Err(e)) => {
+                    crate::log_warn!("join", "workshop details: {e}");
+                    warnings.push(NO_DETAILS.into());
+                }
+                Err(e) => {
+                    crate::log_warn!("join", "workshop details task failed: {e}");
+                    warnings.push(NO_DETAILS.into());
+                }
             }
             // `needs_update` above came from `appworkshop_221100.acf`, which is only as
             // fresh as the last time Steam checked; a mod its author updated can read as
@@ -2011,10 +2147,12 @@ pub async fn join_plan(
     // an unreadable Workshop list does not stop this plan, which checks the folders
     // itself (D-265), so its "cannot be checked" was untrue here (D-296).
     let (unreadable_head, unreadable_tail) = diagnostics::WORKSHOP_UNREADABLE;
+    // Broken mod links are the Mods page's to remove; they do not stop a join (row 16).
+    let broken = diagnostics::broken_links(diag.junctions.iter().filter(|j| j.removable).count());
     warnings.extend(
         diag.warnings
             .iter()
-            .filter(|w| *w != diagnostics::STEAM_NOT_RUNNING && *w != diagnostics::BATTLEYE_MISSING)
+            .filter(|w| *w != diagnostics::STEAM_NOT_RUNNING && *w != diagnostics::BATTLEYE_MISSING && **w != broken)
             .map(|w| {
                 match w
                     .strip_prefix(unreadable_head)
@@ -2133,10 +2271,13 @@ pub async fn launch_game(
     refuse_if_running()?;
     let row = cached_row(&state.cache, &id)
         .await
-        .ok_or_else(|| AppError::Internal(format!("unknown server {id}")))?;
-    let addr: SocketAddr = id
-        .parse()
-        .map_err(|_| AppError::Internal(format!("bad server id {id}")))?;
+        .ok_or_else(|| AppError::Internal("That server is no longer in the server list.".into()))?;
+    let addr: SocketAddr = id.parse().map_err(|_| {
+        AppError::logged(
+            "That server could not be found",
+            format!("bad server id {id}"),
+        )
+    })?;
     // INFO beside RULES for the game port, as in the plan (D-265), and kept when it
     // moved (D-295).
     let (rules, info) = tokio::join!(state.a2s.rules(addr), state.a2s.info(addr));
@@ -2173,9 +2314,12 @@ pub async fn launch_game(
                     mods
                 }
                 None if row.tags.modded => {
+                    crate::log_warn!(
+                        "join",
+                        "{id}: no mod list ({e}) and none cached; not started"
+                    );
                     return Err(AppError::Internal(format!(
-                        "Could not read {}'s mod list ({e}), and nothing is cached for it. \
-                         Starting without mods would be rejected by the server, so nothing was started — try again in a moment.",
+                        "Could not read {}'s mod list, so DayZ was not started: without its mods the server would turn you away. Try again in a moment.",
                         row.name
                     )));
                 }
@@ -2210,14 +2354,14 @@ pub async fn launch_game(
         let row = row_for_spec;
         let steam = registry::detect();
         if !steam.running {
-            return Err(AppError::Internal("Steam is not running".into()));
+            return Err(AppError::Internal("Steam is not running. Start Steam, then join again.".into()));
         }
         let path = steam
             .path
-            .ok_or_else(|| AppError::Internal("Steam is not installed".into()))?;
+            .ok_or_else(|| AppError::Internal("Steam is not installed on this PC.".into()))?;
         let libs = locate::libraries(&path)?;
         let game = locate::find_dayz(&libs)?
-            .ok_or_else(|| AppError::Internal("DayZ is not installed".into()))?;
+            .ok_or_else(|| AppError::Internal("DayZ is not installed on this PC.".into()))?;
         // A vanilla server needs no Workshop list, and one that will not parse — a power
         // cut mid-write (D-194) — refused every launch, vanilla included, while the join
         // plan had already turned the same error into a warning. The content folders
@@ -2260,7 +2404,7 @@ pub async fn launch_game(
         for (id, name) in &required {
             let (folder, meta) = by_id.get(id).cloned().ok_or_else(|| {
                 AppError::Internal(format!(
-                    "mod {name} ({id}) is not installed; sync mods first"
+                    "{name} is not downloaded yet. Download the missing mods, then join."
                 ))
             })?;
             items.push((*id, folder, meta));
@@ -2296,7 +2440,7 @@ pub async fn launch_game(
         Ok::<_, AppError>((game.folder, links, spec))
     })
     .await
-    .map_err(|e| AppError::Internal(format!("launch task failed: {e}")))??;
+    .map_err(|e| AppError::logged("DayZ could not be started", format!("launch task failed: {e}")))??;
 
     let args = launch::build_args(&spec);
     // Spawn FIRST, then step aside (D-119, corrected in D-151): a child started by a
@@ -2346,18 +2490,26 @@ pub async fn launch_game(
         // Q22: a join that is not recorded is exactly the reported symptom, so the
         // failure has to leave a trace (D-162) — and, since row 14 (F15, approved), be
         // said: the dialog shows "Not added to Recent: …".
+        // In the player's words, the error itself in the log (row 16).
         launched.history_error = tauri::async_runtime::spawn_blocking(move || {
-            let c = c
-                .lock()
-                .map_err(|_| "the cache is unavailable".to_string())?;
+            let Ok(c) = c.lock() else {
+                crate::log_error!("cache", "history_add: the cache lock is poisoned");
+                return Err(SAVED_DATA_UNREADABLE);
+            };
             let added = c.history_add(&row_for_history, mods);
             crate::browser::cache::note_write(&added);
-            added.map_err(|e| e.to_string())
+            added.map_err(|e| {
+                crate::log_error!("cache", "history_add failed: {e}");
+                crate::browser::cache::plain_reason(&e)
+            })
         })
         .await
-        .unwrap_or_else(|e| Err(format!("the history task failed: {e}")))
+        .unwrap_or_else(|e| {
+            crate::log_error!("cache", "history_add task failed: {e}");
+            Err(SAVED_DATA_UNREADABLE)
+        })
         .err()
-        .inspect(|e| crate::log_error!("cache", "history_add failed: {e}"));
+        .map(str::to_string);
     }
     #[cfg(debug_assertions)]
     eprintln!(
@@ -2405,7 +2557,12 @@ pub async fn game_running() -> AppResult<bool> {
             .is_some()
     })
     .await
-    .map_err(|e| AppError::Internal(format!("process check failed: {e}")))
+    .map_err(|e| {
+        AppError::logged(
+            "The check for a running DayZ did not finish",
+            format!("process check failed: {e}"),
+        )
+    })
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2430,34 +2587,28 @@ pub struct Favourite {
 pub async fn favourites_list(state: State<'_, AppState>) -> AppResult<Vec<Favourite>> {
     let c = Arc::clone(&state.cache);
     tauri::async_runtime::spawn_blocking(move || {
-        let c = c
-            .lock()
-            .map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
-        let list = c
-            .favourites()
-            .map_err(|e| AppError::Internal(format!("cache: {e}")))?;
+        let c = c.lock().map_err(|_| saved_data("cache lock poisoned"))?;
+        let list = c.favourites().map_err(saved_data_sql)?;
         Ok(list
             .into_iter()
             .map(|(id, added_at)| Favourite { id, added_at })
             .collect())
     })
     .await
-    .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?
+    .map_err(|e| saved_data(format!("cache task failed: {e}")))?
 }
 
 #[tauri::command]
 pub async fn favourite_set(state: State<'_, AppState>, id: String, on: bool) -> AppResult<()> {
     let c = Arc::clone(&state.cache);
     tauri::async_runtime::spawn_blocking(move || {
-        let c = c
-            .lock()
-            .map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
+        let c = c.lock().map_err(|_| saved_data("cache lock poisoned"))?;
         let set = c.favourite_set(&id, on);
         crate::browser::cache::note_write(&set);
-        set.map_err(|e| AppError::Internal(format!("cache: {e}")))
+        set.map_err(saved_data_sql)
     })
     .await
-    .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?
+    .map_err(|e| saved_data(format!("cache task failed: {e}")))?
 }
 
 #[tauri::command]
@@ -2468,14 +2619,11 @@ pub async fn history_list(
     let c = Arc::clone(&state.cache);
     let limit = limit.unwrap_or(50).min(500);
     tauri::async_runtime::spawn_blocking(move || {
-        let c = c
-            .lock()
-            .map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
-        c.history(limit)
-            .map_err(|e| AppError::Internal(format!("cache: {e}")))
+        let c = c.lock().map_err(|_| saved_data("cache lock poisoned"))?;
+        c.history(limit).map_err(saved_data_sql)
     })
     .await
-    .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?
+    .map_err(|e| saved_data(format!("cache task failed: {e}")))?
 }
 
 /// Removes every join from the history (the Recent view's confirmed "Clear list",
@@ -2484,14 +2632,11 @@ pub async fn history_list(
 pub async fn history_clear(state: State<'_, AppState>) -> AppResult<usize> {
     let c = Arc::clone(&state.cache);
     tauri::async_runtime::spawn_blocking(move || {
-        let c = c
-            .lock()
-            .map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
-        c.history_clear()
-            .map_err(|e| AppError::Internal(format!("cache: {e}")))
+        let c = c.lock().map_err(|_| saved_data("cache lock poisoned"))?;
+        c.history_clear().map_err(saved_data_sql)
     })
     .await
-    .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?
+    .map_err(|e| saved_data(format!("cache task failed: {e}")))?
 }
 
 /// Verified head-count samples for one server over the last `hours` (default 72).
@@ -2504,14 +2649,11 @@ pub async fn population_history(
     let c = Arc::clone(&state.cache);
     let since = ServerRow::now_unix() - hours.unwrap_or(72) as i64 * 3600;
     tauri::async_runtime::spawn_blocking(move || {
-        let c = c
-            .lock()
-            .map_err(|_| AppError::Internal("cache lock poisoned".into()))?;
-        c.population(&id, since)
-            .map_err(|e| AppError::Internal(format!("cache: {e}")))
+        let c = c.lock().map_err(|_| saved_data("cache lock poisoned"))?;
+        c.population(&id, since).map_err(saved_data_sql)
     })
     .await
-    .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?
+    .map_err(|e| saved_data(format!("cache task failed: {e}")))?
 }
 
 /// Query ports to try when the typed port turned out to be a game port: game+1..+3
@@ -2602,23 +2744,26 @@ pub async fn direct_connect(
         Some((h, p)) => (
             h.trim_matches(|c| c == '[' || c == ']'),
             p.parse::<u16>()
-                .map_err(|_| AppError::Internal(format!("bad port in {address}")))?,
+                .map_err(|_| AppError::Internal(format!("“{address}” has no valid port.")))?,
         ),
         None => (text, 2302),
     };
     if host.is_empty() {
         return Err(AppError::Internal(
-            "enter an address like 51.81.8.81:2402".into(),
+            "Enter an address like 51.81.8.81:2302.".into(),
         ));
     }
     let ip: std::net::IpAddr = match host.parse() {
         Ok(ip) => ip,
         Err(_) => tokio::net::lookup_host((host, port))
             .await
-            .map_err(|e| AppError::Internal(format!("cannot resolve {host}: {e}")))?
+            .map_err(|e| {
+                crate::log_info!("join", "cannot resolve {host}: {e}");
+                not_found(host)
+            })?
             .map(|a| a.ip())
             .find(|ip| ip.is_ipv4())
-            .ok_or_else(|| AppError::Internal(format!("{host} has no IPv4 address")))?,
+            .ok_or_else(|| not_found(host))?,
     };
     crate::log_info!("join", "direct connect to {address}");
     // The typed port may be the query port (answers INFO directly) or the game port
@@ -2660,7 +2805,7 @@ pub async fn direct_connect(
         Err(_) => Err("the server cache is unavailable".to_string()),
     })
     .await
-    .map_err(|e| AppError::Internal(format!("cache task failed: {e}")))?
+    .map_err(|e| saved_data(format!("cache task failed: {e}")))?
     .map_err(AppError::Internal)?;
     send_rows(&app, "batch", &vec![row.clone()]);
     if let Some(mut t) = Target::from_row(&row) {
@@ -2693,7 +2838,8 @@ pub struct ImportResult {
 fn import_failed(n: usize, e: &str) -> AppError {
     crate::log_error!("cache", "favourite import of {n} row(s) failed: {e}");
     AppError::Internal(format!(
-        "read {n} favourite(s) but could not save them: {e}"
+        "Read {n} favourite{} but could not save them. The details are on the Logs page.",
+        if n == 1 { "" } else { "s" }
     ))
 }
 

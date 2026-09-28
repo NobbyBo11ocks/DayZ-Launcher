@@ -98,6 +98,22 @@ fn s(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
+/// "1 mod is" or "3 mods are": a count with its noun and verb (row 16, no "(s)").
+fn count(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
+/// Mod links in `!Workshop` whose mod folder is gone, for the Mods page, which removes
+/// them. The join plan leaves the line out: they do not stop a join (row 16).
+pub fn broken_links(n: usize) -> String {
+    format!(
+        "{} in !Workshop {} broken; remove {} on the Mods page.",
+        count(n, "mod link", "mod links"),
+        if n == 1 { "is" } else { "are" },
+        if n == 1 { "it" } else { "them" }
+    )
+}
+
 /// The lines the join plan says in its own words, so it can leave these out and say each
 /// problem once (D-296).
 pub const STEAM_NOT_RUNNING: &str = "Steam is not running; the server list and Workshop need it.";
@@ -116,11 +132,11 @@ pub fn collect() -> AppResult<Diagnostics> {
 
     let steam = registry::detect();
     if steam.path.is_none() {
-        warnings.push("Steam is not installed (no registry key).".into());
+        warnings.push("Steam is not installed on this PC.".into());
     } else if !steam.running {
         warnings.push(STEAM_NOT_RUNNING.into());
     } else if steam.active_user == 0 {
-        warnings.push("Steam is running but nobody is logged in.".into());
+        warnings.push("Steam is running but nobody is signed in.".into());
     }
 
     // A truncated `libraryfolders.vdf` or `appworkshop_221100.acf` — a power cut
@@ -187,8 +203,10 @@ pub fn collect() -> AppResult<Diagnostics> {
                 let ids = workshop::installed_ids(&g.library.path);
                 if !ids.is_empty() {
                     warnings.push(format!(
-                        "Steam's Workshop list is missing; {} mod(s) are listed from their folders, without sizes or update times.",
-                        ids.len()
+                        "Steam's Workshop list is missing; {} listed from {} folder{}, without sizes or update times.",
+                        count(ids.len(), "mod is", "mods are"),
+                        if ids.len() == 1 { "its" } else { "their" },
+                        if ids.len() == 1 { "" } else { "s" }
                     ));
                 }
                 Some(workshop::from_folders(&g.library.path, &ids))
@@ -205,7 +223,9 @@ pub fn collect() -> AppResult<Diagnostics> {
             let missing = ws.items.iter().filter(|i| i.folder.is_none()).count();
             if missing > 0 {
                 warnings.push(format!(
-                    "{missing} Workshop item(s) are listed as installed but have no folder."
+                    "{} listed as installed but {} no folder.",
+                    count(missing, "Workshop mod is", "Workshop mods are"),
+                    if missing == 1 { "has" } else { "have" }
                 ));
             }
             for i in ws
@@ -214,7 +234,7 @@ pub fn collect() -> AppResult<Diagnostics> {
                 .filter(|i| matches!(i.meta_published_id, Some(p) if p != i.id))
             {
                 warnings.push(format!(
-                    "Workshop folder {} contains meta.cpp for publishedid {} (mismatch).",
+                    "The folder for mod {} holds a different mod ({}).",
                     i.id,
                     i.meta_published_id.unwrap_or(0)
                 ));
@@ -253,9 +273,7 @@ pub fn collect() -> AppResult<Diagnostics> {
             .collect();
         let dangling = junctions.iter().filter(|j| j.removable).count();
         if dangling > 0 {
-            warnings.push(format!(
-                "{dangling} junction(s) in !Workshop point at missing folders."
-            ));
+            warnings.push(broken_links(dangling));
         }
     } else if steam.path.is_some() {
         // A library on a disconnected drive is skipped by `find_dayz`, and "not
@@ -265,7 +283,7 @@ pub fn collect() -> AppResult<Diagnostics> {
                 "Steam has DayZ in {}, but that folder is not reachable; connect the drive and try again.",
                 p.display()
             ),
-            None => format!("DayZ (app {DAYZ_APP_ID}) is not installed in any Steam library."),
+            None => "DayZ is not installed in any Steam library.".into(),
         });
     }
 

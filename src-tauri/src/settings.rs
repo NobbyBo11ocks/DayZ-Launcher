@@ -18,6 +18,8 @@ use serde_json::Value;
 const INSTALL_CHOICES_KEY: &str = r"Software\dayzlauncher\DZSA CrayZ Launcher";
 
 const THEMES: [&str; 2] = ["slate", "light"];
+/// The pages the launcher can open on (row 16); News is the default (D-100).
+const OPEN_ON: [&str; 3] = ["news", "servers", "favourites"];
 // Keep in step with `ACCENTS` in src/lib/state/prefs.svelte.ts and the tokens in src/app.css.
 const ACCENTS: [&str; 12] = [
     "amber", "orange", "red", "rose", "pink", "violet", "indigo", "blue", "sky", "teal", "green",
@@ -48,6 +50,9 @@ pub struct UiPrefs {
     /// The launcher version whose "What's new" notes were last shown (D-301). Empty in
     /// a file written before 0.1.78, which the front end reads as an update to this one.
     pub last_seen_version: String,
+    /// The page the launcher opens on, one of `OPEN_ON` (row 16). With News off it
+    /// opens on Servers.
+    pub open_on: String,
     /// Keys this build does not know, kept as they came: a newer version's, which an
     /// older one dropped at its first write — a downgrade and an upgrade again lost them,
     /// and one-time moves ran twice (row 15, H4). Never rename a key or change its type;
@@ -69,6 +74,7 @@ impl Default for UiPrefs {
             accent_default_v2: false,
             news: true,
             last_seen_version: String::new(),
+            open_on: "news".into(),
             extra: serde_json::Map::new(),
         }
     }
@@ -82,6 +88,9 @@ impl UiPrefs {
         }
         if !ACCENTS.contains(&self.accent.as_str()) {
             self.accent = "lime".into();
+        }
+        if !OPEN_ON.contains(&self.open_on.as_str()) {
+            self.open_on = "news".into();
         }
         if !matches!(self.filters, Some(Value::Object(_)) | None) {
             self.filters = None;
@@ -1045,6 +1054,27 @@ mod tests {
         assert_eq!(
             SettingsStore::load(&path).get().ui.last_seen_version,
             "0.1.78"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Row 16: the start page is News until the player picks another of the three.
+    #[test]
+    fn the_start_page_is_news_until_another_is_picked() {
+        let old: Settings = parse_settings(br#"{"ui":{"onboarded":true}}"#).unwrap();
+        assert_eq!(old.ui.open_on, "news");
+        let path = temp_path("openon");
+        let store = SettingsStore::load(&path);
+        assert_eq!(
+            store
+                .patch_ui(json!({ "openOn": "favourites" }))
+                .unwrap()
+                .open_on,
+            "favourites"
+        );
+        assert_eq!(
+            store.patch_ui(json!({ "openOn": "mods" })).unwrap().open_on,
+            "news"
         );
         let _ = std::fs::remove_file(&path);
     }

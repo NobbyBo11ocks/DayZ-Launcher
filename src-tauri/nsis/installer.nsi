@@ -208,7 +208,7 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 ; The rest of the artwork sits beside the sidebar image Tauri was given (src-tauri/nsis).
 !searchreplace DZL_ART "${SIDEBARIMAGE}" "sidebar.bmp" ""
 !define MUI_WELCOMEPAGE_TITLE "Welcome to ${PRODUCTNAME}"
-!define MUI_WELCOMEPAGE_TEXT "The DayZ server browser that checks every player count with the server itself, syncs the Workshop mods a server needs and gets you in with one click.$\r$\n$\r$\nThis installs version ${VERSION} for your Windows account; no administrator rights are needed.$\r$\n$\r$\nClick Next to continue."
+!define MUI_WELCOMEPAGE_TEXT "The DayZ server browser that checks player counts with the servers themselves, downloads the Workshop mods a server needs and gets you in with one click.$\r$\n$\r$\nThis installs version ${VERSION} for your Windows account; no administrator rights are needed.$\r$\n$\r$\nClick Next to continue."
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW DzlWelcomeShow
 Var DzlHwnd
 Var DzlChild
@@ -501,7 +501,7 @@ Function PageOptions
   ${OrIf} ${Silent}
     Abort
   ${EndIf}
-  !insertmacro MUI_HEADER_TEXT "Options" "These can all be changed later in Settings."
+  !insertmacro MUI_HEADER_TEXT "Options" "You can change this later in Settings."
   nsDialogs::Create 1018
   Pop $0
   ${If} $0 == error
@@ -513,7 +513,7 @@ Function PageOptions
   ${If} $OptNewsState = 1
     ${NSD_Check} $OptNewsCheckbox
   ${EndIf}
-  ${NSD_CreateLabel} 12u 24u 96% 34u "With the news page off, the launcher never contacts Steam's news feed, its picture CDN or YouTube. It can be turned back on at any time in Settings."
+  ${NSD_CreateLabel} 12u 24u 96% 34u "With the news page off, the launcher never contacts Steam's news feed, its picture server or YouTube. It can be turned back on at any time in Settings."
   Pop $0
   Call DzlDarkIn
   nsDialogs::Show

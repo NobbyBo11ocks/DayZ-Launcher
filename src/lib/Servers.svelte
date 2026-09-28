@@ -64,7 +64,14 @@
       // Through closeConnect, like Escape: closing destroys the focused field, and
       // focus fell to <body>, where the grid's keys stop working (D-224, D-256).
       closeConnect();
+      // "Join", not "Add" (row 16): the join window opens with its plan, as from the list.
+      servers.requestJoin(row.id);
     }
+  }
+
+  async function startSteam() {
+    const why = await servers.startSteam();
+    if (why) servers.fail("steam-start", why);
   }
 
   // The store is started once by App.svelte and never stopped (D-084).
@@ -132,8 +139,8 @@
     // The header's notice, said once when it appears (D-291).
     if (servers.steam && !servers.steam.initialized) return servers.steam.signedOut ? "Steam is running but nobody is signed in; the launcher connects once you sign in." : "Steam is not running; the launcher connects as soon as it starts.";
     const v = servers.verifySummary;
-    if (v?.skipped) return "Verification deferred; a pass is already running.";
-    if (v) return `${fmt.format(v.verified)} verified, ${fmt.format(v.inflated + v.unverifiable + v.synthetic)} fake, ${v.offline} offline.`;
+    if (v?.skipped) return "Player counts are already being checked.";
+    if (v) return `${fmt.format(v.verified)} verified, ${fmt.format(v.inflated + v.unverifiable + v.synthetic)} untrusted, ${v.offline} not answering.`;
     const d = servers.done;
     if (d && !d.rejected) return `${fmt.format(d.responded)} servers listed.`;
     return "";
@@ -152,7 +159,7 @@
         <input
           class="search"
           type="search"
-          placeholder="Search name, map or IP"
+          placeholder="Search name, description, map or IP"
           value={typed}
           bind:this={searchEl}
           aria-label="Search servers (/ in the list comes here)"
@@ -165,6 +172,15 @@
               // To the list rather than nowhere: `blur()` left focus on <body>, where the
               // list's keys do nothing until Tab finds it again (D-291).
               e.currentTarget.closest(".servers")?.querySelector<HTMLElement>('[role="grid"]')?.focus();
+            } else if ((e.key === "ArrowDown" || e.key === "Enter") && !e.isComposing) {
+              // On into the list, its first match selected unless the selection is in it,
+              // so ↑/↓ and Enter carry on from there (row 16). The typing pause is skipped.
+              e.preventDefault();
+              box.dispose();
+              servers.filters.search = typed;
+              const first = servers.list[0];
+              if (first && !servers.list.some((r) => r.id === servers.selectedId)) servers.select(first.id);
+              e.currentTarget.closest(".servers")?.querySelector<HTMLElement>('[role="grid"]')?.focus();
             }
           }}
         />
@@ -173,14 +189,12 @@
       <!-- Beside the search, where an address would be typed anyway (user request,
            D-250); the popover opens to the right, over the list. -->
       <div class="connect">
-        <button class="iconbtn" bind:this={connectBtn} class:on={connectOpen} onclick={toggleConnect} aria-expanded={connectOpen} aria-label="Direct connect" title="Direct connect to an address">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3" /><circle cx="8" cy="8" r="3" /></svg>
-        </button>
+        <button class="btn secondary" bind:this={connectBtn} onclick={toggleConnect} aria-expanded={connectOpen} title="Join a server by its address">Direct connect</button>
         {#if connectOpen}
           <form class="pop" onsubmit={(e) => { e.preventDefault(); void connectDirect(); }}>
             <span class="poptitle">Direct connect</span>
-            <input type="text" placeholder="ip:port" bind:value={direct} bind:this={connectInput} aria-label="Direct connect address" spellcheck="false" />
-            <button class="btn" type="submit" disabled={connecting || !direct.trim()}>{connecting ? "…" : "Add"}</button>
+            <input type="text" placeholder="IP:port" bind:value={direct} bind:this={connectInput} aria-label="Server address, IP:port" spellcheck="false" />
+            <button class="btn" type="submit" disabled={connecting || !direct.trim()}>{connecting ? "…" : "Join"}</button>
           </form>
         {/if}
       </div>
@@ -195,6 +209,9 @@
                F12, approved). -->
           {@const why = servers.steam.signedOut ? "Steam is running but nobody is signed in; the launcher connects once you sign in." : "Steam is not running; the launcher connects as soon as it starts."}
           <span class="warn" title={servers.steam.error ?? why}>{why}</span>
+          {#if !servers.steam.signedOut}
+            <button class="link" onclick={startSteam} disabled={servers.steamStarting}>{servers.steamStarting ? "Starting Steam…" : "Start Steam"}</button>
+          {/if}
           <button class="link" onclick={() => servers.loadDzsa()} disabled={servers.dzsaLoading} title="Download the DZSA Launcher's public server list (about 24 MB) instead">
             {servers.dzsaLoading ? "Downloading…" : "Load list from DZSA"}
           </button>
@@ -210,7 +227,7 @@
            servers, so the rows people care about arrive in about 40 s and the empty
            ones keep filling in behind them. -->
       <button class="btn" onclick={() => servers.refresh(true, true)} disabled={busy} title="Fetch from Steam: servers with players first (about 40 s), then the empty ones (a few minutes)">
-        {servers.steam?.refreshing ? "Refreshing…" : "Refresh"}
+        {servers.steam?.refreshing ? (servers.refreshListed > 0 ? `Refreshing… ${fmt.format(servers.refreshListed)} listed` : "Refreshing…") : "Refresh"}
       </button>
     </div>
 
@@ -261,12 +278,8 @@
   .search:focus-visible { outline: 2px solid var(--accent-ink); }
   .searchwrap kbd { position: absolute; right: 7px; padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; font-size: 10.5px; line-height: 15px; color: var(--fg-muted); background: var(--bg-elev); pointer-events: none; }
 
-  .iconbtn { all: unset; cursor: pointer; box-sizing: border-box; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); border: 1px solid var(--border-control); background: var(--bg-row); color: var(--fg-muted); }
-  .iconbtn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; }
-  .iconbtn:hover, .iconbtn.on { color: var(--fg); border-color: var(--accent-ink); }
-  .iconbtn:focus-visible { outline: 2px solid var(--accent-ink); }
-
   .connect { position: relative; flex: none; }
+  .connect [aria-expanded="true"] { border-color: var(--accent); }
   .pop { position: absolute; top: 34px; left: 0; z-index: 20; display: flex; align-items: center; gap: 6px; padding: 8px; border-radius: 10px; background: var(--bg-elev); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); }
   .poptitle { font-size: 11.5px; color: var(--fg-muted); white-space: nowrap; padding-right: 2px; }
   .pop input { box-sizing: border-box; width: 190px; height: 28px; padding: 0 10px; border-radius: var(--radius); border: 1px solid var(--border-control); background: var(--bg-row); color: var(--fg); font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }

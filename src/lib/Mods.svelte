@@ -70,7 +70,7 @@
     try {
       const r = await invoke<JunctionCleanup>("junctions_remove_dangling");
       const failed = r.failed.map((f) => `${f.name} (${f.error})`).join(", ");
-      notice = `Removed ${r.removed.length} stale junction${r.removed.length === 1 ? "" : "s"}${failed ? `; could not remove ${failed}` : ""}.`;
+      notice = `Removed ${r.removed.length} broken link${r.removed.length === 1 ? "" : "s"}${failed ? `; could not remove ${failed}` : ""}.`;
       error = failed ? `Could not remove ${failed}` : null;
       await load();
     } catch (e) {
@@ -162,7 +162,7 @@
     { id: "all", label: "All", count: () => all.length },
     { id: "updates", label: "Updates", count: () => stale.length },
     { id: "unused", label: "On no server", count: () => unused.length },
-    { id: "nojunction", label: "No junction", count: () => noJunction.length },
+    { id: "nojunction", label: "No link", count: () => noJunction.length },
   ];
 
   const items = $derived.by(() => {
@@ -260,8 +260,8 @@
       if (ok) {
         notice =
           ids.length === 1 && ids[0]
-            ? `Unsubscribed from ${ids[0].name}. Steam removes the files when DayZ is not running; the junction stays for the official launcher.`
-            : `Unsubscribed from ${ok} mods. Steam removes the files when DayZ is not running; the junctions stay for the official launcher.`;
+            ? `Unsubscribed from ${ids[0].name}. Steam removes the files when DayZ is not running; the mod link stays for the official launcher.`
+            : `Unsubscribed from ${ok} mods. Steam removes the files when DayZ is not running; the mod links stay for the official launcher.`;
         for (const r of res) if (r.ok) selected.delete(r.id);
       }
       if (bad.length) error = `Could not unsubscribe from ${bad.length} mod${bad.length === 1 ? "" : "s"}: ${bad[0]?.error ?? "no answer from Steam"}`;
@@ -286,17 +286,17 @@
   <header class="bar">
     <h1 tabindex="-1" bind:this={headingEl}>Mods</h1>
     {#if data?.workshop}
-      <span class="muted">{all.length} installed · {fmtBytes(totalSize)}{#if dangling}{" "}· {dangling} stale junction{dangling === 1 ? "" : "s"}{/if}</span>
+      <span class="muted">{all.length} installed · {fmtBytes(totalSize)}{#if dangling}{" "}· {dangling} broken link{dangling === 1 ? "" : "s"}{/if}</span>
     {/if}
     <span class="spacer"></span>
     {#if dangling}
       {#if confirmClean}
-        <span class="muted" id="clean-q">Remove {dangling} stale junction{dangling === 1 ? "" : "s"}? Only ones whose target folder is gone.</span>
+        <span class="muted" id="clean-q">Remove {dangling} broken link{dangling === 1 ? "" : "s"}? Only links whose mod folder is gone.</span>
         <button class="btn danger" aria-describedby="clean-q" onclick={async () => { await cleanJunctions(); void focusSoon('[data-ask="clean"]'); }}>Yes</button>
         <button class="btn secondary" data-no="clean" aria-describedby="clean-q" onclick={() => { confirmClean = false; void focusSoon('[data-ask="clean"]'); }}>No</button>
       {:else}
-        <button class="btn secondary" data-ask="clean" onclick={() => { confirmClean = true; void focusSoon('[data-no="clean"]'); }} disabled={cleaning || !!updating} title="Delete the !Workshop junctions whose target folder no longer exists">
-          {cleaning ? "Removing…" : `Clean ${dangling} stale`}
+        <button class="btn secondary" data-ask="clean" onclick={() => { confirmClean = true; void focusSoon('[data-no="clean"]'); }} disabled={cleaning || !!updating} title="Remove the mod links in !Workshop whose mod folder is gone">
+          {cleaning ? "Removing…" : `Remove ${dangling} broken`}
         </button>
       {/if}
     {/if}
@@ -378,7 +378,7 @@
             <th aria-sort={ariaSort("name")}><button class="th" onclick={() => setSort("name")}>Mod<span aria-hidden="true">{mark("name")}</span></button></th>
             <th class="num" aria-sort={ariaSort("size")}><button class="th" onclick={() => setSort("size")}>Size<span aria-hidden="true">{mark("size")}</span></button></th>
             <th aria-sort={ariaSort("updated")}><button class="th" onclick={() => setSort("updated")}>Updated<span aria-hidden="true">{mark("updated")}</span></button></th>
-            <th>Junction</th>
+            <th>Link</th>
             <th class="num" title="Servers whose scanned mod list includes this item" aria-sort={ariaSort("servers")}>
               <button class="th" onclick={() => setSort("servers")}>Servers<span aria-hidden="true">{mark("servers")}</span></button>
             </th>
@@ -399,7 +399,7 @@
               </td>
               <td class="num">{fmtBytes(it.size)}</td>
               <td>{new Date(it.timeUpdated * 1000).toLocaleDateString()}{it.needsUpdate ? " ⚠ update" : ""}</td>
-              <td class={j ? (j.targetExists ? "ok" : "warn") : "muted"}>{j ? (j.targetExists ? j.name : `${j.name} (target gone)`) : "none (created on first join)"}</td>
+              <td class={j ? (j.targetExists ? "ok" : "warn") : "muted"}>{j ? (j.targetExists ? j.name : `${j.name} (mod folder gone)`) : "none yet (made when you join)"}</td>
               <td class="num">
                 {#if !servers.modsIndexLoaded}<span class="muted" title="The server list's mod lists have not loaded yet">—</span>{:else if running}<button class="btn slim" onclick={() => showServers(it.id)} title="Show these servers" aria-label="{running} server{running === 1 ? '' : 's'} running {name}, show them">{running}</button>{:else}<span class="muted">0</span>{/if}
               </td>
@@ -424,7 +424,7 @@
   {/if}
 
   <p class="muted small">
-    Steam downloads mods when you join a server that needs them. Junctions in <code>!Workshop</code> are shared with the official launcher and never deleted here on their own; dangling ones can be cleaned up with the button above.
+    Steam downloads mods when you join a server that needs them. The @mod links in <code>!Workshop</code> are shared with the official launcher; this page removes only broken ones, and only when you ask.
   </p>
 </section>
 

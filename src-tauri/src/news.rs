@@ -434,13 +434,22 @@ pub fn prune_thumbnails(dir: &std::path::Path, keep: &std::collections::HashSet<
 /// The News page's error when there is no connection (row 14, F6, approved).
 const NEWS_OFFLINE: &str =
     "The news could not be loaded: no connection to Steam. It is tried again when the connection is back.";
+/// Any other failure: the page retries on focus and every half hour (row 16).
+const NEWS_FAILED: &str =
+    "The news could not be loaded: Steam's news service did not answer. It is tried again later.";
+
+/// `NEWS_FAILED` on screen, what went wrong in the log.
+fn failed(detail: impl std::fmt::Display) -> String {
+    crate::log_warn!("news", "{detail}");
+    NEWS_FAILED.to_string()
+}
 
 pub async fn fetch(count: u32) -> Result<Vec<NewsItem>, String> {
     let client = reqwest::Client::builder()
         .user_agent(USER_AGENT)
         .timeout(std::time::Duration::from_secs(20))
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(failed)?;
     // Plain integers and fixed words only, so the URL is built without the `query`
     // and `json` reqwest features (kept off to stay with the updater's feature set).
     let url = format!(
@@ -451,13 +460,15 @@ pub async fn fetch(count: u32) -> Result<Vec<NewsItem>, String> {
         .get(url)
         .send()
         .await
-        .map_err(|e| crate::http::request_error(e, "news request", NEWS_OFFLINE))?
+        .map_err(|e| crate::http::request_error(e, "news request", NEWS_OFFLINE, NEWS_FAILED))?
         .error_for_status()
-        .map_err(|e| format!("news request failed: {e}"))?;
+        .map_err(|e| failed(format!("news request failed: {e}")))?;
     // 60 posts are well under 100 KB gzipped; 8 MB is far above any honest reply (D-163).
-    let body = crate::http::body_capped(resp, 8 * 1024 * 1024, "news reply").await?;
+    let body = crate::http::body_capped(resp, 8 * 1024 * 1024, "news reply")
+        .await
+        .map_err(failed)?;
     let doc: Document =
-        serde_json::from_slice(&body).map_err(|e| format!("news reply unreadable: {e}"))?;
+        serde_json::from_slice(&body).map_err(|e| failed(format!("news reply unreadable: {e}")))?;
     let mut items: Vec<NewsItem> = doc.appnews.newsitems.into_iter().map(convert).collect();
     items.sort_by_key(|i| std::cmp::Reverse(i.date));
     Ok(items)

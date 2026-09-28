@@ -28,7 +28,7 @@ pub fn spawn(game_dir: &Path, args: &[String]) -> AppResult<(Child, Launched)> {
     let exe = game_dir.join(BE_EXE);
     if !exe.is_file() {
         return Err(AppError::Internal(format!(
-            "{} is missing; verify the game files in Steam",
+            "{} is missing. Verify the game files in Steam.",
             exe.display()
         )));
     }

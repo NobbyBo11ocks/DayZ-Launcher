@@ -13,8 +13,11 @@
 // did, and keeping a twelve-line comment in step across two files is a job nobody will
 // remember to do (D-205).
 //
-// Run after every CLI upgrade; `--write` refreshes the file from the new tag with the
-// marked blocks re-applied, so the diff can be reviewed.
+// Our English.nsh (the installer's strings, row 16) is checked the same way: upstream's
+// file for the tag, with only the strings its `; dzl-strings:` line names in our words.
+//
+// Run after every CLI upgrade; `--write` refreshes both files from the new tag with our
+// changes re-applied, so the diff can be reviewed.
 // Usage: node tools/nsis_template_check.js [--write]
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -22,6 +25,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const localPath = path.join(root, "src-tauri", "nsis", "installer.nsi");
+const langPath = path.join(root, "src-tauri", "nsis", "English.nsh");
 const MARKER = "; --- end of DayZ Launcher header; everything below is upstream ---\n";
 const OPEN = "; >>> dzl-change: ";
 const CLOSE = "; <<< dzl-change";
@@ -78,6 +82,10 @@ function unmark(body) {
 async function main(write) {
   const cliVersion = JSON.parse(readFileSync(path.join(root, "node_modules/@tauri-apps/cli/package.json"), "utf8")).version;
   const tag = `tauri-cli-v${cliVersion}`;
+  return Math.max(await checkTemplate(tag, write), await checkStrings(tag, write));
+}
+
+async function checkTemplate(tag, write) {
   const url = `https://raw.githubusercontent.com/tauri-apps/tauri/${tag}/crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi`;
 
   const res = await fetch(url);
@@ -140,6 +148,45 @@ async function main(write) {
   }
   writeFileSync(localPath, header.replace(/tauri-cli-v[\d.]+/g, tag) + "\n" + rebuilt);
   console.log(`refreshed from upstream ${tag} with ${blocks.length} marked changes; review the diff`);
+  return 0;
+}
+
+/**
+ * English.nsh: every LangString upstream has, each as upstream wrote it, except the ones
+ * the `; dzl-strings:` line names, which must differ. A string a CLI upgrade adds or
+ * rewords is caught here instead of missing from the installer.
+ */
+async function checkStrings(tag, write) {
+  const url = `https://raw.githubusercontent.com/tauri-apps/tauri/${tag}/crates/tauri-bundler/src/bundle/windows/nsis/languages/English.nsh`;
+  const res = await fetch(url);
+  if (!res.ok) return fail(`${url} → HTTP ${res.status}`);
+  const upstream = (await res.text()).replace(/\r\n/g, "\n");
+  const local = readFileSync(langPath, "utf8").replace(/\r\n/g, "\n");
+  const ours = new Set((/^; dzl-strings: (.*)$/m.exec(local)?.[1] ?? "").trim().split(/\s+/).filter(Boolean));
+  const parse = (text) => text.split("\n").filter((l) => l.startsWith("LangString ")).map((l) => [l.split(" ")[1], l]);
+  const up = parse(upstream);
+  const mine = new Map(parse(local));
+  const problems = [];
+  for (const [key, line] of up) {
+    const have = mine.get(key);
+    if (have === undefined) problems.push(`${key} is missing`);
+    else if (ours.has(key) && have === line) problems.push(`${key} is named as ours but is upstream's`);
+    else if (!ours.has(key) && have !== line) problems.push(`${key} differs from upstream without being named`);
+  }
+  for (const key of mine.keys()) if (!up.some(([k]) => k === key)) problems.push(`${key} is no longer upstream's`);
+  if (!local.includes(tag)) problems.push(`the header names another tag than ${tag}`);
+  if (problems.length === 0) {
+    console.log(`ok: English.nsh is upstream ${tag} with ${ours.size} strings of our own`);
+    return 0;
+  }
+  if (!write) {
+    console.error(`mismatch in English.nsh: ${problems.join("; ")}; run with --write, then review the diff`);
+    return 1;
+  }
+  const header = local.split("\n").filter((l) => l.startsWith(";")).join("\n").replace(/tauri-cli-v[\d.]+/g, tag);
+  const body = up.map(([key, line]) => (ours.has(key) && mine.has(key) ? mine.get(key) : line)).join("\n");
+  writeFileSync(langPath, header + "\n" + body + "\n");
+  console.log(`refreshed English.nsh from upstream ${tag}; review the diff`);
   return 0;
 }
 

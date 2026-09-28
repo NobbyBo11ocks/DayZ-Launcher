@@ -285,7 +285,7 @@
   const pingClass = (ms: number) => (ms < 60 ? "ok" : ms >= 120 ? "warn" : "");
   /** Ping quality in words: the colour alone said it, which is not available to a
    *  screen reader and not distinguishable to everyone else (D-198). */
-  const pingWord = (ms: number) => (ms < 60 ? "good" : ms >= 120 ? "far away" : "usable");
+  const pingWord = (ms: number) => (ms < 60 ? "good" : ms >= 120 ? "high" : "usable");
   const pingTitle = (ms: number) => `${ms} ms — ${pingWord(ms)}`;
 </script>
 
@@ -407,26 +407,26 @@
               title={r.clone
                 ? "Same name as a server verified on another address; this copy's own check has not verified it"
                 : isInflated(r)
-                  ? `Steam reports 0 authenticated players; the server claims ${r.players}`
+                  ? `Steam sees nobody on it; the server claims ${r.players}`
                 : r.players > 127
                   ? "Claims more players than any DayZ server this launcher has counted"
                 : r.verifiedPlayers == null && (r.bots ?? 0) > 0 && r.bots === r.players
-                  ? "Reports as many bots as players, the mark of a patched player count, and has never been counted"
+                  ? "Its listing carries the mark of a faked count, and it has never been counted"
                 : r.verdict === "inflated"
-                  ? `Inflated: server claims ${r.players}, ${r.verifiedPlayers ?? 0} actually connected`
+                  ? `Inflated: the server claims ${r.players}, ${r.verifiedPlayers ?? 0} actually connected`
                   : r.verdict === "unverifiable"
                     ? r.steamEmpty === false
                       ? r.verifiedPlayers != null
-                        ? "Server has stopped answering player queries; showing its last head-count"
-                        : "Server does not answer player queries; Steam sees a session but the number is the server's own, unconfirmed"
-                      : "Server refuses player queries while claiming players"
+                        ? "The server has stopped sharing its player list; showing its last count"
+                        : "The server does not share its player list; Steam sees a session, but the number is the server's own, unconfirmed"
+                      : "The server claims players but does not share its player list"
                     : r.verdict === "synthetic"
-                      ? "Player list looks fabricated"
+                      ? "The player list looks fake"
                       : r.verdict === "offline"
-                        ? "Server is not answering; this is the last number it reported"
+                        ? "The server is not answering; this is the last number it reported"
                         : r.verdict === "verified"
-                          ? `Verified head-count (${clock(r.tags.timeMinutes)} in game)`
-                          : "Reported by the server, not yet verified"}
+                          ? "Counted by the launcher"
+                          : "The server's own number, not checked yet"}
             >
               <!-- An unchecked count is dimmed and marked "?" (D-288). Steam vouching
                    for a server keeps it in the list, but the number is still the

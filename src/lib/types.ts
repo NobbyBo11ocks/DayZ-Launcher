@@ -517,7 +517,12 @@ export type UiPrefs = {
   news: boolean;
   /** The version whose "What's new" notes were last shown; empty before 0.1.78 (D-301). */
   lastSeenVersion: string;
+  /** The page the launcher opens on (row 16); absent before 0.1.83. */
+  openOn?: StartPage;
 };
+
+/** The pages the launcher can open on (row 16); `OPEN_ON` in settings.rs. */
+export type StartPage = "news" | "servers" | "favourites";
 
 /** One DayZ news post from Steam's feed (D-099). */
 export type NewsItem = {

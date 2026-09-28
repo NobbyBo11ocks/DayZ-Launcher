@@ -64,7 +64,7 @@ pub fn ensure_junctions(
     for (id, source, meta_name) in items {
         if !source.is_dir() {
             return Err(AppError::Internal(format!(
-                "Workshop item {id} has no folder at {}",
+                "Mod {id} has no folder at {}. Steam may not have finished downloading it.",
                 source.display()
             )));
         }
@@ -112,7 +112,7 @@ pub fn ensure_junctions(
         }
         let (junction, created) = chosen.ok_or_else(|| {
             AppError::Internal(format!(
-                "cannot create a junction for mod {id}: {} and its sibling are taken",
+                "Could not make the mod link for mod {id}: {} and its spare name are both taken.",
                 candidates[0].display()
             ))
         })?;

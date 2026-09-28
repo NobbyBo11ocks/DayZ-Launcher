@@ -57,7 +57,7 @@
     <h2 id="welcome-title">Welcome to DZSA CrayZ Launcher</h2>
     <ol id="welcome-points">
       <li><strong>Steam stays in charge.</strong> The server list comes from Steam, mods download through the Workshop, and the game starts through BattlEye exactly like the official launcher. Keep Steam running.</li>
-      <li><strong>Player counts are verified.</strong> More than half of the servers on Steam fake their population. Every number you see is checked directly with the server; fakes are hidden by default ("Hide inflated" in the Servers filters).</li>
+      <li><strong>Player counts are checked.</strong> More than half of the servers on Steam fake their player count. The launcher counts the players itself; a count not checked yet shows “?”, and servers it cannot trust are hidden (“Hide untrusted” in the filters).</li>
       <li><strong>Join in one click.</strong> Pick a server, press Join. Missing mods download with progress and DayZ launches connected.</li>
     </ol>
     <div class="row">
@@ -67,7 +67,7 @@
       <span class="sr-only" role="status">{imported ?? ""}</span>
     </div>
     <footer>
-      <span class="muted small">Keys: <kbd>/</kbd> search · <kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> join · <kbd>F</kbd> favourite</span>
+      <span class="muted small">Keys: <kbd>/</kbd> search · <kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> join · <kbd>F</kbd> favourite · <kbd>←</kbd><kbd>→</kbd> sort · <kbd>Space</kbd> reverse</span>
       <button class="btn" onclick={onDone}>Start browsing</button>
     </footer>
   </div>

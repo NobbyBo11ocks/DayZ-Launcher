@@ -107,6 +107,17 @@
     }
     return list;
   });
+  /** Enter picks the most-run mod that matches (row 16): typing alone filtered nothing
+   *  until the list was opened and a mod chosen. */
+  function pickTopMod(e: KeyboardEvent) {
+    if (e.key !== "Enter" || e.isComposing) return;
+    const q = modQuery.trim().toLowerCase();
+    const top = q ? modOptions.find((m) => m.name.toLowerCase().includes(q)) : undefined;
+    if (!top) return;
+    e.preventDefault();
+    servers.filters.mod = top.id;
+    servers.saveFilters();
+  }
 </script>
 
 <section class="panel" aria-labelledby="{uid}-title">
@@ -143,7 +154,7 @@
     <!-- Real checkboxes now that the toggles have a column of their own: a ticked row
          is ticked, where a chip only changed colour. Two to a row for the short ones;
          the one with a count gets the full width so the number lines up at the right
-         (Hide inflated, the other, went down with the foot). The block needs no
+         (Hide untrusted, the other, went down with the foot). The block needs no
          heading: every row names itself. -->
     <div class="checks" role="group" aria-label="Status">
       <label class="check"><input type="checkbox" checked={f.notEmpty} onchange={() => toggle("notEmpty")} />Not empty</label>
@@ -161,12 +172,12 @@
       </label>
     </div>
 
-    <!-- The foot: from Hide inflated down to the mod search, at the bottom of the rail
+    <!-- The foot: from Hide untrusted down to the mod search, at the bottom of the rail
          with the free height above it, on the user's call (D-270). A window with no
          height to spare leaves it where it was, under the checkboxes. -->
     <div class="foot">
-      <label class="check" title="Hide servers whose player count cannot be trusted: inflated, fabricated, not answering, or a copy of another server's name">
-        <input type="checkbox" checked={f.hideUntrusted} onchange={() => toggle("hideUntrusted")} title="Hide servers whose player count cannot be trusted: inflated, fabricated, not answering, or a copy of another server's name" />Hide inflated <span class="num">{fmt.format(servers.untrustedCount)}</span>
+      <label class="check" title="Hide servers whose player count cannot be trusted: inflated, faked, not answering, or copying another server's name">
+        <input type="checkbox" checked={f.hideUntrusted} onchange={() => toggle("hideUntrusted")} title="Hide servers whose player count cannot be trusted: inflated, faked, not answering, or copying another server's name" />Hide untrusted <span class="num">{fmt.format(servers.untrustedCount)}</span>
       </label>
 
       <!-- Official is Bohemia's public hive, where your character follows you between
@@ -235,7 +246,7 @@
       </div>
       {#if servers.modCatalog.size > 0 || f.mod}
         <div class="modf" role="group" aria-label="Running a specific mod">
-          <input class="modsearch" type="search" placeholder="Find a mod" bind:value={modQuery} aria-label="Find a mod" spellcheck="false" />
+          <input class="modsearch" type="search" placeholder="Find a mod" bind:value={modQuery} aria-label="Find a mod" spellcheck="false" onkeydown={pickTopMod} />
           <select class="modselect" class:on={f.mod !== 0} bind:value={servers.filters.mod} bind:this={modSelectEl} onchange={() => servers.saveFilters()} aria-label="Servers running this mod" title="Servers whose mod list includes this Workshop item">
             <option value={0}>Any mod</option>
             {#each modOptions as m (m.id)}

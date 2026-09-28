@@ -11,7 +11,7 @@
   import { servers } from "./state/servers.svelte";
   import { updates } from "./state/updates.svelte";
   import { modUpdates } from "./state/mods.svelte";
-  import type { Settings } from "./types";
+  import type { Settings, StartPage } from "./types";
   import { beforeClose } from "./state/closing";
 
   type AppInfo = { name: string; version: string; tauri: string; os: string; elevated?: boolean };
@@ -227,6 +227,25 @@
   ];
   // Twelve accents as colour dots (D-131): the id is the label, capitalised.
   const accents = ACCENTS.map((id) => ({ id, label: id.charAt(0).toUpperCase() + id.slice(1) }));
+  // The page the launcher opens on (row 16). With News off it opens on Servers, which
+  // is then the one shown as picked.
+  const startPages = $derived(
+    ([["news", "News"], ["servers", "Servers"], ["favourites", "Favourites"]] as [StartPage, string][]).filter(([id]) => prefs.news || id !== "news"),
+  );
+  const openOn = $derived<StartPage>(prefs.openOn === "news" && !prefs.news ? "servers" : prefs.openOn);
+
+  // What a launch adds for this PC beside the extra parameters (row 16): it showed only
+  // in the command line after a launch. Asked again when those change.
+  let perfArgs = $state<string[]>([]);
+  $effect(() => {
+    const extra = launch?.extraArgs ?? "";
+    const t = setTimeout(() => {
+      invoke<string[]>("perf_args", { extra })
+        .then((a) => (perfArgs = a))
+        .catch(() => {});
+    }, 250);
+    return () => clearTimeout(t);
+  });
 
   /**
    * Arrow keys inside a radiogroup, which is what makes it one tab stop instead of
@@ -289,14 +308,22 @@
         <div class="cbody">
           <label class="check">
             <input type="checkbox" bind:checked={servers.filters.hideUntrusted} onchange={() => servers.saveFilters()} />
-            <span>Hide servers with inflated or unverifiable player counts</span>
+            <span>Hide servers whose player count cannot be trusted</span>
           </label>
           <!-- Off removes the page and stops the feed being fetched at all (D-174). -->
           <label class="check">
             <input type="checkbox" checked={prefs.news} onchange={(e) => prefs.setNews(e.currentTarget.checked)} />
             <span>Show DayZ news on a page of its own</span>
           </label>
-          <p class="note">Off means the launcher never contacts Steam's news feed, its picture CDN or YouTube.</p>
+          <p class="note">Off means the launcher never contacts Steam's news feed, its picture server or YouTube.</p>
+          <div class="row">
+            <span class="label" id="open-on">Open on</span>
+            <div class="group" role="radiogroup" aria-labelledby="open-on" tabindex="-1" onkeydown={(e) => roving(e, startPages.map(([id]) => id), openOn, (id) => prefs.setOpenOn(id as StartPage))}>
+              {#each startPages as [id, label] (id)}
+                <button class="chip" class:on={openOn === id} role="radio" aria-checked={openOn === id} tabindex={openOn === id ? 0 : -1} onclick={() => prefs.setOpenOn(id)}>{label}</button>
+              {/each}
+            </div>
+          </div>
         </div>
       </section>
 
@@ -307,7 +334,7 @@
             <dt>Status</dt>
             <dd class={servers.steam?.initialized ? "ok" : "warn"}>
               {servers.steam?.initialized ? `connected as ${servers.steam.persona ?? "?"}` : (servers.steam?.error ?? "not connected")}
-              {#if servers.steam?.idle}<span class="muted"> · released while idle, reconnects on use</span>{/if}
+              {#if servers.steam?.idle}<span class="muted"> · disconnected while idle; reconnects when needed</span>{/if}
             </dd>
             <dt>Local DayZ</dt>
             <dd>{servers.localVersion ?? "not found"}</dd>
@@ -316,13 +343,13 @@
           </dl>
           {#if launch}
             <label class="row">
-              <span class="label">Idle release</span>
+              <span class="label">Disconnect when idle</span>
               <span class="inline">
-                after <input class="text num" type="number" min="0" max="1440" step="1" bind:value={launch.steamIdleMinutes} onchange={saveIdle} aria-label="Idle release, minutes" aria-describedby="idle-zero" /> min
-                <span class="muted" id="idle-zero">0 = stay connected</span>
+                after <input class="text num" type="number" min="0" max="1440" step="1" bind:value={launch.steamIdleMinutes} onchange={saveIdle} aria-label="Disconnect when idle, minutes" aria-describedby="idle-zero" /> min
+                <span class="muted" id="idle-zero">0 = never</span>
               </span>
             </label>
-            <p class="note">Steam counts playtime while connected. Releasing stops that; it reconnects by itself when needed.</p>
+            <p class="note">While connected, Steam shows you as playing DayZ and counts the hours. Disconnecting stops that; the launcher reconnects by itself when it needs Steam.</p>
           {/if}
         </div>
       </section>
@@ -375,23 +402,24 @@
         <div class="cbody">
           {#if launch}
             <label class="row">
-              <span class="label">Profile name</span>
-              <input class="text" type="text" bind:value={launch.profileName} oninput={scheduleSave} placeholder={servers.steam?.persona ?? "Steam persona"} aria-label="In-game profile name" />
+              <span class="label">In-game name</span>
+              <input class="text" type="text" bind:value={launch.profileName} oninput={scheduleSave} placeholder={servers.steam?.persona ?? "Your Steam name"} aria-label="In-game name" />
             </label>
             <label class="check"><input type="checkbox" bind:checked={launch.skipIntro} onchange={scheduleSave} /> <span>Skip intro <code>-skipintro</code></span></label>
             <label class="check"><input type="checkbox" bind:checked={launch.noSplash} onchange={scheduleSave} /> <span>No splash screen <code>-nosplash</code></span></label>
             <label class="check"><input type="checkbox" bind:checked={launch.noPause} onchange={scheduleSave} /> <span>Keep running when unfocused <code>-noPause</code></span></label>
             <label class="row">
-              <span class="label">Extra args</span>
+              <span class="label">Extra parameters</span>
               <input class="text mono" type="text" bind:value={launch.extraArgs} oninput={scheduleSave} placeholder="-profiles=&quot;D:\Profiles&quot; -limitFPS=144" />
             </label>
+            {#if perfArgs.length > 0}<p class="note">Also added for this PC unless you set them above: <code>{perfArgs.join(" ")}</code></p>{/if}
 
-            <h3>Saved profiles</h3>
+            <h3>Launch profiles</h3>
             <div class="row">
               <span class="label">Saved</span>
               <span class="inline wrap">
-                <select class="text" bind:value={pick} bind:this={pickEl} onchange={() => (confirmingDelete = false)} aria-label="Saved launch profiles">
-                  <option value={-1}>Saved profiles…</option>
+                <select class="text" bind:value={pick} bind:this={pickEl} onchange={() => (confirmingDelete = false)} aria-label="Launch profiles">
+                  <option value={-1}>Launch profiles…</option>
                   {#each launch.launchProfiles as p, i (i)}<option value={i}>{p.name}</option>{/each}
                 </select>
                 {#if confirmingDelete && pick >= 0}
@@ -411,7 +439,7 @@
             <div class="row">
               <span class="label">New</span>
               <span class="inline wrap">
-                <input class="text" type="text" placeholder="Profile name" bind:value={newName} aria-label="New profile name" />
+                <input class="text" type="text" placeholder="Name for this profile" bind:value={newName} aria-label="Name for this profile" />
                 <button class="chip" onclick={saveProfile} disabled={!newName.trim()} title="Save the launch options above under this name">{replacing ? `Replace “${replacing.name}”` : "Save as profile"}</button>
               </span>
             </div>
@@ -462,7 +490,7 @@
 
   .row { display: flex; align-items: center; gap: 12px; min-width: 0; }
   .row.wrap { flex-wrap: wrap; }
-  .label { flex: 0 0 92px; color: var(--fg-muted); font-size: 12.5px; }
+  .label { flex: 0 0 124px; color: var(--fg-muted); font-size: 12.5px; }
   .group { display: inline-flex; gap: 6px; flex-wrap: wrap; align-items: center; }
   .swatch { margin-left: 4px; font-size: 12px; }
 

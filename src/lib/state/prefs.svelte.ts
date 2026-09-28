@@ -1,6 +1,7 @@
 // Theme and accent. The settings file is the source of truth (D-070); localStorage
 // is read synchronously at start-up so the first paint already has the right theme,
 // then the file's values win as soon as they arrive. Every storage access is guarded.
+import type { StartPage } from "../types";
 import { uiPrefs } from "./uiprefs.svelte";
 
 export type Theme = "slate" | "light";
@@ -8,6 +9,7 @@ export type Accent = "amber" | "orange" | "red" | "rose" | "pink" | "violet" | "
 
 const KEY = "dayz-launcher.prefs.v1";
 const NEWS_KEY = "dayz-launcher.news.v1";
+const OPEN_KEY = "dayz-launcher.open-on.v1";
 /** Colour-wheel order, as shown in Settings. Tokens live in app.css; the host list in settings.rs. */
 export const ACCENTS: Accent[] = ["amber", "orange", "red", "rose", "pink", "violet", "indigo", "blue", "sky", "teal", "green", "lime"];
 
@@ -15,6 +17,7 @@ const normTheme = (t: unknown): Theme => (t === "light" ? "light" : "slate");
 /** Lime is the default (D-132); it must match `UiPrefs::default` in settings.rs. */
 const DEFAULT_ACCENT: Accent = "lime";
 const normAccent = (a: unknown): Accent => (ACCENTS.includes(a as Accent) ? (a as Accent) : DEFAULT_ACCENT);
+const normOpen = (p: unknown): StartPage => (p === "servers" || p === "favourites" ? p : "news");
 
 function loadCache(): { theme: Theme; accent: Accent } {
   try {
@@ -38,6 +41,8 @@ class Prefs {
    * file winning as soon as it is read.
    */
   news = $state(true);
+  /** The page the launcher opens on (row 16), cached like `news` for the first frame. */
+  openOn = $state<StartPage>("news");
   #fromFile = false;
 
   constructor() {
@@ -46,6 +51,7 @@ class Prefs {
     this.accent = c.accent;
     try {
       this.news = localStorage.getItem(NEWS_KEY) !== "off";
+      this.openOn = normOpen(localStorage.getItem(OPEN_KEY));
     } catch {
       /* storage unavailable */
     }
@@ -64,11 +70,13 @@ class Prefs {
       // and with it the fetches Settings promises never happen (D-194).
       if (uiPrefs.readOk) {
         this.news = u.news !== false;
+        this.openOn = normOpen(u.openOn);
         // The start-up copy follows the file. Only a change made here ever wrote it, so a
         // News page the installer had switched off (D-206) was drawn and taken away
         // again at every start (row 15, F3).
         try {
           localStorage.setItem(NEWS_KEY, this.news ? "on" : "off");
+          localStorage.setItem(OPEN_KEY, this.openOn);
         } catch {
           /* storage unavailable */
         }
@@ -76,7 +84,7 @@ class Prefs {
         // A damaged file was set aside and its defaults are being written: they get this
         // copy's choice, as theme and accent do below, or News came back at the next
         // start with its feed, pictures and videos (row 15, F1).
-        uiPrefs.patch({ news: this.news });
+        uiPrefs.patch({ news: this.news, openOn: this.openOn });
       }
       this.#fromFile = true;
       uiPrefs.patch({ theme: this.theme, accent: this.accent });
@@ -92,6 +100,17 @@ class Prefs {
       /* ignore */
     }
     uiPrefs.patch({ news: on });
+  }
+
+  /** The page the next start opens on (row 16). */
+  setOpenOn(p: StartPage) {
+    this.openOn = p;
+    try {
+      localStorage.setItem(OPEN_KEY, p);
+    } catch {
+      /* ignore */
+    }
+    uiPrefs.patch({ openOn: p });
   }
 
   /** Applies to <html> and persists. Called from an $effect in App.svelte. */

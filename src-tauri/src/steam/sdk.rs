@@ -644,7 +644,9 @@ impl SteamWorker {
     pub fn refresh(&self, partitions: Vec<Filters>, force: bool) -> Result<bool, String> {
         let s = self.status();
         if !s.initialized {
-            return Err(s.error.unwrap_or_else(|| "Steam is not initialised".into()));
+            return Err(s
+                .error
+                .unwrap_or_else(|| "Steam is not connected yet.".into()));
         }
         if s.refreshing {
             return Ok(false);
@@ -671,7 +673,9 @@ impl SteamWorker {
     pub fn sync(&self, job: u64, ids: Vec<u64>, subscribe: bool) -> Result<(), String> {
         let s = self.status();
         if !s.initialized {
-            return Err(s.error.unwrap_or_else(|| "Steam is not initialised".into()));
+            return Err(s
+                .error
+                .unwrap_or_else(|| "Steam is not connected yet.".into()));
         }
         if ids.is_empty() {
             return Err("nothing to sync".into());
@@ -690,7 +694,9 @@ impl SteamWorker {
     pub fn unsubscribe(&self, ids: &[u64]) -> Result<UnsubscribeResults, String> {
         let s = self.status();
         if !s.initialized {
-            return Err(s.error.unwrap_or_else(|| "Steam is not initialised".into()));
+            return Err(s
+                .error
+                .unwrap_or_else(|| "Steam is not connected yet.".into()));
         }
         if ids.is_empty() {
             return Ok(Vec::new());
@@ -727,7 +733,9 @@ impl SteamWorker {
     pub fn friends(&self) -> Result<Vec<FriendInfo>, String> {
         let s = self.status();
         if !s.initialized {
-            return Err(s.error.unwrap_or_else(|| "Steam is not initialised".into()));
+            return Err(s
+                .error
+                .unwrap_or_else(|| "Steam is not connected yet.".into()));
         }
         let (reply, rx) = mpsc::channel();
         self.cmd
@@ -764,7 +772,9 @@ impl SteamWorker {
     pub fn friend_avatar(&self, steam_id: u64) -> Result<Option<Avatar>, String> {
         let s = self.status();
         if !s.initialized {
-            return Err(s.error.unwrap_or_else(|| "Steam is not initialised".into()));
+            return Err(s
+                .error
+                .unwrap_or_else(|| "Steam is not connected yet.".into()));
         }
         let (reply, rx) = mpsc::channel();
         self.cmd
@@ -783,7 +793,9 @@ impl SteamWorker {
     pub fn item_details(&self, ids: &[u64]) -> Result<(Vec<ItemDetails>, Option<String>), String> {
         let s = self.status();
         if !s.initialized {
-            return Err(s.error.unwrap_or_else(|| "Steam is not initialised".into()));
+            return Err(s
+                .error
+                .unwrap_or_else(|| "Steam is not connected yet.".into()));
         }
         let mut out = Vec::with_capacity(ids.len());
         let mut missed: Option<String> = None;
@@ -1070,7 +1082,7 @@ fn tick_sync(
         {
             let e = String::from(
                 "Steam lists it as installed but its folder is gone. Unsubscribe it on the \
-                 Mods page (or in Steam), then join again to download it afresh",
+                 Mods page (or in Steam), then join again to download it afresh.",
             );
             p.state = "failed".into();
             p.error = Some(e.clone());
@@ -1120,12 +1132,12 @@ fn tick_sync(
             } else if stalled {
                 // What to do next, not only what happened (D-265).
                 Some(format!(
-                    "Steam made no progress on the download for {} minutes. Check Steam's Downloads page; if a mod stays stuck, unsubscribe it on the Mods page and join again",
+                    "Steam made no progress on the download for {} minutes. Check Steam's Downloads page; if a mod stays stuck, unsubscribe it on the Mods page and join again.",
                     SYNC_STALL.as_secs() / 60
                 ))
             } else {
                 Some(format!(
-                    "Steam did not finish the download within {} hours",
+                    "Steam did not finish the download within {} hours.",
                     SYNC_CAP.as_secs() / 3600
                 ))
             },
@@ -1428,7 +1440,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                             for id in ids.iter().filter(|id| s.ids.contains(id)) {
                                 s.failed.insert(
                                     *id,
-                                    "It was unsubscribed while it downloaded; join again to download it".into(),
+                                    "It was unsubscribed while it downloaded; join again to download it.".into(),
                                 );
                             }
                         } else {

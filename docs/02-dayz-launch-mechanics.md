@@ -15,7 +15,7 @@ All paths and values below were read from **this machine** on 2026-09-21 (S-41) 
 ## 2. Locating Steam and the game
 
 1. Registry (`winreg` crate):
-   - `HKCU\Software\Valve\Steam` → `SteamPath` (`c:/program files (x86)/steam`, forward slashes, lower case) and `SteamExe`.
+   - `HKCU\Software\Valve\Steam` → `SteamPath` (`c:/program files (x86)/steam`, forward slashes, lower case) and `SteamExe`. "Start Steam" runs `SteamExe` when no `steam.exe` is live, without the `SteamAppId`/`SteamGameId` the Steamworks session sets in the launcher's own environment (S-116, D-306).
    - `HKLM\SOFTWARE\WOW6432Node\Valve\Steam` → `InstallPath` (`C:\Program Files (x86)\Steam`).
    - `HKCU\Software\Valve\Steam\ActiveProcess` → `pid` and `ActiveUser` (non-zero when a user is logged in; live: ActiveUser 1824600665). **`pid` goes stale**: it read 16884 while the live `steam.exe` was 15176 (D-026). Detect liveness by enumerating processes (`CreateToolhelp32Snapshot`) for `steam.exe` whose image path is under `SteamPath`; use the registry pid only as a hint.
 2. Libraries: parse `<SteamPath>\steamapps\libraryfolders.vdf` (`keyvalues-parser`). Shape:

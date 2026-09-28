@@ -47,7 +47,7 @@
   const AREAS: { id: string; label: string; hint: string }[] = [
     { id: "join", label: "Joining", hint: "Join plans, direct connect and what a server needs" },
     { id: "launch", label: "Launching", hint: "The game starting and how it ended" },
-    { id: "mods", label: "Mods", hint: "Downloads, junctions, unsubscribes and mod scans" },
+    { id: "mods", label: "Mods", hint: "Downloads, mod links, unsubscribes and mod scans" },
     { id: "steam", label: "Steam", hint: "The Steam session and server-list refreshes" },
     { id: "verify", label: "Verification", hint: "Player-count checks against the servers" },
     { id: "cache", label: "Cache", hint: "The local database: writes, prunes and failures" },
@@ -189,8 +189,9 @@
   <!-- One chip per area; switching one off stops it being recorded at all, in the
        file as well as here (D-172). -->
   <div class="areas" role="group" aria-label="What to record">
+    <span class="muted rec" aria-hidden="true">Record:</span>
     {#each AREAS as a (a.id)}
-      <button class="chip sm" aria-pressed={!isMuted(a.id)} class:off={isMuted(a.id)} onclick={() => void toggleArea(a.id)} title={isMuted(a.id) ? `Not recording: ${a.hint}` : a.hint} disabled={!recording || !settings}>
+      <button class="chip sm" aria-pressed={!isMuted(a.id)} class:off={isMuted(a.id)} onclick={() => void toggleArea(a.id)} title={isMuted(a.id) ? `Not recording: ${a.hint}. Click to record.` : `Recording: ${a.hint}. Click to stop.`} disabled={!recording || !settings}>
         {a.label}
         {#if !isMuted(a.id) && counts.get(a.id)}<span class="n">{counts.get(a.id)}</span>{/if}
       </button>
@@ -237,6 +238,7 @@
 
   .areas { display: flex; flex-wrap: wrap; gap: 5px; }
   .chip.sm { height: 21px; padding: 0 8px; font-size: 11px; }
+  .rec { align-self: center; font-size: 11.5px; }
   .chip.off { opacity: 0.7; text-decoration: line-through; }
   .n { margin-left: 5px; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
 

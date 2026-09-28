@@ -191,7 +191,7 @@
         {friends.length} friend{friends.length === 1 ? "" : "s"} · {online} online · {inDayz} in DayZ
         {#if loadedAt}· updated {loadedAt}{/if}
       </span>
-      {#if servers.steam?.idle && !friends.length}<span class="muted">Steam session released while idle — press Refresh to fetch the list.</span>{/if}
+      {#if servers.steam?.idle && !friends.length}<span class="muted">Disconnected from Steam while idle. Press Refresh to load your friends.</span>{/if}
       {#if error}<span class="error" role="alert">{error}</span>{/if}
       <!-- The line the other list pages share: a join opened from here that closed
            because its server dropped out of the list said so nowhere (row 14, F10,

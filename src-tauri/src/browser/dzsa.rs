@@ -61,6 +61,15 @@ pub struct DzsaRow {
     pub mods: Vec<(u64, String)>,
 }
 
+/// Any failure but a missing connection (row 16): a sentence, the detail in the log.
+const DZSA_FAILED: &str =
+    "Could not download the DZSA list: the DZSA site did not answer properly. Try again later.";
+
+fn failed(detail: impl std::fmt::Display) -> String {
+    crate::log_warn!("app", "DZSA list: {detail}");
+    DZSA_FAILED.to_string()
+}
+
 /// Downloads and converts the whole list. Blocking network work happens inside
 /// reqwest's own runtime; the JSON is deserialised once into the typed structs.
 pub async fn fetch() -> Result<Vec<DzsaRow>, String> {
@@ -74,20 +83,24 @@ pub async fn fetch() -> Result<Vec<DzsaRow>, String> {
         .redirect(reqwest::redirect::Policy::none())
         .https_only(true)
         .build()
-        .map_err(|e| format!("http client: {e}"))?;
+        .map_err(|e| failed(format!("http client: {e}")))?;
     let resp = client.get(DZSA_URL).send().await.map_err(|e| {
         crate::http::request_error(
             e,
             "DZSA request",
             "Could not download the DZSA list: no connection. Try again once you are online.",
+            DZSA_FAILED,
         )
     })?;
     if !resp.status().is_success() {
-        return Err(format!("DZSA answered HTTP {}", resp.status()));
+        return Err(failed(format!("DZSA answered HTTP {}", resp.status())));
     }
     // The live list is ~24 MB; the cap is generous but finite (D-163).
-    let bytes = crate::http::body_capped(resp, 64 * 1024 * 1024, "DZSA server list").await?;
-    let doc: Document = serde_json::from_slice(&bytes).map_err(|e| format!("DZSA JSON: {e}"))?;
+    let bytes = crate::http::body_capped(resp, 64 * 1024 * 1024, "DZSA server list")
+        .await
+        .map_err(failed)?;
+    let doc: Document =
+        serde_json::from_slice(&bytes).map_err(|e| failed(format!("DZSA JSON: {e}")))?;
     let now = ServerRow::now_unix();
     Ok(doc
         .result

@@ -10,6 +10,16 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.83",
+    notes: [
+      { kind: "added", text: "Pick the page the launcher opens on: News, Servers or Favourites." },
+      { kind: "added", text: "Start Steam from the launcher when Steam is closed." },
+      { kind: "changed", text: "Direct connect has its own button and opens the join window." },
+      { kind: "changed", text: "Clearer words everywhere, like Hide untrusted and In-game name." },
+      { kind: "fixed", text: "The first window fits laptop screens, and missing spaces are back." },
+    ],
+  },
+  {
     version: "0.1.82",
     notes: [
       { kind: "added", text: "The join window says when your name has letters DayZ cannot show." },

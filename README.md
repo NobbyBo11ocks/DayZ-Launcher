@@ -107,7 +107,7 @@ No account, no API key, no ads, no sponsored placements and no telemetry. Every 
 
 ### 🕵️ Spot the farms
 
-Untick **Hide inflated**, search for a name, and the list tells on it: the same server dozens of times, every copy claiming 100–127 players, every one marked ⚠. Open one and the pane says why in plain words: **Steam reports 0 authenticated players; the server claims 116**, next to **199 other servers at the same address**.
+Untick **Hide untrusted**, search for a name, and the list tells on it: the same server dozens of times, every copy claiming 100–127 players, every one marked ⚠. Open one and the pane says why in plain words: **Steam sees nobody on it; the server claims 116**, next to **199 other servers at the same address**.
 
 Every verdict explains itself:
 **Verified head-count** · **Inflated player count** · **Fabricated player list** · **Refuses player queries** · **Not answering** · **Name taken from another server** · **Implausible player count** · **Empty server**
@@ -165,9 +165,9 @@ Star any server and it lands in **Favourites** with the same verified counts. Yo
 </td>
 <td width="50%" valign="top">
 
-<img src="docs/screenshots/mods.png" alt="Mods: installed Workshop mods with size, update date, junction and how many servers run each">
+<img src="docs/screenshots/mods.png" alt="Mods: installed Workshop mods with size, update date, mod link and how many servers run each">
 
-**Mods** — size, last update, `!Workshop` junction and how many servers run each one, with Folder and Unsubscribe beside it.
+**Mods** — size, last update, `!Workshop` mod link and how many servers run each one, with Folder and Unsubscribe beside it.
 
 </td>
 </tr>
@@ -248,7 +248,7 @@ Star any server and it lands in **Favourites** with the same verified counts. Yo
 - A per-user installer; the launcher runs at the same elevation as Steam
 - **Steam idle release**, so a launcher left open stops counting as playtime after 5 idle minutes and gives its memory back (adjustable in Settings)
 - A Logs page with per-area mutes and an off switch
-- Confirmed clean-up of dangling `!Workshop` junctions, and never one you did not confirm
+- Confirmed clean-up of broken `!Workshop` mod links, and never one you did not confirm
 - A slim window that remembers where it was
 - DZSA's public list as a fallback when Steam is unavailable
 
@@ -334,14 +334,14 @@ It starts DayZ the way Bohemia's own launcher does, through `DayZ_BE.exe` with t
 <details>
 <summary><b>Can I keep DZSA Launcher or the official launcher installed?</b></summary>
 
-Yes. All three use the same `!Workshop` junctions. This one never deletes a junction on its own; the one clean-up it offers removes only junctions whose mod folder is gone, and only after you confirm it.
+Yes. All three use the same `!Workshop` mod links (Windows junctions). This one never deletes a link on its own; the one clean-up it offers removes only links whose mod folder is gone, and only after you confirm it.
 
 </details>
 
 <details>
 <summary><b>Why are so many servers hidden?</b></summary>
 
-Their player count cannot be trusted: Steam sees nobody on them, their player list does not match what they advertise, or the list is fabricated. Untick **Hide inflated** to see them all; the details pane says what each one failed.
+Their player count cannot be trusted: Steam sees nobody on them, their player list does not match what they claim, or the list is fake. Untick **Hide untrusted** to see them all; the details pane says what each one failed.
 
 </details>
 
