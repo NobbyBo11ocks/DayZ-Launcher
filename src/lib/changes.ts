@@ -10,6 +10,13 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.88",
+    notes: [
+      { kind: "fixed", text: "Start Steam is safer when the launcher runs as administrator." },
+      { kind: "changed", text: "Logs no longer show your Windows account name." },
+    ],
+  },
+  {
     version: "0.1.87",
     notes: [{ kind: "fixed", text: "The server list stays smoother during a Refresh with a mod filter picked." }],
   },

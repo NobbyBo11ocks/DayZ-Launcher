@@ -115,6 +115,28 @@ pub fn pid_is_elevated(pid: u32) -> Option<bool> {
     }
 }
 
+/// Whether the desktop shell (Explorer) runs elevated, as it does on the built-in
+/// Administrator account or with UAC off: every program the player starts then has an
+/// administrator token already. `None` when there is no shell window or it cannot be
+/// queried.
+pub fn shell_is_elevated() -> Option<bool> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetShellWindow, GetWindowThreadProcessId};
+    // SAFETY: plain queries; a null window is checked before it is used.
+    let pid = unsafe {
+        let w = GetShellWindow();
+        if w.is_null() {
+            return None;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(w, &mut pid);
+        pid
+    };
+    if pid == 0 {
+        return None;
+    }
+    pid_is_elevated(pid)
+}
+
 /// Starts this executable again through the "runas" verb (UAC prompt) with the
 /// same arguments. Returns `true` when the new instance was started, so the caller
 /// exits; `false` (declined prompt or failure) keeps the current instance.

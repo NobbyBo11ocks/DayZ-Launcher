@@ -158,7 +158,51 @@ pub fn path() -> Option<PathBuf> {
 /// newline and a plausible timestamp writes entries indistinguishable from real ones,
 /// in the file the user copies into a support report. The WebView's own path has
 /// flattened since D-163; the Rust macros never did (D-221).
+/// The player's profile folder as it appears in paths (`C:\Users\<name>`), with its
+/// forward-slash form, read once.
+fn profile_forms() -> &'static [String] {
+    static FORMS: OnceLock<Vec<String>> = OnceLock::new();
+    FORMS.get_or_init(|| {
+        let Some(p) = std::env::var_os("USERPROFILE").map(|p| p.to_string_lossy().into_owned())
+        else {
+            return Vec::new();
+        };
+        let p = p.trim_end_matches(['\\', '/']).to_string();
+        if p.len() < 4 {
+            return Vec::new();
+        }
+        let mut forms = vec![p.clone(), p.replace('\\', "/")];
+        forms.dedup();
+        forms
+    })
+}
+
+/// `%USERPROFILE%` for the player's own profile folder, so a log shared in a bug
+/// report does not carry the Windows account name (row 21). Matched without regard to
+/// ASCII case, as Windows paths are.
+fn redact(s: &str, forms: &[String]) -> String {
+    let mut out = s.to_string();
+    for form in forms {
+        let mut from = 0;
+        loop {
+            let found = out[from..]
+                .char_indices()
+                .map(|(i, _)| from + i)
+                .find(|&i| {
+                    out.len() - i >= form.len()
+                        && out.is_char_boundary(i + form.len())
+                        && out[i..i + form.len()].eq_ignore_ascii_case(form)
+                });
+            let Some(at) = found else { break };
+            out.replace_range(at..at + form.len(), "%USERPROFILE%");
+            from = at + "%USERPROFILE%".len();
+        }
+    }
+    out
+}
+
 fn flatten(s: &str) -> String {
+    let s = redact(s, profile_forms());
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
         match ch {
@@ -263,6 +307,31 @@ macro_rules! log_error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Row 21: a path under the player's profile is logged as %USERPROFILE%, whatever
+    /// its case or slashes; other paths are left alone.
+    #[test]
+    fn the_profile_folder_is_not_written_into_the_log() {
+        let forms = vec![
+            r"C:\Users\Zoë Admin".to_string(),
+            "C:/Users/Zoë Admin".to_string(),
+        ];
+        assert_eq!(
+            redact(
+                r"open C:\Users\Zoë Admin\AppData\x.log and c:\users\zoë admin\y",
+                &forms
+            ),
+            r"open %USERPROFILE%\AppData\x.log and %USERPROFILE%\y"
+        );
+        assert_eq!(
+            redact("C:/Users/Zoë Admin/Documents", &forms),
+            "%USERPROFILE%/Documents"
+        );
+        assert_eq!(
+            redact(r"G:\SteamLibrary\steamapps", &forms),
+            r"G:\SteamLibrary\steamapps"
+        );
+    }
 
     #[test]
     fn ring_keeps_the_most_recent_and_never_grows() {

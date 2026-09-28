@@ -261,6 +261,19 @@ pub fn steam_start() -> Result<(), String> {
     if steam.running {
         return Ok(());
     }
+    // Never with rights the player's own programs lack. The path is HKCU's `SteamExe`,
+    // which any program of the player can rewrite, and Steam's folder is writable by
+    // every user, so from a launcher running as administrator — it matches an elevated
+    // Steam, D-120 — one click could start another program with those rights (row 21).
+    // Where Windows' shell runs elevated too (the built-in Administrator account, UAC
+    // off), every program already has them and nothing is given away.
+    if crate::proc::current_is_elevated() && crate::proc::shell_is_elevated() != Some(true) {
+        crate::log_warn!(
+            "steam",
+            "start: refused, the launcher is elevated and the desktop is not"
+        );
+        return Err("The launcher runs as administrator and Windows does not, so it will not start Steam with those rights. Start Steam from the Start menu.".into());
+    }
     let Some(exe) = steam.exe.filter(|p| p.is_file()) else {
         crate::log_warn!("steam", "start: no steam.exe (registry {})", steam.source);
         return Err(
