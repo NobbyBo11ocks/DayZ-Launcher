@@ -1,4 +1,4 @@
-//! Population trust: rules R2–R5, the continuity rule R11 and R12 from docs/11-fake-population-detection.md.
+//! Population trust: rules R2–R5, the continuity rule R11 and R12–R14 from docs/11-fake-population-detection.md.
 //!
 //! For each server: one A2S_PLAYER (the real head-count), preceded by an A2S_INFO
 //! (fresh reported count, ping, clock) when the check is on demand or the stored count
@@ -28,8 +28,9 @@ pub enum Verdict {
     /// R4: INFO answers with players > 0 but PLAYER never answers.
     Unverifiable,
     /// R5: the PLAYER list looks fabricated (at most two distinct durations on a list
-    /// that is not all young, all young and repetitive, or any name); R11: its sessions
-    /// did not carry over between two checks.
+    /// that is not all young, all young and repetitive, or any name); R11: sessions old
+    /// enough to have been on at the previous check were not on it; R13: more entries
+    /// than slots; R14: a burst of sessions under a second beside an old one (D-314).
     Synthetic,
     /// Neither INFO nor PLAYER answered.
     Offline,
@@ -149,11 +150,12 @@ pub fn judge(
             // out of the count, and a server that sends them is inflating by exactly
             // that many. R5 caught the tool only with no real player on, R11 only when
             // four fifths of the list were fake; with four real players it verified at
-            // fourteen (D-238).
+            // fourteen (D-238). An exact 0.0 counts too, one byte from the tool's
+            // constant: none of 2 409 honest lists read live held a single one (D-314).
             let fabricated = p
                 .players
                 .iter()
-                .filter(|x| x.duration_secs > 0.0 && x.duration_secs < 0.001)
+                .filter(|x| (0.0..0.001).contains(&x.duration_secs))
                 .count();
             if fabricated >= 2 {
                 let v = (p.players.len() - fabricated) as i32;
@@ -210,8 +212,38 @@ pub fn judge(
                     );
                 }
             }
+            // R13: more sessions than slots (D-314). A full server lists exactly its
+            // slots and never its login queue — 110 of 110 with 21 waiting and 121 of 121
+            // with 15, read live — so an entry past the last slot is held by no player.
+            // Only against a slot count from this check or a fresh listing: a stale one
+            // may predate a change of slots.
+            if reported >= 0 && max > 0 && v > max {
+                return (
+                    Verdict::Synthetic,
+                    Some(v),
+                    format!("{v} entries on a server of {max} slots"),
+                );
+            }
+            // R14: three or more sessions under a second beside one of ten minutes or
+            // more (D-314): what T2 would send writing any value under a second where it
+            // writes 2.35e-38. Squads land within half a second of each other (D-268),
+            // so an honest list shows this only to a check that arrives within a second
+            // of a squad, while older players are on; none of 2 252 live lists did.
+            let fresh = p.players.iter().filter(|x| x.duration_secs < 1.0).count();
+            let oldest = p
+                .players
+                .iter()
+                .map(|x| x.duration_secs)
+                .fold(0.0_f32, f32::max);
+            if fresh >= 3 && oldest >= 600.0 {
+                return (
+                    Verdict::Synthetic,
+                    Some(v),
+                    format!("{fresh} sessions under a second beside one of {oldest:.0} s"),
+                );
+            }
             // No count to compare: the cached one was stale and its re-read failed
-            // (`verify_one`, D-245). R5, R11 and R12 have had their say above; the
+            // (`verify_one`, D-245). R5, R11–R14 have had their say above; the
             // head-count stands on its own.
             if reported < 0 {
                 return (
@@ -329,58 +361,163 @@ const CONTINUITY_SHIFT_WINDOW_SECS: f32 = 120.0;
 const CONTINUITY_SLACK_SECS: f32 = 3.0;
 /// Consecutive failed comparisons before the verdict changes.
 const CONTINUITY_STRIKES: u8 = 2;
-/// Checks further apart than this are not compared. Churn alone takes a steady,
-/// honest server under the one-in-five floor over an hour or two — sessions average
-/// about 58 minutes on docs/11's figure (91 % still there after 5½ minutes) — so two
-/// refreshes 90 minutes apart could strike it twice. At 30 minutes ~60 % remain (D-237).
-const CONTINUITY_MAX_GAP_SECS: f32 = 1800.0;
+/// A comparison fails when at least this many sessions old enough to have been on at
+/// the previous check were not on it, and they are at least a tenth of those sessions.
+const CONTINUITY_MISSING: usize = 2;
+/// The one-in-five count judges checks up to this far apart. Churn alone takes a
+/// steady, honest server under it over an hour or two — sessions average about 58
+/// minutes on docs/11's figure (91 % still there after 5½ minutes) — so two refreshes
+/// 90 minutes apart could strike it twice. At 30 minutes ~60 % remain (D-237). The
+/// invariant needs no cap: churn does not enter it (D-314).
+const CONTINUITY_FLOOR_MAX_GAP_SECS: f32 = 1800.0;
 /// The reason given while a standing R11 verdict waits for a check it can compare.
 pub const CONTINUITY_STANDING: &str =
     "sessions did not carry over at earlier checks; none since was close enough to compare";
 
-/// How many of `prev` reappear in `now` advanced by exactly `shift`, each entry used once.
-pub fn carried_over(prev: &[f32], now: &[f32], shift: f32, slack: f32) -> usize {
-    let mut pool: Vec<f32> = now.to_vec();
-    let mut matched = 0;
-    for &d in prev {
-        let want = d + shift;
-        if let Some(i) = pool.iter().position(|&n| (n - want).abs() <= slack) {
-            pool.swap_remove(i);
+/// Lines `now` up with `prev` advanced by `shift`: of the sessions in `now` at least
+/// `min_age` long, how many there were and how many found one in `prev` within
+/// `slack`. Both lists run longest first and are matched in order, each entry once;
+/// `offsets` collects `now − prev` of every match.
+fn align(
+    prev: &[f64],
+    now: &[f64],
+    shift: f64,
+    slack: f64,
+    min_age: f64,
+    mut offsets: Option<&mut Vec<f64>>,
+) -> (usize, usize) {
+    let (mut old, mut matched, mut j) = (0, 0, 0);
+    for &d in now {
+        if d < min_age {
+            break;
+        }
+        old += 1;
+        let want = d - shift;
+        while j < prev.len() && prev[j] > want + slack {
+            j += 1;
+        }
+        if j < prev.len() && prev[j] >= want - slack {
+            if let Some(o) = offsets.as_deref_mut() {
+                o.push(d - prev[j]);
+            }
             matched += 1;
+            j += 1;
         }
     }
-    matched
+    (old, matched)
 }
 
-/// The most of `prev` that any single shift within `window` of `dt` carries into
-/// `now`. Every pair of an old and a new duration votes for the shift it implies, in
-/// one-second bins, and the five best-supported shifts are scored: the real shift
-/// collects a vote from every session that stayed, wherever it sits in the list.
-/// Candidates used to come from the first three old durations alone, and PLAYER lists
-/// run oldest first, so an honest server whose three longest sessions had left
-/// between checks offered no true candidate and took a strike (D-268).
-pub fn best_carried_over(prev: &[f32], now: &[f32], dt: f32, window: f32, slack: f32) -> usize {
+/// Durations as the comparisons read them: finite, longest first.
+fn longest_first(v: &[f32]) -> Vec<f64> {
+    let mut v: Vec<f64> = v
+        .iter()
+        .map(|&d| f64::from(d))
+        .filter(|d| d.is_finite())
+        .collect();
+    v.sort_unstable_by(|a, b| b.total_cmp(a));
+    v
+}
+
+/// The whole-second shift within `window` of `dt` that carries the most sessions of
+/// `prev` into `now`, nearest the gap among equals, and how many it carries. The scan
+/// stops once a shift carries more than `enough`.
+fn most_carried(
+    prev: &[f64],
+    now: &[f64],
+    dt: f64,
+    window: f64,
+    slack: f64,
+    enough: usize,
+) -> (usize, f64) {
     let w = window.ceil() as i32;
-    let mut votes = vec![0u32; (2 * w + 1) as usize];
-    for &p in prev {
-        for &n in now {
-            let off = n - p - dt;
-            // NaN and infinities fail the test and cast nowhere.
-            if off.abs() <= window {
-                votes[(off.round() as i32 + w) as usize] += 1;
+    let mut best = (0, dt);
+    for i in 0..=2 * w {
+        let off = f64::from((i + 1) / 2);
+        let shift = if i % 2 == 1 { dt + off } else { dt - off };
+        let (_, matched) = align(prev, now, shift, slack, f64::NEG_INFINITY, None);
+        if matched > best.0 {
+            best = (matched, shift);
+            if matched > enough {
+                break;
             }
         }
     }
-    let mut bins: Vec<usize> = (0..votes.len()).filter(|&i| votes[i] > 0).collect();
-    bins.sort_unstable_by(|&a, &b| votes[b].cmp(&votes[a]));
-    let mut best = 0;
-    for &i in bins.iter().take(5) {
-        best = best.max(carried_over(prev, now, dt + (i as i32 - w) as f32, slack));
-        if best == prev.len() {
-            break;
+    best
+}
+
+/// R11's count, kept beside the invariant (D-314): the most sessions of `prev` that one
+/// shift within `window` of `dt` carries into `now`, counting stopped past `enough`.
+/// Every whole second of the window is tried; since D-268 no shift is left out because
+/// the three oldest sessions had left, which struck an honest server.
+fn carried(prev: &[f32], now: &[f32], dt: f32, window: f32, slack: f32, enough: usize) -> usize {
+    let (p, n) = (longest_first(prev), longest_first(now));
+    most_carried(
+        &p,
+        &n,
+        f64::from(dt),
+        f64::from(window),
+        f64::from(slack),
+        enough,
+    )
+    .0
+}
+
+/// R11's comparison (D-314): the sessions in `now` old enough to have been on at the
+/// check `dt` seconds earlier — longer than the shift plus `slack` — that `prev` does
+/// not hold. `None` when some shift within `window` of `dt` accounts for all of them
+/// but one, or all but under a tenth; otherwise the fewest any shift leaves unexplained
+/// and how many sessions were that old at it.
+///
+/// Churn does not enter it: a player who left is not looked for, and one who joined is
+/// younger than the gap. So unlike the count beside it — whether more than one session
+/// in five carried over — it needs no cap on the gap, and real sessions padded with
+/// re-drawn ones fail it for the padding alone, where the count passes padding up to
+/// four fifths of the list as long as the real sessions stay. Every shift is tried, not only
+/// the one most sessions agree on: players who happened to join as far apart as others
+/// who left could outvote two who stayed, and strike an honest list (row 22).
+fn unexplained(
+    prev: &[f32],
+    now: &[f32],
+    dt: f32,
+    window: f32,
+    slack: f32,
+) -> Option<(usize, usize)> {
+    let (p, n) = (longest_first(prev), longest_first(now));
+    let (dt, window, slack) = (f64::from(dt), f64::from(window), f64::from(slack));
+    let mut fewest: Option<(usize, usize)> = None;
+    let mut explains = |shift: f64| {
+        let (old, matched) = align(&p, &n, shift, slack, shift + slack, None);
+        let missing = old - matched;
+        if missing < CONTINUITY_MISSING || missing * 10 < old {
+            return true;
+        }
+        if fewest.is_none_or(|(m, _)| missing < m) {
+            fewest = Some((missing, old));
+        }
+        false
+    };
+    // Every half second of the window, nearest the gap first: an honest list lines up
+    // at its real shift, seconds from the gap on a host that answers directly.
+    let steps = (window * 2.0).ceil() as i32;
+    for i in 0..=2 * steps {
+        let off = f64::from((i + 1) / 2) * 0.5;
+        if explains(if i % 2 == 1 { dt + off } else { dt - off }) {
+            return None;
         }
     }
-    best
+    // And the shift most sessions agree on, refined to the median offset of its
+    // matches, as row 22 measured it on 2 797 live pairs; a half-second grid can
+    // straddle it (S-122).
+    let (agreed, shift) = most_carried(&p, &n, dt, window, slack, usize::MAX);
+    if agreed > 0 {
+        let mut offsets = Vec::with_capacity(agreed);
+        align(&p, &n, shift, slack, f64::NEG_INFINITY, Some(&mut offsets));
+        offsets.sort_unstable_by(f64::total_cmp);
+        if explains(offsets[offsets.len() / 2]) {
+            return None;
+        }
+    }
+    fewest
 }
 
 /// Rule R11: real sessions carry over between checks, advanced by the time elapsed;
@@ -390,22 +527,24 @@ pub fn best_carried_over(prev: &[f32], now: &[f32], dt: f32, window: f32, slack:
 /// commit, entries whose durations are `random() × 10 000` on each query, after the
 /// real ones; the version it shipped writes zero-length entries instead, which R12
 /// catches (D-238). A faker that re-draws its list on every query passes R2 (INFO
-/// matches the list) and R5 (distinct, not young, unnamed). Between
-/// two checks a minute or more apart every real duration reappears advanced by the
-/// gap; the fakes never do. Two consecutive checks in which at most one session — or
-/// a fifth of them, on a busy server — carried over, and the list is synthetic. A
-/// restart is exempt (every session younger than the gap), and so is a list that
-/// halved, which is a wipe or a mass leave and not a lie. A later check that carries
-/// over clears the strikes, so the verdict heals itself (D-233).
+/// matches the list) and R5 (distinct, not young, unnamed). Between two checks a minute
+/// or more apart, every session in the second list old enough to have been on at the
+/// first was on it, advanced by the gap; re-drawn entries were not (`unexplained`,
+/// D-314). Up to 30 minutes apart, more than one session in five must also carry over
+/// (`carried`, D-233): entries re-drawn younger than the gap escape the first test,
+/// and padding up to four fifths of a list passes the second while the real sessions stay.
+/// Two consecutive checks that fail either, and the list is synthetic. A restart is
+/// exempt (every session younger than the gap), and so is a list that halved, which
+/// is a wipe or a mass leave and not a lie. A later check that passes both clears the
+/// strikes, so the verdict heals itself (D-233).
 ///
 /// A verdict stands until a comparison overturns it (D-237). The first sample after a
-/// restart, a check inside the minimum gap and a check beyond the maximum one all used
-/// to answer "no opinion", which the caller published as Verified: a farm got its
-/// fabricated count back at every launch and every time its row was opened. A cached
-/// "synthetic" verdict now starts at the full strike count, and comparisons that are
-/// exempt (restart, halved list) or impossible (too close, too far) keep the strikes
-/// they found — resetting them let a list that alternated sizes, halving every other
-/// check, never be flagged.
+/// restart and a check inside the minimum gap used to answer "no opinion", which the
+/// caller published as Verified: a farm got its fabricated count back at every launch
+/// and every time its row was opened. A cached "synthetic" verdict now starts at the
+/// full strike count, and comparisons that are exempt (restart, halved list) or
+/// impossible (too close) keep the strikes they found — resetting them let a list that
+/// alternated sizes, halving every other check, never be flagged.
 pub fn continuity(id: &str, durations: &[f32], was_synthetic: bool) -> Option<String> {
     continuity_at(id, durations, was_synthetic, Instant::now())
 }
@@ -431,24 +570,30 @@ fn continuity_at(id: &str, durations: &[f32], was_synthetic: bool, now: Instant)
         }
         let restarted = durations.iter().all(|&d| d < dt);
         let halved = durations.len() * 2 < prev.durations.len();
-        if dt <= CONTINUITY_MAX_GAP_SECS && prev.durations.len() >= 5 && !restarted && !halved {
-            let matched = best_carried_over(
-                &prev.durations,
-                durations,
-                dt,
-                CONTINUITY_SHIFT_WINDOW_SECS,
-                CONTINUITY_SLACK_SECS,
-            );
-            let floor = (prev.durations.len() / 5).max(1);
-            if matched <= floor {
-                strikes = prev.strikes.saturating_add(1);
-                reason = Some(format!(
-                    "{matched} of {} sessions carried over between checks {:.0} s apart",
-                    prev.durations.len(),
-                    dt
-                ));
-            } else {
-                strikes = 0;
+        if prev.durations.len() >= 5 && !restarted && !halved {
+            let (window, slack) = (CONTINUITY_SHIFT_WINDOW_SECS, CONTINUITY_SLACK_SECS);
+            let strike = match unexplained(&prev.durations, durations, dt, window, slack) {
+                Some((missing, old)) => Some(format!(
+                    "{missing} of {old} sessions older than the gap were missing from the list {dt:.0} s earlier"
+                )),
+                None if dt <= CONTINUITY_FLOOR_MAX_GAP_SECS => {
+                    let floor = (prev.durations.len() / 5).max(1);
+                    let matched = carried(&prev.durations, durations, dt, window, slack, floor);
+                    (matched <= floor).then(|| {
+                        format!(
+                            "{matched} of {} sessions carried over between checks {dt:.0} s apart",
+                            prev.durations.len()
+                        )
+                    })
+                }
+                None => None,
+            };
+            match strike {
+                Some(why) => {
+                    strikes = prev.strikes.saturating_add(1);
+                    reason = Some(why);
+                }
+                None => strikes = 0,
             }
         }
     }
@@ -581,22 +726,29 @@ mod tests {
     }
 
     #[test]
-    fn continuity_real_sessions_carry_over() {
+    fn continuity_explains_real_sessions() {
         // Twenty sessions two minutes later: every duration advanced by 120 s.
         let a: Vec<f32> = (0..20).map(|i| 300.0 + i as f32 * 37.0).collect();
         let b: Vec<f32> = a.iter().map(|d| d + 120.0).collect();
-        assert_eq!(best_carried_over(&a, &b, 120.0, 120.0, 3.0), 20);
-        // One left and one joined: nineteen still carry over, and the one that left
-        // was among the three the shift candidates are drawn from.
+        assert_eq!(unexplained(&a, &b, 120.0, 120.0, 3.0), None);
+        // One left and one joined: the one who left is not looked for, and the one who
+        // joined is younger than the gap.
         let mut c = b.clone();
         c[0] = 12.0;
-        assert_eq!(best_carried_over(&a, &c, 120.0, 120.0, 3.0), 19);
+        assert_eq!(unexplained(&a, &c, 120.0, 120.0, 3.0), None);
         // A snapshot-serving host: durations advanced 400 s over a 342 s gap (measured
-        // live on Dead City), and a few-second proxy cache at +6 s (KarmaKrew).
+        // live on Dead City), a few-second proxy cache at +6 s (KarmaKrew), and two
+        // checks served the same snapshot, nothing advanced at all.
         let d: Vec<f32> = a.iter().map(|x| x + 400.0).collect();
-        assert_eq!(best_carried_over(&a, &d, 341.9, 120.0, 3.0), 20);
+        assert_eq!(unexplained(&a, &d, 341.9, 120.0, 3.0), None);
         let e: Vec<f32> = a.iter().map(|x| x + 126.0).collect();
-        assert_eq!(best_carried_over(&a, &e, 120.0, 120.0, 3.0), 20);
+        assert_eq!(unexplained(&a, &e, 120.0, 120.0, 3.0), None);
+        assert_eq!(unexplained(&a, &a, 90.0, 120.0, 3.0), None);
+        // Pacer jitter of two and a half seconds either way.
+        let f: Vec<f32> = (0..20)
+            .map(|i| a[i] + 120.0 + if i % 2 == 0 { 2.5 } else { -2.5 })
+            .collect();
+        assert_eq!(unexplained(&a, &f, 120.0, 120.0, 3.0), None);
     }
 
     #[test]
@@ -607,24 +759,101 @@ mod tests {
         let a: Vec<f32> = (0..20).map(|i| 20_000.0 - i as f32 * 613.0).collect();
         let mut b: Vec<f32> = a[3..].iter().map(|d| d + 1200.0).collect();
         b.extend([40.0, 25.0, 3.0]);
-        assert_eq!(best_carried_over(&a, &b, 1200.0, 120.0, 3.0), 17);
+        assert_eq!(unexplained(&a, &b, 1200.0, 120.0, 3.0), None);
         // Five players, the three oldest gone: the two that stayed still line up.
         let a = [9000.0, 8000.0, 7000.0, 900.0, 300.0];
         let b = [1500.0, 900.0, 60.0, 30.0, 10.0];
-        assert_eq!(best_carried_over(&a, &b, 600.0, 120.0, 3.0), 2);
+        assert_eq!(unexplained(&a, &b, 600.0, 120.0, 3.0), None);
+    }
+
+    /// The count beside the invariant, on the cases it was built against (D-268).
+    #[test]
+    fn continuity_counts_what_carried_over() {
+        let all = usize::MAX;
+        let a: Vec<f32> = (0..20).map(|i| 300.0 + i as f32 * 37.0).collect();
+        let b: Vec<f32> = a.iter().map(|d| d + 120.0).collect();
+        assert_eq!(carried(&a, &b, 120.0, 120.0, 3.0, all), 20);
+        let mut c = b.clone();
+        c[0] = 12.0;
+        assert_eq!(carried(&a, &c, 120.0, 120.0, 3.0, all), 19);
+        let d: Vec<f32> = a.iter().map(|x| x + 400.0).collect();
+        assert_eq!(carried(&a, &d, 341.9, 120.0, 3.0, all), 20);
+        let e: Vec<f32> = a.iter().map(|x| x + 126.0).collect();
+        assert_eq!(carried(&a, &e, 120.0, 120.0, 3.0, all), 20);
+        // The three oldest left: seventeen, and two of five.
+        let a: Vec<f32> = (0..20).map(|i| 20_000.0 - i as f32 * 613.0).collect();
+        let mut b: Vec<f32> = a[3..].iter().map(|d| d + 1200.0).collect();
+        b.extend([40.0, 25.0, 3.0]);
+        assert_eq!(carried(&a, &b, 1200.0, 120.0, 3.0, all), 17);
+        let a = [9000.0, 8000.0, 7000.0, 900.0, 300.0];
+        let b = [1500.0, 900.0, 60.0, 30.0, 10.0];
+        assert_eq!(carried(&a, &b, 600.0, 120.0, 3.0, all), 2);
+        // Re-drawn beside one real player: nothing past chance coincidences.
+        let mut a = redrawn(11, 19);
+        a.push(2000.0);
+        let mut b = redrawn(12, 19);
+        b.push(2120.0);
+        assert!(carried(&a, &b, 120.0, 120.0, 3.0, all) <= 4);
+        // Counting stops once enough carried over.
+        let a: Vec<f32> = (0..20).map(|i| 300.0 + i as f32 * 37.0).collect();
+        let b: Vec<f32> = a.iter().map(|d| d + 120.0).collect();
+        assert!(carried(&a, &b, 120.0, 120.0, 3.0, 4) > 4);
+    }
+
+    /// Entries re-drawn younger than the gap are never old enough for the invariant to
+    /// look for; that most of the list failed to carry over still gives them away within
+    /// 30 minutes, as it did before D-314 (row 22's model: 298 of 381 such servers).
+    #[test]
+    fn continuity_still_finds_a_list_that_does_not_carry_over() {
+        let t0 = Instant::now();
+        let at = |secs: u64| t0 + std::time::Duration::from_secs(secs);
+        let real = [7200.0, 5400.0, 3100.0, 900.0];
+        let list = |seed: u64, since: f32| -> Vec<f32> {
+            let mut v: Vec<f32> = real.iter().map(|d| d + since).collect();
+            v.extend(redrawn(seed, 16).iter().map(|d| d % 60.0));
+            v
+        };
+        let id = "test:young";
+        assert!(continuity_at(id, &list(21, 0.0), false, at(0)).is_none());
+        assert!(continuity_at(id, &list(22, 300.0), false, at(300)).is_none());
+        let why = continuity_at(id, &list(23, 600.0), false, at(600)).expect("two strikes");
+        assert!(why.contains("carried over between checks"), "{why}");
+    }
+
+    /// Three who joined 70–90 s after a check line up with three who had joined 10–30 s
+    /// before it and left, at a shift 100 s short of the gap, and outvote the two who
+    /// stayed. At that shift the stayers look invented; at the real one nothing is
+    /// missing, and the real one is tried as well (row 22).
+    #[test]
+    fn continuity_is_not_outvoted_by_a_chance_alignment() {
+        let a = [5000.0, 4000.0, 30.0, 20.0, 10.0];
+        let b = [6800.0, 5800.0, 1730.0, 1720.0, 1710.0];
+        assert_eq!(unexplained(&a, &b, 1800.0, 120.0, 3.0), None);
     }
 
     #[test]
-    fn continuity_redrawn_list_does_not_carry_over() {
+    fn continuity_finds_a_redrawn_list() {
         // A list re-drawn as `random() × 10 000` on every query, as T2's first commit
         // did (docs/11). One real player at 2 000 s carries over; nineteen fakes do not.
         let mut a: Vec<f32> = (1..20).map(|i| (i * 7919 % 10_000) as f32).collect();
         a.push(2000.0);
         let mut b: Vec<f32> = (1..20).map(|i| (i * 104_729 % 10_000) as f32).collect();
         b.push(2120.0);
-        // No shift lines up more than the floor a twenty-entry list allows (four): the
-        // real player plus whatever coincides within three seconds.
-        assert!(best_carried_over(&a, &b, 120.0, 120.0, 3.0) <= 4);
+        let (missing, old) = unexplained(&a, &b, 120.0, 120.0, 3.0).expect("a strike");
+        assert!(missing * 10 >= old * 8, "{missing} of {old}");
+    }
+
+    /// The padding alone condemns a list: twenty real sessions carry over and five
+    /// re-drawn entries beside them do not (D-314). The count R11 used before passed
+    /// it, twenty carried over being far above one in five.
+    #[test]
+    fn continuity_finds_padding_beside_real_sessions() {
+        let real: Vec<f32> = (0..20).map(|i| 400.0 + i as f32 * 181.0).collect();
+        let mut a = real.clone();
+        a.extend([7310.0, 5120.0, 2890.0, 9480.0, 660.0]);
+        let mut b: Vec<f32> = real.iter().map(|d| d + 300.0).collect();
+        b.extend([1830.0, 8470.0, 4410.0, 6150.0, 3260.0]);
+        assert_eq!(unexplained(&a, &b, 300.0, 120.0, 3.0), Some((5, 25)));
     }
 
     #[test]
@@ -646,19 +875,7 @@ mod tests {
     fn continuity_verdict_stands_until_a_comparison_clears_it() {
         let t0 = Instant::now();
         let at = |secs: u64| t0 + std::time::Duration::from_secs(secs);
-        // A fresh `random() × 10 000` list on every query, as T2's first commit did
-        // (docs/11; xorshift64).
-        let fake = |seed: u64, n: usize| -> Vec<f32> {
-            let mut x = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
-            (0..n)
-                .map(|_| {
-                    x ^= x << 13;
-                    x ^= x >> 7;
-                    x ^= x << 17;
-                    (x % 10_000) as f32
-                })
-                .collect()
-        };
+        let fake = redrawn;
         let id = "test:r11";
         assert!(continuity_at(id, &fake(1, 20), false, at(0)).is_none());
         assert!(
@@ -671,7 +888,7 @@ mod tests {
         );
         // Inside the minimum gap: nothing to compare, the verdict stands.
         assert!(continuity_at(id, &fake(4, 20), false, at(250)).is_some());
-        // Beyond the maximum gap: re-baselined on this sample, the verdict stands.
+        // An hour on: compared all the same since D-314, and struck again.
         assert!(continuity_at(id, &fake(5, 20), false, at(4_000)).is_some());
         // A list that halved is exempt from comparison, and exempt is not cleared.
         let half = fake(6, 9);
@@ -681,18 +898,25 @@ mod tests {
         assert!(continuity_at(id, &carried, false, at(4_350)).is_none());
     }
 
-    /// Churn on an honest server over a long gap is not evidence: two checks 90
-    /// minutes apart that share almost no sessions are not compared (D-237).
+    /// Churn on an honest server over a long gap is not evidence, so the gap needs no
+    /// cap (D-314): ninety minutes on, seventeen of twenty have left and seventeen
+    /// joined since, and the three who stayed line up. A re-drawn list is found across
+    /// the same gaps, which the 30-minute cap of D-237 never compared.
     #[test]
-    fn continuity_does_not_compare_across_long_gaps() {
+    fn continuity_compares_across_long_gaps() {
         let t0 = Instant::now();
         let at = |secs: u64| t0 + std::time::Duration::from_secs(secs);
         let a: Vec<f32> = (0..20).map(|i| 300.0 + i as f32 * 97.0).collect();
-        let b: Vec<f32> = (0..20).map(|i| 50.0 + i as f32 * 211.0).collect();
-        let c: Vec<f32> = (0..20).map(|i| 70.0 + i as f32 * 173.0).collect();
+        let mut b: Vec<f32> = a[17..].iter().map(|d| d + 5_400.0).collect();
+        b.extend((0..17).map(|i| 50.0 + i as f32 * 211.0));
+        let mut c: Vec<f32> = b[..3].iter().map(|d| d + 5_400.0).collect();
+        c.extend((0..17).map(|i| 70.0 + i as f32 * 173.0));
         assert!(continuity_at("test:gap", &a, false, at(0)).is_none());
         assert!(continuity_at("test:gap", &b, false, at(5_400)).is_none());
         assert!(continuity_at("test:gap", &c, false, at(10_800)).is_none());
+        assert!(continuity_at("test:gap2", &redrawn(1, 20), false, at(0)).is_none());
+        assert!(continuity_at("test:gap2", &redrawn(2, 20), false, at(5_400)).is_none());
+        assert!(continuity_at("test:gap2", &redrawn(3, 20), false, at(10_800)).is_some());
     }
 
     /// A verdict cached before a restart stands until a comparison can overturn it.
@@ -701,6 +925,20 @@ mod tests {
         let a: Vec<f32> = (0..10).map(|i| 500.0 + i as f32 * 50.0).collect();
         assert!(continuity("test:cached", &a, true).is_some());
         assert!(continuity("test:fresh", &a, false).is_none());
+    }
+
+    /// A fresh `random() × 10 000` list on every query, as T2's first commit did
+    /// (docs/11; xorshift64).
+    fn redrawn(seed: u64, n: usize) -> Vec<f32> {
+        let mut x = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+        (0..n)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                (x % 10_000) as f32
+            })
+            .collect()
     }
 
     fn players(durations: &[f32], name: &str) -> Players {
@@ -772,6 +1010,61 @@ mod tests {
         // One very young entry alone is a player who has just connected.
         let p = players(&[1963.8, 946.1, 0.0004, 300.0], "");
         assert_eq!(judge(Some(&i), Ok(&p), 0, 0).0, Verdict::Verified);
+    }
+
+    /// R12 counts an exact 0.0 as zero-length too (D-314): the tool a byte from its
+    /// constant. One alone is still a player who has just connected.
+    #[test]
+    fn exact_zero_sessions_are_counted_out() {
+        let mut i = live_info();
+        i.max_players = 60;
+        i.players = 14;
+        let mut d = vec![1963.8, 946.1, 300.0, 120.5];
+        d.extend([0.0; 10]);
+        let (v, n, _) = judge(Some(&i), Ok(&players(&d, "")), 0, 0);
+        assert_eq!((v, n), (Verdict::Inflated, Some(4)));
+        i.players = 5;
+        let one = players(&[1963.8, 946.1, 300.0, 120.5, 0.0], "");
+        assert_eq!(judge(Some(&i), Ok(&one), 0, 0).0, Verdict::Verified);
+    }
+
+    /// R13 (D-314): a full list is honest, one entry past the slots is not — judged
+    /// against a slot count that is current, never a stale one.
+    #[test]
+    fn more_entries_than_slots_is_synthetic() {
+        let mut i = live_info();
+        i.max_players = 10;
+        i.players = 10;
+        let full: Vec<f32> = (0..10).map(|k| 100.0 + k as f32 * 61.0).collect();
+        assert_eq!(
+            judge(Some(&i), Ok(&players(&full, "")), 0, 0).0,
+            Verdict::Verified
+        );
+        let mut over = full.clone();
+        over.push(1234.5);
+        let over = players(&over, "");
+        let (v, n, why) = judge(Some(&i), Ok(&over), 0, 0);
+        assert_eq!((v, n), (Verdict::Synthetic, Some(11)), "{why}");
+        // A fresh listing's slot count is as current as INFO; a stale one is not used.
+        assert_eq!(judge(None, Ok(&over), 10, 10).0, Verdict::Synthetic);
+        assert_eq!(judge(None, Ok(&over), -1, 10).0, Verdict::Verified);
+    }
+
+    /// R14 (D-314): three sessions under a second beside one of ten minutes or more.
+    /// The same burst after a restart is its players coming back, and two together
+    /// beside old sessions are a duo.
+    #[test]
+    fn a_sub_second_burst_beside_an_old_session_is_synthetic() {
+        let mut i = live_info();
+        i.max_players = 60;
+        i.players = 6;
+        let burst = players(&[2400.0, 830.0, 312.0, 0.4, 0.2, 0.05], "");
+        let (v, _, why) = judge(Some(&i), Ok(&burst), 0, 0);
+        assert_eq!(v, Verdict::Synthetic, "{why}");
+        let back = players(&[4.1, 2.2, 1.3, 0.8, 0.5, 0.3], "");
+        assert_eq!(judge(Some(&i), Ok(&back), 0, 0).0, Verdict::Verified);
+        let duo = players(&[2400.0, 830.0, 312.0, 95.0, 0.6, 0.4], "");
+        assert_eq!(judge(Some(&i), Ok(&duo), 0, 0).0, Verdict::Verified);
     }
 
     #[test]

@@ -1,7 +1,8 @@
 // Measures the shape of real A2S_PLAYER lists, to size the rules that read them
-// (docs/11, D-238): how many honest lists carry zero-length sessions (R12), a
-// sub-second cluster next to an old session, entries out of join order, more entries
-// than slots, and how many sessions carry over between two passes (R11).
+// (docs/11, D-238, D-314): how many honest lists carry zero-length sessions (R12), a
+// sub-second cluster next to an old session (R14), entries out of join order, more
+// entries than slots (R13), and between two passes how many sessions carry over and
+// how many old enough to have been on at the first were missing from it (R11).
 //
 // Targets come from the launcher's own cache: servers it verified at five players or
 // more, sampled at random. One PLAYER query per server, one server at a time, and the
@@ -44,7 +45,7 @@ function shape(d, max) {
   for (let i = 1; i < d.length; i++) if (d[i] > d[i - 1] + 1) ascents++;
   return {
     entries: d.length,
-    zeroLength: d.filter((x) => x > 0 && x < 0.001).length,
+    zeroLength: d.filter((x) => x >= 0 && x < 0.001).length,
     subSecond: d.filter((x) => x < 1).length,
     oldest: Math.round(Math.max(0, ...d)),
     ascents,
@@ -52,36 +53,73 @@ function shape(d, max) {
   };
 }
 
+/** Durations as R11 reads them: finite, longest first. */
+const longestFirst = (v) => v.filter(Number.isFinite).sort((a, b) => b - a);
+
 /**
- * R11's test: the most of `prev` that one shift within ±120 s of `gap` carries into `now`, to 3 s.
- * Every old/new pair votes for its shift in 1-s bins and the five best-supported bins are scored,
- * as `best_carried_over` does since D-268 (shifts drawn from the three oldest sessions missed the
- * real one whenever those three had left).
+ * `align` in verify.rs: `now` lined up with `prev` advanced by `shift`, both longest first and
+ * matched in order within 3 s. Of the sessions in `now` at least `minAge` long: how many there were
+ * and how many matched; `offsets` collects `now − prev` of each match.
  */
-function carriedOver(prev, now, gap) {
-  const votes = new Map();
-  for (const p of prev) {
-    for (const n of now) {
-      const off = n - p - gap;
-      if (Math.abs(off) <= 120) votes.set(Math.round(off), (votes.get(Math.round(off)) ?? 0) + 1);
+function align(prev, now, shift, minAge = -Infinity, offsets = null) {
+  let old = 0;
+  let matched = 0;
+  let j = 0;
+  for (const d of now) {
+    if (d < minAge) break;
+    old++;
+    const want = d - shift;
+    while (j < prev.length && prev[j] > want + 3) j++;
+    if (j < prev.length && prev[j] >= want - 3) {
+      offsets?.push(d - prev[j]);
+      matched++;
+      j++;
     }
   }
-  const bins = [...votes].sort((a, b) => b[1] - a[1]).slice(0, 5);
-  let best = 0;
-  for (const [off] of bins) {
-    const shift = gap + off;
-    const pool = [...now];
-    let matched = 0;
-    for (const d of prev) {
-      const i = pool.findIndex((x) => Math.abs(x - (d + shift)) <= 3);
-      if (i >= 0) {
-        pool.splice(i, 1);
-        matched++;
-      }
-    }
-    best = Math.max(best, matched);
+  return [old, matched];
+}
+
+/** `most_carried`: the whole-second shift within ±120 s of `gap` that carries the most, nearest first. */
+function mostCarried(p, n, gap) {
+  let best = [0, gap];
+  for (let i = 0; i <= 240; i++) {
+    const shift = gap + Math.floor((i + 1) / 2) * (i % 2 === 1 ? 1 : -1);
+    const matched = align(p, n, shift)[1];
+    if (matched > best[0]) best = [matched, shift];
   }
   return best;
+}
+
+/** R11's count (`carried`): the most sessions of `prev` one shift carries into `now`. */
+const carriedOver = (prev, now, gap) => mostCarried(longestFirst(prev), longestFirst(now), gap)[0];
+
+/**
+ * R11's invariant (`unexplained`, D-314): null when some shift within ±120 s of `gap` — every half
+ * second, then the one most sessions agree on refined to the median offset of its matches — leaves
+ * at most one session of `now` old enough to have been on at `prev` without a partner in it, or
+ * under a tenth of them; otherwise the fewest missing and how many were that old.
+ */
+function unexplained(prev, now, gap) {
+  const [p, n] = [longestFirst(prev), longestFirst(now)];
+  let fewest = null;
+  const explains = (s) => {
+    const [old, matched] = align(p, n, s, s + 3);
+    const missing = old - matched;
+    if (missing < 2 || missing * 10 < old) return true;
+    if (!fewest || missing < fewest[0]) fewest = [missing, old];
+    return false;
+  };
+  for (let i = 0; i <= 480; i++) {
+    if (explains(gap + Math.floor((i + 1) / 2) * 0.5 * (i % 2 === 1 ? 1 : -1))) return null;
+  }
+  const [agreed, shift] = mostCarried(p, n, gap);
+  if (agreed > 0) {
+    const offsets = [];
+    align(p, n, shift, -Infinity, offsets);
+    offsets.sort((x, y) => x - y);
+    if (explains(offsets[Math.floor(offsets.length / 2)])) return null;
+  }
+  return fewest;
 }
 
 const first = await pass();
@@ -89,7 +127,7 @@ console.log(`first pass: ${first.size} lists; waiting five minutes (D-037)`);
 await new Promise((r) => setTimeout(r, 300_000));
 const second = await pass();
 
-const found = { lists: 0, zeroLength1: 0, zeroLength2: 0, subSecondCluster: 0, ascending: 0, overMax: 0 };
+const found = { lists: 0, zeroLength1: 0, zeroLength2: 0, subSecondCluster: 0, ascending: 0, overMax: 0, pairs: 0, missing: 0 };
 const carriedShare = [];
 for (const t of targets) {
   for (const lists of [first, second]) {
@@ -104,7 +142,7 @@ for (const t of targets) {
     }
     if (s.subSecond >= 3 && s.oldest >= 600) {
       found.subSecondCluster++;
-      console.log("sub-second cluster beside an old session", t.id, JSON.stringify(s));
+      console.log("sub-second cluster beside an old session (R14 would fire)", t.id, JSON.stringify(s));
     }
     if (s.ascents > 0) {
       found.ascending++;
@@ -112,13 +150,22 @@ for (const t of targets) {
     }
     if (s.overMax) {
       found.overMax++;
-      console.log("more entries than slots", t.id, JSON.stringify(s));
+      console.log("more entries than slots (R13 would fire)", t.id, JSON.stringify(s));
     }
   }
   const a = first.get(t.id);
   const b = second.get(t.id);
   if (a && b && a.durations.length >= 5) {
     const gap = b.at - a.at;
+    // R11's invariant, with its exemptions: a restart and a list that halved.
+    if (b.durations.length >= 5 && !b.durations.every((d) => d < gap) && b.durations.length * 2 >= a.durations.length) {
+      found.pairs++;
+      const u = unexplained(a.durations, b.durations, gap);
+      if (u) {
+        found.missing++;
+        console.log(`${u[0]} of ${u[1]} sessions older than the gap missing from the first pass (an R11 strike)`, t.id, JSON.stringify({ before: a.durations.length, after: b.durations.length, gap: Math.round(gap) }));
+      }
+    }
     const share = carriedOver(a.durations, b.durations, gap) / a.durations.length;
     carriedShare.push(share);
     // A restart between the passes is exempt from R11 and says so here: every session

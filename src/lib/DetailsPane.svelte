@@ -269,7 +269,7 @@
         return "The server did not answer at all.";
       case "synthetic": {
         if (v.reason.includes("named=true")) return "The player list looks fake: its entries carry names, which real DayZ lists never do.";
-        if (v.reason.includes("carried over between checks")) return "The player list looks fake: the sessions seen at the previous check did not carry over.";
+        if (v.reason.includes("carried over between checks") || v.reason.includes("missing from the list")) return "The player list looks fake: the sessions seen at the previous check did not carry over.";
         if (v.reason.includes("earlier checks")) return "Sessions did not carry over at earlier checks; waiting for a check close enough to compare.";
         const m = /^(\d+) entries, (\d+) distinct/.exec(v.reason);
         if (m) return `The player list looks fake: ${m[1]} entries with only ${m[2]} different session length${m[2] === "1" ? "" : "s"}.`;

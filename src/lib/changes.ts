@@ -10,6 +10,10 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.90",
+    notes: [{ kind: "added", text: "Better at spotting servers that pad their player list with fake players." }],
+  },
+  {
     version: "0.1.89",
     notes: [{ kind: "fixed", text: "Servers that just restarted are no longer hidden as fakes." }],
   },
