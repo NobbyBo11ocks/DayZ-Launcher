@@ -285,9 +285,9 @@ flowchart LR
 
 | Installer | Cold start to first frame | Refresh, then verify | Idle CPU | Memory, whole app |
 |:-:|:-:|:-:|:-:|:-:|
-| **7.7 MB** | **0.43 s** | **≈ 30 s + ≈ 26 s** | **0.2 %** of one core | **≈ 306 MB** |
+| **7.7 MB** | **0.43 s** | **≈ 37 s + ≈ 25 s** | **0.2 %** of one core | **304–332 MB** |
 
-<sub>Installer measured at v0.1.69. Refresh and verify from the app's own log on 2026-09-26: 2 366 servers listed in 30.0 s, then 2 193 checked in 26.2 s. Memory and idle CPU at v0.1.23; cold start at v0.1.19. Budgets, method and history in [docs/05 §6](docs/05-architecture-and-optimisation.md).</sub>
+<sub>Installer measured at v0.1.83 (7 745 809 bytes). Refresh and verify from the app's own log on 2026-09-28 (v0.1.85): 2 975 servers listed in 37.1 s, then 2 684 checked in 24.6 s. Memory at v0.1.75 with 83 568 cached servers, News page 304 MB and Servers 332 MB (D-298); idle CPU at v0.1.23; cold start at v0.1.19. Budgets, method and history in [docs/05 §6](docs/05-architecture-and-optimisation.md).</sub>
 
 ---
 
