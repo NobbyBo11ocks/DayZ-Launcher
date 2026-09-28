@@ -10,6 +10,10 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.89",
+    notes: [{ kind: "fixed", text: "Servers that just restarted are no longer hidden as fakes." }],
+  },
+  {
     version: "0.1.88",
     notes: [
       { kind: "fixed", text: "Start Steam is safer when the launcher runs as administrator." },

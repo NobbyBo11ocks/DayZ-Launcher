@@ -172,11 +172,6 @@ pub fn judge(
             }
             let v = p.players.len() as i32;
             if v >= 5 {
-                let distinct: HashSet<i64> = p
-                    .players
-                    .iter()
-                    .map(|x| x.duration_secs.round() as i64)
-                    .collect();
                 // Players who join together land within half a second of each other
                 // (three such groups in one live 114-player list), so in whole seconds a
                 // trio and a duo on a five-player server were two durations; in tenths
@@ -195,7 +190,12 @@ pub fn judge(
                 // a fabricated list away is repetition — many players sharing very few
                 // distinct durations — so young sessions only count when they also
                 // repeat.
-                let repetitive = distinct.len() * 3 <= v as usize;
+                // In tenths as well: in whole seconds a reconnect wave read as repetition.
+                // Six players back at 19.2, 19.2, 19.1, 18.8, 18.5 and 18.1 s were two
+                // durations, and two honest servers (31–40 players) went hidden seconds
+                // after their restarts; in tenths they are five, and a list that copies
+                // its values still repeats (row 22).
+                let repetitive = distinct_tenths * 3 <= v as usize;
                 // `distinct <= 2` alone fired on a five-player restart reconnect
                 // (durations 10.9–11.9 s, 34 more joined within five minutes), so
                 // it needs the list not to be young; a young fabricated list is
@@ -205,8 +205,7 @@ pub fn judge(
                         Verdict::Synthetic,
                         Some(v),
                         format!(
-                            "{v} entries, {} distinct durations, all_young={all_young}, named={named}",
-                            distinct.len()
+                            "{v} entries, {distinct_tenths} distinct durations, all_young={all_young}, named={named}"
                         ),
                     );
                 }
@@ -882,6 +881,18 @@ mod tests {
         // A list that repeats itself exactly is still what it was.
         let copies = players(&[3600.0, 3600.0, 3600.0, 1200.0, 1200.0], "");
         assert_eq!(judge(Some(&i), Ok(&copies), 0, 0).0, Verdict::Synthetic);
+        // Two live reconnect waves seconds after a restart (row 22): honest, where whole
+        // seconds made both repetitive.
+        i.players = 6;
+        for wave in [
+            [19.2, 19.2, 19.1, 18.8, 18.5, 18.1],
+            [30.24, 30.23, 30.21, 29.74, 29.62, 6.33],
+        ] {
+            assert_eq!(
+                judge(Some(&i), Ok(&players(&wave, "")), 0, 0).0,
+                Verdict::Verified
+            );
+        }
     }
 
     #[test]
