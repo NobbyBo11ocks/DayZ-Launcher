@@ -110,7 +110,7 @@ No account, no API key, no ads, no sponsored placements and no telemetry. Every 
 Untick **Hide untrusted**, search for a name, and the list tells on it: the same server dozens of times, every copy claiming 100–127 players, every one marked ⚠. Open one and the pane says why in plain words: **Steam sees nobody on it; the server claims 116**, next to **199 other servers at the same address**.
 
 Every verdict explains itself:
-**Verified head-count** · **Inflated player count** · **Fabricated player list** · **Refuses player queries** · **Not answering** · **Name taken from another server** · **Implausible player count** · **Empty server**
+**Verified player count** · **Inflated player count** · **Fake player list** · **Player list not shared** · **Not answering** · **Name taken from another server** · **Implausible player count** · **Empty server**
 
 </td>
 </tr>
@@ -181,9 +181,9 @@ Star any server and it lands in **Favourites** with the same verified counts. Yo
 </td>
 <td width="50%" valign="top">
 
-<img src="docs/screenshots/settings.png" alt="Settings: appearance, what the launcher shows, Steam, how DayZ starts, saved profiles and updates">
+<img src="docs/screenshots/settings.png" alt="Settings: appearance, what the launcher shows, Steam, how DayZ starts, launch profiles and updates">
 
-**Settings** — themes and accents, what the browser hides, how DayZ starts, saved launch profiles, the Steam session with its idle release, and updates.
+**Settings** — themes and accents, what the launcher shows and the page it opens on, how DayZ starts, launch profiles, the Steam session with its disconnect when idle, and updates.
 
 </td>
 </tr>
@@ -246,7 +246,7 @@ Star any server and it lands in **Favourites** with the same verified counts. Yo
 
 - Signed one-click updates
 - A per-user installer; the launcher runs at the same elevation as Steam
-- **Steam idle release**, so a launcher left open stops counting as playtime after 5 idle minutes and gives its memory back (adjustable in Settings)
+- **Disconnect when idle** from Steam, so a launcher left open stops counting as playtime after 5 idle minutes and gives its memory back (adjustable in Settings)
 - A Logs page with per-area mutes and an off switch
 - Confirmed clean-up of broken `!Workshop` mod links, and never one you did not confirm
 - A slim window that remembers where it was
