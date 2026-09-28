@@ -152,6 +152,9 @@
   let closed = false;
   const SAVE_RETRY_MS = 3_000;
   const MAX_SAVE_RETRIES = 5;
+  /** After the quick retries, still while the page is open: the line on screen says the
+   *  settings are tried again, and after five failures nothing was (row 17). */
+  const SLOW_RETRY_MS = 30_000;
   async function saveNow() {
     saveTimer = undefined;
     if (!launch || launch.unreadable) return;
@@ -181,14 +184,16 @@
       unsaved = true;
       // Not after the page has gone: a copy retried then could land over a Recording
       // switch changed on the Logs page since.
-      if (!closed && saveRetries < MAX_SAVE_RETRIES) {
+      if (!closed) {
         saveRetries++;
         clearTimeout(saveTimer);
-        saveTimer = setTimeout(() => void saveNow(), SAVE_RETRY_MS);
+        saveTimer = setTimeout(() => void saveNow(), saveRetries <= MAX_SAVE_RETRIES ? SAVE_RETRY_MS : SLOW_RETRY_MS);
       }
     }
   }
   function scheduleSave() {
+    // A new edit, a new round of quick retries (row 17).
+    saveRetries = 0;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => void saveNow(), 300);
   }
@@ -236,15 +241,24 @@
 
   // What a launch adds for this PC beside the extra parameters (row 16): it showed only
   // in the command line after a launch. Asked again when those change.
+  // Only the answer to the newest question counts: two can wait on the first hardware
+  // read together and come back in either order (row 17).
   let perfArgs = $state<string[]>([]);
   $effect(() => {
-    const extra = launch?.extraArgs ?? "";
+    if (!launch) return;
+    const extra = launch.extraArgs;
+    let live = true;
     const t = setTimeout(() => {
       invoke<string[]>("perf_args", { extra })
-        .then((a) => (perfArgs = a))
+        .then((a) => {
+          if (live) perfArgs = a;
+        })
         .catch(() => {});
     }, 250);
-    return () => clearTimeout(t);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
   });
 
   /**

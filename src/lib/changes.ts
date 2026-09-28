@@ -10,6 +10,16 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.84",
+    notes: [
+      { kind: "fixed", text: "Join works again once Steam is back after a join failed without it." },
+      { kind: "fixed", text: "A refresh Steam did not answer is tried again after a pause." },
+      { kind: "fixed", text: "The connection notice stays until your connection is really back." },
+      { kind: "fixed", text: "The Steam sign-in message no longer stays on screen after Steam closes." },
+      { kind: "fixed", text: "The first News highlights are kept for you after the welcome." },
+    ],
+  },
+  {
     version: "0.1.83",
     notes: [
       { kind: "added", text: "Pick the page the launcher opens on: News, Servers or Favourites." },

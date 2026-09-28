@@ -110,7 +110,12 @@
           /* storage unavailable */
         }
         if (legacy) uiPrefs.patch({ onboarded: true });
-        else showWelcome = true;
+        else {
+          showWelcome = true;
+          // The list behind the welcome, where "Start browsing" goes: News mounted under it
+          // marked its five first-run highlights seen before anyone saw them (row 17).
+          active = "servers";
+        }
         onboarded = legacy;
       }
       void checkWhatsNew(u.lastSeenVersion ?? "", onboarded);

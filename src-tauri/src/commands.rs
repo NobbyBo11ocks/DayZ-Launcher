@@ -502,21 +502,33 @@ pub async fn servers_dzsa(app: AppHandle, state: State<'_, AppState>) -> AppResu
                 // Both were discarded, so a failed write still returned Ok(n) and
                 // the mod rows could be written for servers the upsert never stored
                 // — the same class of bug fixed for the favourites import (D-186).
-                if let Err(e) = c.upsert_keeping_measured(&for_db) {
+                // In words, and noted for the Servers notice, as every other write
+                // the player would miss (row 17).
+                let upserted = c.upsert_keeping_measured(&for_db);
+                crate::browser::cache::note_write(&upserted);
+                if let Err(e) = upserted {
                     crate::log_error!(
                         "cache",
                         "DZSA upsert of {} row(s) failed: {e}",
                         for_db.len()
                     );
-                    return Err(format!("could not store the server list: {e}"));
+                    return Err(format!(
+                        "The DZSA list could not be saved: {}.",
+                        crate::browser::cache::plain_reason(&e)
+                    ));
                 }
-                if let Err(e) = c.replace_server_mods_many(&mods, now) {
+                let stored = c.replace_server_mods_many(&mods, now);
+                crate::browser::cache::note_write(&stored);
+                if let Err(e) = stored {
                     crate::log_error!(
                         "cache",
                         "DZSA mod lists for {} row(s) failed: {e}",
                         mods.len()
                     );
-                    return Err(format!("could not store the mod lists: {e}"));
+                    return Err(format!(
+                        "The DZSA list's mod lists could not be saved: {}.",
+                        crate::browser::cache::plain_reason(&e)
+                    ));
                 }
                 Ok(())
             } else {
@@ -1685,7 +1697,13 @@ pub async fn server_details(
         send_rows(&app, "verified", &persist);
         let _ = tauri::async_runtime::spawn_blocking(move || {
             if let Ok(mut c) = cache.lock() {
-                let _ = c.apply_verifications(&persist);
+                // Noted like the pass's own writes: a verdict the cache refused was
+                // dropped without a word (row 17).
+                let applied = c.apply_verifications(&persist);
+                crate::browser::cache::note_write(&applied);
+                if let Err(e) = applied {
+                    crate::log_warn!("cache", "the pane's verdict was not stored: {e}");
+                }
             }
         })
         .await;
@@ -2221,7 +2239,11 @@ async fn join_persona(state: &State<'_, AppState>) -> Option<String> {
         .await
         .ok()
         .flatten();
-    live.or_else(|| state.steam.status().persona)
+    // The last session's name only while Steam is up: in the seconds after an account
+    // switch the status is not, and the previous account's name went to DayZ (row 17).
+    // With no name at all DayZ takes Steam's own.
+    let status = state.steam.status();
+    live.or_else(|| status.initialized.then_some(status.persona).flatten())
 }
 
 /// Subscribe + download the given Workshop items; progress via `mods:progress`,
@@ -2795,8 +2817,15 @@ pub async fn direct_connect(
     // no sample yet, as the details pane once did (D-237, D-268).
     let was_synthetic = tauri::async_runtime::spawn_blocking(move || match c.lock() {
         Ok(mut c) => {
-            c.upsert(&stored)
-                .map_err(|e| format!("could not store the server: {e}"))?;
+            let upserted = c.upsert(&stored);
+            crate::browser::cache::note_write(&upserted);
+            upserted.map_err(|e| {
+                crate::log_error!("cache", "direct connect upsert failed: {e}");
+                format!(
+                    "The server could not be saved: {}.",
+                    crate::browser::cache::plain_reason(&e)
+                )
+            })?;
             Ok(c.get(&id)
                 .ok()
                 .flatten()

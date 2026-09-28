@@ -1697,6 +1697,9 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                                 st.initialized = false;
                                 st.refreshing = false;
                                 st.idle = false;
+                                // Said of the Steam that left: kept, the pages went on
+                                // saying nobody was signed in and hid Start Steam (row 17).
+                                st.signed_out = false;
                                 st.error = Some("Steam is no longer running".into());
                             });
                         }
@@ -1738,6 +1741,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                 shared.set_status(&events, |st| {
                     st.initialized = true;
                     st.idle = true;
+                    st.signed_out = false;
                     st.error = None;
                 });
             } else if available && !running {
@@ -1750,6 +1754,7 @@ fn run(rx: mpsc::Receiver<Cmd>, events: UnboundedSender<SteamEvent>, shared: Sha
                             st.initialized = false;
                             st.idle = false;
                             st.refreshing = false;
+                            st.signed_out = false;
                             st.error = Some("Steam is no longer running".into());
                         });
                     }

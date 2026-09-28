@@ -206,6 +206,10 @@ const STALE_SECS = 120;
 const UNCOUNTED_STALE_SECS = 600;
 /** How many failed refreshes a session re-arms the automatic refresh for (row 14, F3). */
 const MAX_AUTO_REARMS = 3;
+/** How long an unanswered refresh waits before the re-armed one: re-armed at once, it ran
+ *  at the next status event, which follows the rejection straight away, so a throttling
+ *  master server (D-046) was asked three times back to back (row 17). */
+const NO_ANSWER_RETRY_MS = 5 * 60_000;
 /** How often the cache's write health is asked for (D-303). */
 const CACHE_POLL_MS = 60_000;
 /** Title-bar friend count poll (D-103); Steam answers from its local cache. */
@@ -560,8 +564,13 @@ class ServersStore {
   modScanning = $state(false);
   /** The checks find this PC's connection down (the host's `net` message), or Windows
    *  says there is none: the Servers header says the list is kept as it was (row 14,
-   *  F1, approved). */
-  netDown = $state(false);
+   *  F1, approved). Two flags: the host says only when its state changes, so Windows'
+   *  `online` after a Wi-Fi reconnect cleared a notice the host still stood by (row 17). */
+  #hostNetDown = $state(false);
+  #osOffline = $state(false);
+  get netDown() {
+    return this.#hostNetDown || this.#osOffline;
+  }
   /** What start-up did with the cache, and whether its writes fail now (D-303). */
   cache = $state<CacheStatus | null>(null);
   /** The favourites could not be read at start: the Favourites page says so instead of
@@ -1189,9 +1198,9 @@ class ServersStore {
     void this.pollCache(true);
     setInterval(() => void this.pollCache(false), CACHE_POLL_MS);
     // Windows' own word on the network between the host's checks (row 14, F1).
-    if (!navigator.onLine) this.netDown = true;
-    window.addEventListener("offline", () => (this.netDown = true));
-    window.addEventListener("online", () => (this.netDown = false));
+    this.#osOffline = !navigator.onLine;
+    window.addEventListener("offline", () => (this.#osOffline = true));
+    window.addEventListener("online", () => (this.#osOffline = false));
   }
 
   /** Reads `cache_status`; at start, a damaged cache moved aside is said once (row 14,
@@ -1350,7 +1359,10 @@ class ServersStore {
     this.error = null;
     try {
       const started = await invoke<boolean>("servers_refresh", { force, full });
-      this.#autoRefreshed = started;
+      // Only ever set: a later press declined as busy cleared it, and the start-up retry
+      // then ran a second automatic refresh a minute after the player's and re-opened the
+      // DZSA fallback (row 17). A declined start-up refresh still leaves it unset (D-222).
+      if (started) this.#autoRefreshed = true;
       // Declined by the worker's 60 s throttle (a restart right after a refresh, the
       // updater's relaunch): nothing else would ask again until the next status
       // event, which in a quiet session is the idle release a quarter of an hour
@@ -1387,6 +1399,17 @@ class ServersStore {
     } catch (e) {
       logWarn("steam", `local game version unavailable: ${describe(e)}`);
     }
+  }
+
+  #rearmTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Steam there but silent (its throttle, a timeout): the retry is armed after a pause. */
+  #rearmLater() {
+    clearTimeout(this.#rearmTimer);
+    this.#rearmTimer = setTimeout(() => {
+      this.#rearmTimer = undefined;
+      this.#retryArmed = true;
+      this.maybeAutoRefresh();
+    }, NO_ANSWER_RETRY_MS);
   }
 
   #autoRetry: ReturnType<typeof setTimeout> | undefined;
@@ -1434,7 +1457,7 @@ class ServersStore {
         if (!this.modsIndexLoaded) void this.loadModsIndex();
         return;
       case "net":
-        this.netDown = !m.data;
+        this.#hostNetDown = !m.data;
         return;
     }
   }
@@ -1472,7 +1495,8 @@ class ServersStore {
         // not asked for ever and can still be released.
         if (this.#rearms < MAX_AUTO_REARMS) {
           this.#rearms++;
-          this.#retryArmed = true;
+          if (d.reason === "no-answer") this.#rearmLater();
+          else this.#retryArmed = true;
         }
       }
       return;
@@ -1790,8 +1814,12 @@ class ServersStore {
   async importOfficial(): Promise<ImportResult | string> {
     try {
       const r = await invoke<ImportResult>("import_official_favourites");
-      if (!r.missing) await this.loadFavourites();
-      this.favouritesUnread = false;
+      // Only a read clears the flag: with no official file the host never touched the
+      // favourites, and the page went from "could not be read" to "No favourites yet" (row 17).
+      if (!r.missing) {
+        await this.loadFavourites();
+        this.favouritesUnread = false;
+      }
       return r;
     } catch (e) {
       return String(e);

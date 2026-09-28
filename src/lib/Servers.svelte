@@ -57,14 +57,18 @@
     const address = direct.trim();
     if (!address) return;
     connecting = true;
-    const row = await servers.directConnect(address);
+    // Not selected by the probe: a join window opened while it ran kept its pane behind
+    // it moving to this server (D-281); the join waits for no window to be open, and the
+    // address stays for another try (row 17, as Recent does).
+    const row = await servers.directConnect(address, false);
     connecting = false;
-    if (row) {
+    if (row && servers.joiningId === null) {
       direct = "";
       // Through closeConnect, like Escape: closing destroys the focused field, and
       // focus fell to <body>, where the grid's keys stop working (D-224, D-256).
       closeConnect();
       // "Join", not "Add" (row 16): the join window opens with its plan, as from the list.
+      servers.select(row.id);
       servers.requestJoin(row.id);
     }
   }

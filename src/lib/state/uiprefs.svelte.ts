@@ -107,6 +107,9 @@ class UiPrefsStore {
     this.#timer = setTimeout(() => void this.flush(), FLUSH_MS);
   }
 
+  /** The write in flight; the next one waits for it. */
+  #writing: Promise<void> = Promise.resolve();
+
   async flush() {
     clearTimeout(this.#timer);
     // The read first, the pending changes after: taken before a slow first read had
@@ -114,6 +117,21 @@ class UiPrefsStore {
     // reconcile against it put the old theme or News choice back on screen while the
     // file got the new one (row 15, F4).
     await this.ready;
+    // One write at a time. With two out at once, a first one that failed put its older
+    // values back for the retry after the second had saved newer ones, and the retry
+    // wrote them over it: the screen said one thing, the next start another (row 17).
+    const before = this.#writing;
+    let finished!: () => void;
+    this.#writing = new Promise<void>((r) => (finished = r));
+    try {
+      await before;
+      await this.#write();
+    } finally {
+      finished();
+    }
+  }
+
+  async #write() {
     const p = this.#pending;
     if (Object.keys(p).length === 0) return;
     this.#pending = {};

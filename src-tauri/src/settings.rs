@@ -244,6 +244,9 @@ pub struct SettingsStore {
     reset: AtomicBool,
     /// The name of the copy `set_aside` kept of that file.
     kept_as: Mutex<Option<String>>,
+    /// "Still unreadable" was logged since the last read: the Settings page asks every
+    /// 5 s while the file cannot be read, twelve warnings a minute (row 17).
+    warned: AtomicBool,
 }
 
 /// Whether the settings handed out are the player's own (row 14, H4).
@@ -295,7 +298,34 @@ fn decode(bytes: &[u8]) -> Result<String, String> {
     if let Some(rest) = bytes.strip_prefix(&[0xFE, 0xFF]) {
         return utf16(rest, false);
     }
-    String::from_utf8(bytes.to_vec()).map_err(|e| e.to_string())
+    match String::from_utf8(bytes.to_vec()) {
+        Ok(s) => Ok(s),
+        // No mark and not UTF-8: saved in the ANSI code page, as PowerShell 5.1's
+        // `Set-Content` does ("Zoë" is the one byte 0xEB). The whole file was set aside
+        // for it (row 17); the official favourites file is read the same way (D-239).
+        Err(e) => {
+            let text = from_ansi(bytes).ok_or_else(|| e.to_string())?;
+            crate::log_info!(
+                "settings",
+                "the file is not UTF-8; read in the ANSI code page"
+            );
+            Ok(text)
+        }
+    }
+}
+
+/// `bytes` in the system's ANSI code page (`CP_ACP`); `None` when Windows cannot
+/// convert them.
+fn from_ansi(bytes: &[u8]) -> Option<String> {
+    use windows_sys::Win32::Globalization::{MultiByteToWideChar, CP_ACP};
+    let len = i32::try_from(bytes.len()).ok()?;
+    // SAFETY: the input pointer and length describe `bytes`; the first call only sizes.
+    let n = unsafe { MultiByteToWideChar(CP_ACP, 0, bytes.as_ptr(), len, std::ptr::null_mut(), 0) };
+    let mut wide = vec![0u16; usize::try_from(n).ok().filter(|&n| n > 0)?];
+    // SAFETY: `wide` holds the `n` units the first call asked for.
+    let m = unsafe { MultiByteToWideChar(CP_ACP, 0, bytes.as_ptr(), len, wide.as_mut_ptr(), n) };
+    wide.truncate(usize::try_from(m).ok().filter(|&m| m > 0)?);
+    String::from_utf16(&wide).ok()
 }
 
 /// The keys of `map` that `T` takes, one at a time over those already kept; the others
@@ -462,6 +492,7 @@ impl SettingsStore {
             unread: AtomicBool::new(unread),
             reset: AtomicBool::new(reset),
             kept_as: Mutex::new(kept_as),
+            warned: AtomicBool::new(false),
         };
         store.apply_install_choices();
         store
@@ -545,14 +576,17 @@ impl SettingsStore {
             },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
             Err(e) => {
-                crate::log_warn!(
-                    "settings",
-                    "{} is still unreadable ({e}); not writing over it",
-                    self.path.display()
-                );
+                if !self.warned.swap(true, Ordering::AcqRel) {
+                    crate::log_warn!(
+                        "settings",
+                        "{} is still unreadable ({e}); not writing over it",
+                        self.path.display()
+                    );
+                }
                 return Err(e);
             }
         };
+        self.warned.store(false, Ordering::Release);
         self.unread.store(false, Ordering::Release);
         crate::log_info!("settings", "{} readable again", self.path.display());
         Ok(adopted)
@@ -1056,6 +1090,13 @@ mod tests {
             "0.1.78"
         );
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// Row 17: a file saved in the ANSI code page is read, not reset.
+    #[test]
+    fn a_file_in_the_ansi_code_page_is_read() {
+        let s = parse_settings(b"{\"profileName\":\"Zo\xEB\"}").unwrap();
+        assert!(s.profile_name.starts_with("Zo") && s.profile_name.chars().count() == 3);
     }
 
     /// Row 16: the start page is News until the player picks another of the three.

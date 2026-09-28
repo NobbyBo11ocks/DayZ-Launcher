@@ -65,13 +65,20 @@
   // "Steam is not running" is true of the moment the plan was made. Once the session is
   // back the plan is made again, so Join and Download come back without Cancel and a
   // second Join; once each time Steam comes back (row 14, F11).
+  // Also after a failed Join or an exit, where "Start Steam" is offered too: the dialog
+  // stayed on the failure with Join disabled once Steam was back (row 17).
   let replannedForSteam = false;
   $effect(() => {
     const up = servers.steam?.initialized ?? false;
     if (!up) replannedForSteam = false;
-    else if (phase === "ready" && plan && !plan.steamRunning && !replannedForSteam) {
+    else if ((phase === "ready" || phase === "error" || phase === "exited") && plan && !plan.steamRunning && !replannedForSteam) {
       replannedForSteam = true;
-      void replan();
+      void replan().then((ok) => {
+        if (ok && plan?.steamRunning && phase === "error") {
+          error = null;
+          phase = "ready";
+        }
+      });
     }
   });
 
