@@ -13,8 +13,10 @@
   import { external } from "./external";
   import { mapLabel } from "./maps";
   import { servers, pingUnmeasured } from "./state/servers.svelte";
+  import { modUpdates } from "./state/mods.svelte";
   import { explainVerdict, verdictHeading } from "./verdict";
-  import { clock, countryName, type Diagnostics, isInflated, type PopulationSample, queueOf, type ServerDetails, type ServerRow, trustedPlayers } from "./types";
+  import { claimBeside, distinctMods, modCounts, modMark, sessionSummary, siblingsOf } from "./pane";
+  import { clock, countryName, type Diagnostics, isInflated, isUnchecked, isUntrusted, playersShown, type PopulationSample, queueOf, type ServerDetails, type ServerRow, versionDiffers } from "./types";
 
   /** `shows`: whether the host page lists a server. Favourites and LAN pass it, because
    *  they show the pane only for their own rows (D-240). */
@@ -146,6 +148,20 @@
     }),
   );
 
+  /** When the pane's own read answered (`Date.now()`), for the re-read below. */
+  let readAt = 0;
+  let rereading = false;
+  /** How old the Connected section may get before it is read again (row 26, approved). */
+  const REREAD_MS = 5 * 60_000;
+
+  /** A check that landed while the pane's read was answering is the newer word: the
+   *  pane's own echo comes before its reply, so the last one the stream brought is the
+   *  newest (row 26). */
+  function withLater(d: ServerDetails): ServerDetails {
+    const later = servers.lastVerified(d.id);
+    return later && later.verifiedAt >= d.verification.verifiedAt ? { ...d, verification: later } : d;
+  }
+
   // Live INFO/RULES/PLAYER, once per selection.
   $effect(() => {
     const cur = id;
@@ -168,11 +184,8 @@
       invoke<ServerDetails>("server_details", { id: cur })
         .then((d) => {
           if (cancelled) return;
-          // A check that landed while this one was answering is the newer word: the
-          // pane's own echo comes before its reply, so the last one the stream brought
-          // is the newest (row 26).
-          const later = servers.lastVerified(d.id);
-          details = later && later.verifiedAt >= d.verification.verifiedAt ? { ...d, verification: later } : d;
+          readAt = Date.now();
+          details = withLater(d);
         })
         .catch((e) => {
           if (!cancelled) error = String(e);
@@ -196,13 +209,41 @@
     const cur = id;
     if (!cur) return;
     const t = setInterval(() => {
-      if (document.visibilityState === "visible") void servers.verifyVisible([cur]);
+      if (document.visibilityState !== "visible") return;
+      // The Connected section is read again, whole and quietly over what is shown, once
+      // it is five minutes old: it stayed as the pane first read it for as long as the
+      // pane was open (row 26, approved). That read is a check as well, so it stands in
+      // for this minute's.
+      if (sessions && details?.id === cur && Date.now() - readAt >= REREAD_MS) void reread(cur);
+      else void servers.verifyVisible([cur]);
     }, 60_000);
     return () => clearInterval(t);
   });
 
+  async function reread(cur: string) {
+    if (rereading) return;
+    rereading = true;
+    try {
+      const d = await invoke<ServerDetails>("server_details", { id: cur });
+      // Not over another selection's, nor over the fresh read a reselection started.
+      if (id !== cur || details?.id !== cur) return;
+      readAt = Date.now();
+      details = withLater(d);
+    } catch {
+      /* what is shown stays; the failure is in the log (invokeLogged) */
+    } finally {
+      rereading = false;
+    }
+  }
+
   const MODS_COLLAPSED = 10;
-  const mods = $derived(details?.rules?.dayz?.mods ?? []);
+  /** The server's own list; null when it sent none, or one without its DayZ part. */
+  const liveMods = $derived(details?.rules?.dayz?.mods ?? null);
+  /** What the section lists: the server's own, or the scan's when it sent none, as the
+   *  join falls back to it (D-209); each mod once, as the list's column counts them
+   *  (row 26, approved). */
+  const mods = $derived(distinctMods(liveMods ?? details?.scanned?.mods ?? []));
+  const hasList = $derived(liveMods != null || details?.scanned != null);
 
   // 644 hosts in the cached list run two or more servers, and 1 689 rows — 49 % of
   // the list — have at least one sibling; 478 of those groups span more than one map
@@ -214,17 +255,15 @@
   const SIBLINGS_SHOWN = 6;
   const siblings = $derived.by(() => {
     void servers.rowsTick;
-    const ip = row?.ip;
-    const self = row?.id;
-    if (!ip) return [];
-    const out: ServerRow[] = [];
+    const self = row;
+    if (!self?.ip) return [];
+    const at: ServerRow[] = [];
     // The store's address index, not a walk over every row on every flush (D-284).
-    for (const sid of servers.idsAt(ip)) {
+    for (const sid of servers.idsAt(self.ip)) {
       const r = servers.rows.get(sid);
-      if (r && sid !== self) out.push(r);
+      if (r) at.push(r);
     }
-    out.sort((a, b) => trustedPlayers(b) - trustedPlayers(a) || a.pingMs - b.pingMs);
-    return out;
+    return siblingsOf(self, at);
   });
   let allSiblings = $state(false);
   const shownSiblings = $derived(allSiblings ? siblings : siblings.slice(0, SIBLINGS_SHOWN));
@@ -235,33 +274,15 @@
   });
   const shownMods = $derived(allMods ? mods : mods.slice(0, MODS_COLLAPSED));
   // What the join plan would download: Workshop ids above 0, each once (`required_mods`,
-  // D-221, D-265). Server-side mods (id 0) and a repeated id counted as missing (D-281).
-  const missing = $derived(installed ? new Set(mods.filter((m) => m.workshopId > 0 && !installed!.has(m.workshopId)).map((m) => m.workshopId)).size : 0);
+  // D-221, D-265), and what it would update (row 26, approved).
+  const counts = $derived(modCounts(mods, installed, modUpdates.stale));
   const description = $derived((details?.info?.game || row?.description || "").trim());
   const descLong = $derived(description.length > 220 || description.split("\n").length > 3);
 
   // Session lengths summarised (D-081): count, median, longest, arrivals in the last
-  // 10 minutes, and a five-bucket distribution instead of one value per player.
-  const sessions = $derived.by(() => {
-    const secs = (details?.players?.players ?? []).map((p) => p.durationSecs).sort((a, b) => a - b);
-    if (!secs.length) return null;
-    const buckets = [
-      { label: "< 15 min", max: 15 * 60, n: 0 },
-      { label: "15–60 min", max: 60 * 60, n: 0 },
-      { label: "1–3 h", max: 3 * 3600, n: 0 },
-      { label: "3–6 h", max: 6 * 3600, n: 0 },
-      { label: "6 h +", max: Infinity, n: 0 },
-    ];
-    for (const s of secs) buckets.find((b) => s < b.max)!.n++;
-    return {
-      count: secs.length,
-      median: secs[Math.floor(secs.length / 2)] ?? 0,
-      longest: secs[secs.length - 1] ?? 0,
-      recent: secs.filter((s) => s < 600).length,
-      buckets,
-      peak: Math.max(...buckets.map((b) => b.n)),
-    };
-  });
+  // 10 minutes, and a five-bucket distribution instead of one value per player; real
+  // sessions only, as the trust box counts them (row 26, approved).
+  const sessions = $derived(sessionSummary(details?.players?.players, details?.verification.verdict));
 
   /** Highest sample and how many hours the samples span, for the population section. */
   const peak = $derived(samples.reduce<PopulationSample | null>((m, s) => (m == null || s.players > m.players ? s : m), null));
@@ -303,14 +324,21 @@
     <!-- What this pane's own check just counted: a fabricated list is no count, and a
          stored one can be hours old. -->
     {@const listed = v && v.verdict !== "synthetic" ? v.verified : null}
-    {@const versionOk = !localVersion || row.version === localVersion}
+    {@const versionOff = versionDiffers(row.version, localVersion)}
+    {@const claim = claimBeside(row)}
 
     <header class="head">
       <h2 title={row.name} tabindex="-1" bind:this={titleEl}>{row.name}</h2>
       <div class="meta">
         {#if row.country}<span class="chip"><Flag code={row.country} decorative /> {countryName(row.country)}</span>{/if}
         <span class="chip" title={row.map}>{mapLabel(row.map)}</span>
-        <span class="chip" class:bad={!versionOk} title={versionOk ? "Server version" : `Server version differs from your DayZ_x64.exe (${localVersion})`}>v{row.version}{#if !versionOk}{" "}≠ mine{/if}</span>
+        {#if row.version}
+          <span class="chip" class:bad={versionOff} title={versionOff ? `Server version differs from your DayZ_x64.exe (${localVersion})` : "Server version"}>v{row.version}{#if versionOff}{" "}≠ mine{/if}</span>
+        {:else}
+          <!-- Not known (a favourite imported while it was offline, a LAN row): no
+               warning, where an amber "v ≠ mine" sat (row 26, approved). -->
+          <span class="chip" title="Server version unknown">version unknown</span>
+        {/if}
         {#if row.password}<span class="chip">🔒 password</span>{/if}
       </div>
       <div class="addr">
@@ -366,9 +394,12 @@
     <dl class="facts">
       <dt>Players</dt>
       <dd>
-        <strong>{trustedPlayers(row)}</strong> / {row.maxPlayers}
+        <!-- The list's number: a claim nobody could count says so, and "server claims"
+             stands only beside a real head-count (row 26, approved). -->
+        <strong>{playersShown(row)}</strong> / {row.maxPlayers}
+        {#if isUnchecked(row)} <span class="muted">· not counted</span>{/if}
         {#if queueOf(row)} <span class="muted">· {queueOf(row)} in queue</span>{/if}
-        {#if row.verifiedPlayers != null && row.players !== row.verifiedPlayers} <span class="muted">· server claims {row.players}</span>{/if}
+        {#if claim != null} <span class="muted">· server claims {claim}</span>{/if}
       </dd>
       <dt>Ping</dt>
       <!-- The row's, which every later check updates; the pane's first check's own round
@@ -410,7 +441,8 @@
             <li>
               <button class="sib" onclick={() => openSibling(sv.id)} title={sv.name}>
                 <span class="sname">{sv.name}</span>
-                <span class="smeta">{mapLabel(sv.map)} · {trustedPlayers(sv)}/{sv.maxPlayers}</span>
+                <!-- The list's number, and its ⚠ on an untrusted one (row 26, approved). -->
+                <span class="smeta">{mapLabel(sv.map)} · {#if isUntrusted(sv)}<span class="warn" aria-hidden="true">⚠</span><span class="sr-only">not trusted,</span>{" "}{/if}{playersShown(sv)}/{sv.maxPlayers}</span>
               </button>
             </li>
           {/each}
@@ -431,30 +463,48 @@
 
     <section>
       <h3>
-        Mods{#if details?.rules?.dayz} <span class="count">{mods.length}</span>{/if}
-        {#if installed && missing}<span class="warn"> · {missing} missing</span>{/if}
+        Mods{#if hasList} <span class="count">{mods.length}</span>{/if}
+        {#if counts.missing}<span class="warn"> · {counts.missing} missing</span>{/if}
+        {#if counts.toUpdate}<span class="warn"> · {counts.toUpdate} to update</span>{/if}
       </h3>
       {#if loading && !details}
         <p class="muted">Loading…</p>
-      {:else if details?.rulesError}
-        <!-- In words; the reason stays on hover (row 16). -->
-        <p class="muted" title={details.rulesError}>The server did not send its mod list.</p>
-      {:else if details?.rules?.dayz && mods.length === 0}
-        <p class="muted">Vanilla, no mods required.</p>
-      {:else if mods.length}
-        <ul class="mods">
-          {#each shownMods as m, i (`${m.workshopId}#${i}`)}
-            <li class:missing={installed && m.workshopId > 0 && !installed.has(m.workshopId)}>
-              <span class="tick" aria-hidden="true">{installed && m.workshopId > 0 ? (installed.has(m.workshopId) ? "✓" : "○") : "·"}</span>
-              <!-- The tick and the colour were the only difference (D-291). -->
-              {#if installed && m.workshopId > 0}<span class="sr-only">{installed.has(m.workshopId) ? "installed" : "missing"}, </span>{/if}
-              <span class="mname" title={m.name}>{m.name}</span>
-              <a class="mid" href="https://steamcommunity.com/sharedfiles/filedetails/?id={m.workshopId}" onclick={external} title="Open in the Steam Workshop" aria-label="{m.workshopId}, {m.name}, on the Steam Workshop">{m.workshopId}</a>
-            </li>
-          {/each}
-        </ul>
-        {#if mods.length > MODS_COLLAPSED}
-          <button class="link" onclick={() => (allMods = !allMods)} aria-expanded={allMods}>{allMods ? "Show fewer" : `Show all ${mods.length}`}</button>
+      {:else if details}
+        {#if !liveMods}
+          <!-- In words; the reason stays on hover (row 16). A reply without its DayZ part
+               is no list either, where the section stayed empty; and the scan's list is
+               shown as the join uses it (row 26, approved). -->
+          <p class="muted" title={details.rulesError ?? undefined}>
+            {details.scanned ? `The server did not send its mod list, so the one read ${details.scanned.age} is shown.` : "The server did not send its mod list."}
+          </p>
+        {/if}
+        {#if hasList && mods.length === 0}
+          <p class="muted">Vanilla, no mods required.</p>
+        {:else if mods.length}
+          <ul class="mods">
+            {#each shownMods as m, i (`${m.workshopId}#${i}`)}
+              {@const mark = modMark(m, installed, modUpdates.stale)}
+              <li class:missing={mark === "missing"}>
+                <span class="tick" aria-hidden="true">{mark === "installed" || mark === "update" ? "✓" : mark === "missing" ? "○" : "·"}</span>
+                <!-- The tick and the colour were the only difference (D-291). -->
+                {#if mark === "installed" || mark === "update" || mark === "missing"}<span class="sr-only">{mark === "missing" ? "missing" : "installed"}, </span>{/if}
+                <span class="mname" title={m.name}>{m.name}</span>
+                <span class="mend">
+                  {#if mark === "update"}<span class="upd">↻ update</span>{/if}
+                  <!-- No Workshop id: nothing to download, and its link opened a page that
+                       does not exist (row 26, approved). -->
+                  {#if mark === "server-side"}
+                    <span class="mid">server-side</span>
+                  {:else}
+                    <a class="mid" href="https://steamcommunity.com/sharedfiles/filedetails/?id={m.workshopId}" onclick={external} title="Open in the Steam Workshop" aria-label="{m.workshopId}, {m.name}, on the Steam Workshop">{m.workshopId}</a>
+                  {/if}
+                </span>
+              </li>
+            {/each}
+          </ul>
+          {#if mods.length > MODS_COLLAPSED}
+            <button class="link" onclick={() => (allMods = !allMods)} aria-expanded={allMods}>{allMods ? "Show fewer" : `Show all ${mods.length}`}</button>
+          {/if}
         {/if}
       {/if}
     </section>
@@ -539,7 +589,9 @@
   .missing .tick { color: var(--warn); }
   .mname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mid { font-family: Consolas, "Cascadia Mono", monospace; font-size: 11px; color: var(--fg-muted); text-decoration: none; }
-  .mid:hover { text-decoration: underline; }
+  a.mid:hover { text-decoration: underline; }
+  .mend { display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+  .upd { color: var(--warn); font-size: 11px; }
 
   .sum { margin: 0; color: var(--fg-muted); line-height: 1.5; }
   .sum strong { color: var(--fg); font-weight: 600; }

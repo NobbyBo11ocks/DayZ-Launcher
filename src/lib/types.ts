@@ -152,6 +152,19 @@ export const trustedPlayers = (r: ServerRow): number => {
 };
 
 /**
+ * The number the list shows for a row, and the details pane with it: the server's own
+ * claim for a row nobody could count (the list marks it "?" or ⚠), the trusted count
+ * otherwise. The pane showed the trusted count alone, a bold 0 where the list showed
+ * ⚠ 40/60 (row 26, approved).
+ */
+export const playersShown = (r: ServerRow): number => (isUnchecked(r) ? r.players : trustedPlayers(r));
+
+/** A server version that is not the player's. An unknown one ("": a favourite imported
+ *  while it was offline, a LAN row) is no difference: it carried an amber "≠ mine"
+ *  (row 26, approved). */
+export const versionDiffers = (version: string, local: string | null): boolean => local != null && version !== "" && version !== local;
+
+/**
  * The queue a server advertises, believed only when the server is actually full.
  * `lqs<N>` is a free-text keyword, and a 7-player server was showing "+172" with
  * it — 486 never-verified rows advertise one (D-233).
@@ -451,7 +464,12 @@ export type ServerDetails = {
   rulesError: string | null;
   players: A2sPlayers | null;
   verification: Verification;
+  /** The scan's mod list, sent only when the server sent none (row 26, approved). */
+  scanned?: ScannedList;
 };
+
+/** A scanned mod list, published mods only, with its age in words ("2 hours ago"). */
+export type ScannedList = { age: string; mods: { workshopId: number; name: string }[] };
 
 /** What the Mods page and the details pane read of the Steam, DayZ and Workshop check; the
  *  rest (the Steam account, the libraries, the game folder) stays on the host (row 25). */

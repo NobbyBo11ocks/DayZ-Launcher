@@ -1027,9 +1027,28 @@ async fn connection_up() -> bool {
     up
 }
 
+/// The population samples a batch of checks leaves (M6 sparkline): the head-count of
+/// every list that was counted. Verified, and inflated as well, whose count is the real
+/// one beside a larger claim: a server that claims more than it has got no chart at all
+/// (row 26, approved). Never a claim, a fabricated list or a server that did not answer.
+/// An inflated server's queue is its claim's, so it is not kept.
+fn population_samples(results: &[Verification]) -> Vec<(String, i64, i32, i32)> {
+    results
+        .iter()
+        .filter_map(|v| {
+            let queue = match v.verdict {
+                Verdict::Verified => v.tags.as_ref().and_then(|t| t.queue).unwrap_or(0) as i32,
+                Verdict::Inflated => 0,
+                _ => return None,
+            };
+            v.verified.map(|n| (v.id.clone(), v.verified_at, n, queue))
+        })
+        .collect()
+}
+
 /// Emits and persists one batch of verification results, recording the latest
-/// verdict per server so a retry supersedes an earlier "offline". Verified
-/// head-counts also become population samples (M6 sparkline).
+/// verdict per server so a retry supersedes an earlier "offline". Counted head-counts
+/// also become population samples (`population_samples`).
 async fn publish(
     app: &AppHandle,
     cache: &Arc<Mutex<Cache>>,
@@ -1062,14 +1081,7 @@ async fn publish(
                     );
                 }
             }
-            let samples: Vec<(String, i64, i32, i32)> = results
-                .iter()
-                .filter(|v| v.verdict == Verdict::Verified)
-                .filter_map(|v| {
-                    let queue = v.tags.as_ref().and_then(|t| t.queue).unwrap_or(0) as i32;
-                    v.verified.map(|n| (v.id.clone(), v.verified_at, n, queue))
-                })
-                .collect();
+            let samples = population_samples(&results);
             if !samples.is_empty() {
                 // Through `note_write` as well, and a refusal of the file itself is its to
                 // say, once an episode (row 25).
@@ -1125,6 +1137,38 @@ pub struct ServerDetails {
     pub rules_error: Option<String>,
     pub players: Option<a2s::Players>,
     pub verification: Verification,
+    /// The mod list the scan recorded, sent only when the server sent none (`scanned_list`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scanned: Option<ScannedList>,
+}
+
+/// A scanned mod list as the details pane shows it, with how old it is in words.
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScannedList {
+    pub age: String,
+    pub mods: Vec<ScannedMod>,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScannedMod {
+    pub workshop_id: u64,
+    pub name: String,
+}
+
+/// The scan's list for a server that sent none, as the join plan falls back to it
+/// (D-209): the pane said only "The server did not send its mod list" while Join
+/// downloaded the scanned mods (row 26, approved). Published mods only, as the join
+/// uses them (`Cache::server_mods`, D-239).
+fn scanned_list((at, mods): crate::browser::cache::ScannedMods, now: i64) -> ScannedList {
+    ScannedList {
+        age: humanise_age(now.saturating_sub(at)),
+        mods: mods
+            .into_iter()
+            .map(|(workshop_id, name)| ScannedMod { workshop_id, name })
+            .collect(),
+    }
 }
 
 /// Mod lists are re-scanned when older than this.
@@ -1928,8 +1972,17 @@ pub async fn server_details(
         set_net(&app, false);
     }
 
+    // Only when the server sent no list: its own is the one to show.
+    let scanned = match mod_list_of(&rules) {
+        Ok(_) => None,
+        Err(_) => cached_mods(&cache, &id)
+            .await
+            .map(|s| scanned_list(s, ServerRow::now_unix())),
+    };
+
     Ok(ServerDetails {
         id,
+        scanned,
         info_rtt_ms: info.as_ref().ok().map(|r| r.rtt.as_millis() as u32),
         info: info.ok().map(|r| r.value),
         rules_error: rules.as_ref().err().map(|e| e.to_string()),
@@ -3358,6 +3411,65 @@ mod tests {
             Err("the reply had no DayZ part".to_string())
         );
         assert!(mod_list_of(&Err(a2s::A2sError::Timeout)).is_err());
+    }
+
+    use super::{population_samples, scanned_list, ScannedList, ScannedMod};
+    use crate::browser::verify::{Verdict, Verification};
+
+    /// Row 26 (approved): an inflated check leaves its real count as a sample, without
+    /// its claim's queue; a claim, a fabricated list or no answer leaves none.
+    #[test]
+    fn counted_checks_leave_population_samples() {
+        let check = |id: &str, verdict: Verdict, verified: Option<i32>| Verification {
+            id: id.into(),
+            verdict,
+            reported: 60,
+            verified,
+            max_players: 60,
+            ping_ms: Some(30),
+            player_rtt_ms: Some(31),
+            keywords: None,
+            tags: Some(crate::a2s::DayzTags::parse("lqs3")),
+            verified_at: 1_790_000_000,
+            reason: String::new(),
+            facts: None,
+        };
+        let samples = population_samples(&[
+            check("a", Verdict::Verified, Some(58)),
+            check("b", Verdict::Inflated, Some(12)),
+            check("c", Verdict::Synthetic, Some(60)),
+            check("d", Verdict::Unverifiable, None),
+            check("e", Verdict::Offline, None),
+        ]);
+        assert_eq!(
+            samples,
+            vec![
+                ("a".to_string(), 1_790_000_000, 58, 3),
+                ("b".to_string(), 1_790_000_000, 12, 0)
+            ]
+        );
+    }
+
+    /// Row 26 (approved): the scan's list reaches the pane with its age in words and in
+    /// the shape the pane reads.
+    #[test]
+    fn a_scanned_list_says_how_old_it_is() {
+        let now = 1_790_000_000;
+        let list = scanned_list((now - 2 * 3600, vec![(1559212036, "CF".into())]), now);
+        assert_eq!(
+            list,
+            ScannedList {
+                age: "2 hours ago".into(),
+                mods: vec![ScannedMod {
+                    workshop_id: 1559212036,
+                    name: "CF".into()
+                }]
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(&list).unwrap(),
+            serde_json::json!({ "age": "2 hours ago", "mods": [{ "workshopId": 1559212036u64, "name": "CF" }] })
+        );
     }
 
     use super::fallback_query_ports;

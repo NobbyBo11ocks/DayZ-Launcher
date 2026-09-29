@@ -4,7 +4,7 @@
   // Virtualised server table (docs/05 §5, docs/06 §2): fixed 36 px rows, renders only
   // the viewport plus overscan, reports visible ids for verification, keyboard nav.
   import Flag from "./Flag.svelte";
-  import { clock, countryName, isInflated, isUnchecked, isUntrusted, queueOf, type ServerRow, trustedPlayers } from "./types";
+  import { clock, countryName, isInflated, isUnchecked, isUntrusted, playersShown, queueOf, type ServerRow, versionDiffers } from "./types";
   import { pingUnmeasured, type SortKey } from "./state/servers.svelte";
 
   let {
@@ -109,17 +109,17 @@
     const unchecked = isUnchecked(r);
     const queue = queueOf(r);
     const friends = friendsOn?.get(r.id);
-    const mismatch = localVersion != null && r.version !== localVersion;
+    const mismatch = versionDiffers(r.version, localVersion);
     return [
       r.name,
       mapLabel(r.map),
-      `${unchecked ? r.players : trustedPlayers(r)} of ${r.maxPlayers} players` +
+      `${playersShown(r)} of ${r.maxPlayers} players` +
         (untrusted ? ", count not trusted" : unchecked ? ", not verified yet" : "") +
         (queue ? `, ${queue} in the queue` : ""),
       pingUnmeasured(r) ? "ping not measured" : `ping ${r.pingMs} ms, ${pingWord(r.pingMs)}`,
       mods === undefined ? (r.tags.modded ? "modded, mod list not scanned yet" : "mod list not scanned yet") : mods === 0 ? "no mods" : `${mods} mod${mods === 1 ? "" : "s"}`,
       r.tags.timeMinutes != null ? `time ${clock(r.tags.timeMinutes)}` : "",
-      `version ${r.version}${mismatch ? `, not your version ${localVersion}` : ""}`,
+      r.version ? `version ${r.version}${mismatch ? `, not your version ${localVersion}` : ""}` : "version unknown",
       r.password ? "password" : "",
       r.tags.firstPersonOnly ? "first person only" : "",
       r.tags.dlc ? "needs DLC" : "",
@@ -333,10 +333,10 @@
     <div class="spacer" role="presentation" style="height: {rows.length * ROW}px">
       <div class="window" role="presentation" style="transform: translateY({start * ROW}px)">
         {#each slice as r, i (r.id)}
-          {@const pop = trustedPlayers(r)}
           {@const untrusted = isUntrusted(r)}
           {@const unchecked = isUnchecked(r)}
           {@const mods = modsByServer?.get(r.id)?.length}
+          {@const versionOff = versionDiffers(r.version, localVersion)}
           <!-- Keyboard handling belongs to the grid container, not each row: one handler
                there sees every key, while a second on the row made Svelte's delegated
                keydown fire twice (arrows skipped rows, F cancelled itself out, D-151). -->
@@ -434,7 +434,7 @@
                    server that answers INFO and firewalls PLAYER relies on. -->
               <span class="txt" class:muted={unchecked && !untrusted}>
                 {#if untrusted}<span class="warn">⚠</span>{:else if unchecked}<span class="unchecked">?</span>{/if}
-                {unchecked ? r.players : pop}/{r.maxPlayers}{#if queueOf(r)}<span class="muted"> +{queueOf(r)}</span>{/if}
+                {playersShown(r)}/{r.maxPlayers}{#if queueOf(r)}<span class="muted"> +{queueOf(r)}</span>{/if}
               </span>
             </div>
             <!-- 0 on a non-LAN row is "not measured" (DZSA list, an unreachable favourite),
@@ -450,12 +450,15 @@
               {/if}
               {clock(r.tags.timeMinutes)}
             </div>
+            <!-- An unknown version is no difference: it was amber, with an empty "Server
+                 runs ;" (row 26, approved). -->
             <div
               role="gridcell"
               class="cell c-ver"
-              class:warn={localVersion != null && r.version !== localVersion}
-              title={localVersion != null && r.version !== localVersion ? `Server runs ${r.version}; your DayZ is ${localVersion}` : `Server version ${r.version}`}
-            >{shortVersion(r.version)}</div>
+              class:warn={versionOff}
+              class:muted={!r.version}
+              title={!r.version ? "Version unknown" : versionOff ? `Server runs ${r.version}; your DayZ is ${localVersion}` : `Server version ${r.version}`}
+            >{r.version ? shortVersion(r.version) : "unknown"}</div>
           </div>
         {/each}
       </div>

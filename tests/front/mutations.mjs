@@ -19,6 +19,7 @@ const T = "src/lib/types.ts";
 const C = "src/lib/changes.ts";
 const VD = "src/lib/verdict.ts";
 const AV = "src/lib/avatar.ts";
+const PN = "src/lib/pane.ts";
 
 /** [test file, the test's name as it starts, the fix, the source, text, replacement, what the revert does] */
 const MUTATIONS = [
@@ -172,6 +173,29 @@ const MUTATIONS = [
     '      if (v.reason.includes("missing from the list")) return "The player list looks fake: players it lists as older were not there at the previous check.";\n', "", "R11's invariant shows the general line"],
   ["verdict", "every rule's reason has its sentence", "D-268", VD,
     '  v.verdict === "verified" && v.reason.startsWith("INFO reports 0") ? "Empty server" : LABEL[v.verdict];', "  LABEL[v.verdict];", "an empty server headed as a verified count"],
+  // pane.test.mjs (row 26, approved)
+  ["pane", "the Players line", "row 26 (3)", T,
+    "export const playersShown = (r: ServerRow): number => (isUnchecked(r) ? r.players : trustedPlayers(r));",
+    "export const playersShown = (r: ServerRow): number => trustedPlayers(r);", "the pane's bold 0 beside the list's claim"],
+  ["pane", "the Players line", "row 26 (3)", PN,
+    "  if (r.verifiedPlayers == null || playersShown(r) !== r.verifiedPlayers) return null;",
+    "  if (r.verifiedPlayers == null) return null;", "'server claims' beside Steam's 0"],
+  ["pane", "the other servers at an address", "row 26 (9)", PN,
+    " || (self.gamePort > 0 && r.gamePort === self.gamePort)", "", "the pane's own server under its old query port"],
+  ["pane", "the other servers at an address", "row 26 (3)", PN,
+    "Number(a.untrusted) - Number(b.untrusted) || ", "", "untrusted ones sorted among the trusted"],
+  ["pane", "the Connected section counts", "row 26 (2)", PN,
+    "  if (secs.filter(zeroLength).length >= 2) secs = secs.filter((s) => !zeroLength(s));\n", "", "R12's zero-length entries counted as sessions"],
+  ["pane", "the Connected section counts", "row 26 (2)", PN,
+    ' || verdict === "synthetic"', "", "a fake list's sessions shown"],
+  ["pane", "each mod once", "row 26 (8)", PN,
+    "    if (seen.has(key)) return false;\n", "", "a repeated Workshop id counted twice"],
+  ["pane", "each mod once", "row 26 (7)", PN,
+    '  if (m.workshopId <= 0) return "server-side";\n', "", "a server-side mod marked missing"],
+  ["pane", "each mod once", "row 26 (10)", PN,
+    '  return stale.has(m.workshopId) ? "update" : "installed";', '  return "installed";', "no update mark"],
+  ["pane", "an unknown server version", "row 26 (6)", T,
+    'local != null && version !== "" && version !== local', "local != null && version !== local", "an unknown version warned as different"],
   // pages.test.mjs
   ["pages", "favourites are read beside the list", "row 23", S,
     "    this.favouritesLoaded = true;\n",

@@ -10,6 +10,16 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.99",
+    notes: [
+      { kind: "changed", text: "Server details show the last known mods when a server does not send its list." },
+      { kind: "changed", text: "Server details show the same player count as the server list." },
+      { kind: "added", text: "Mods with an update waiting are marked in server details." },
+      { kind: "fixed", text: "A server whose version is unknown is no longer marked as a different version." },
+      { kind: "changed", text: "Connected players in server details stay up to date while you keep them open." },
+    ],
+  },
+  {
     version: "0.1.98",
     notes: [
       { kind: "fixed", text: "Joining a modded server no longer starts DayZ without its mods." },
