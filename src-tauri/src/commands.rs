@@ -312,9 +312,14 @@ pub fn steam_start() -> Result<(), String> {
     if let Some(dir) = exe.parent() {
         cmd.current_dir(dir);
     }
+    // Normal priority whatever the launcher's own: below normal while a game runs, it
+    // would pass that on to Steam for the rest of Steam's life (CreateProcessW, S-127;
+    // row 28), as the game's launch already avoids.
+    use std::os::windows::process::CommandExt;
     match cmd
         .env_remove("SteamAppId")
         .env_remove("SteamGameId")
+        .creation_flags(windows_sys::Win32::System::Threading::NORMAL_PRIORITY_CLASS)
         .spawn()
     {
         Ok(child) => {
@@ -1797,8 +1802,12 @@ pub fn logs_path() -> LogFile {
 /// browser as administrator too, for every site it then showed, the one-click elevation
 /// D-312 closed for Start Steam: the desktop's own shell opens the page instead, as the
 /// signed-in player (`proc::open_as_desktop_user`, row 27). Web addresses only.
-#[tauri::command(async)]
-pub fn open_link(app: AppHandle, url: String) -> AppResult<()> {
+///
+/// On the blocking pool, not one of the runtime's four workers: Explorer can take up to
+/// 10 s to answer, and a few clicks while it was busy held every worker, the servers'
+/// queries with them (row 28).
+#[tauri::command]
+pub async fn open_link(app: AppHandle, url: String) -> AppResult<()> {
     if !is_web_address(&url) {
         return Err(AppError::logged(
             "app",
@@ -1809,15 +1818,19 @@ pub fn open_link(app: AppHandle, url: String) -> AppResult<()> {
             ),
         ));
     }
-    let opened =
+    let target = url.clone();
+    let opened = tauri::async_runtime::spawn_blocking(move || {
         if crate::proc::current_is_elevated() && crate::proc::shell_is_elevated() != Some(true) {
-            crate::proc::open_as_desktop_user(&url)
+            crate::proc::open_as_desktop_user(&target)
         } else {
             use tauri_plugin_opener::OpenerExt;
-            app.opener()
-                .open_url(&url, None::<&str>)
+            // The browser may start here, as this process's child (row 28).
+            crate::proc::at_normal_priority(|| app.opener().open_url(&target, None::<&str>))
                 .map_err(|e| e.to_string())
-        };
+        }
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()));
     opened.map_err(|e| {
         AppError::logged(
             "app",
@@ -2223,7 +2236,9 @@ pub async fn join_plan(
     // server that moved its game port or added a password was planned — and joined —
     // from stale facts (D-265).
     let (rules, info) = tokio::join!(state.a2s.rules(addr), state.a2s.info(addr));
-    let info = info.ok().map(|r| r.value);
+    // Another game answering on the port is no answer from this server (row 18): its game
+    // port, password flag and version were planned, joined and kept as this server's (row 28).
+    let info = info.ok().map(|r| r.value).filter(|i| i.is_dayz());
     let diag = tauri::async_runtime::spawn_blocking(diagnostics::collect)
         .await
         .map_err(|e| {
@@ -2528,7 +2543,9 @@ pub async fn join_plan(
         steam_running: diag.steam.running,
         game_found,
         battleye_present,
-        rules_ok: rules.is_ok(),
+        // A reply without its DayZ part is no list either (D-323): "Vanilla server" showed
+        // beside the warning that the list could not be read (row 28).
+        rules_ok: mod_list_of(&rules).is_ok(),
         missing,
         updates,
         download_bytes,
@@ -2611,7 +2628,9 @@ pub async fn launch_game(
     // INFO beside RULES for the game port, as in the plan (D-265), and kept when it
     // moved (D-295).
     let (rules, info) = tokio::join!(state.a2s.rules(addr), state.a2s.info(addr));
-    let info = info.ok().map(|r| r.value);
+    // Another game answering on the port is no answer from this server (row 18): its game
+    // port, password flag and version were planned, joined and kept as this server's (row 28).
+    let info = info.ok().map(|r| r.value).filter(|i| i.is_dayz());
     let game_port = info
         .as_ref()
         .and_then(|i| i.game_port)
@@ -3311,7 +3330,13 @@ pub async fn import_official_favourites(
                 (xml_row, true)
             }
         };
-        if let Some(t) = Target::from_row(&row) {
+        if let Some(mut t) = Target::from_row(&row) {
+            // The file's players and slots are of an age nobody knows: judged against a
+            // fresh INFO, never against themselves, as the DZSA import's are (D-237). With
+            // INFO lost, R13 held a head-count against the file's slots (row 28).
+            if from_xml {
+                t.reported_at = 0;
+            }
             targets.push(t);
         }
         new_rows.push((row, from_xml));

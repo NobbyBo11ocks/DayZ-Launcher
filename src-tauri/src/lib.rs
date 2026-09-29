@@ -146,11 +146,6 @@ struct Rect {
 /// on the first area given (the primary) when no area holds any of it. `None` for "leave
 /// it".
 fn fit_to_screen(win: Rect, areas: &[Rect]) -> Option<Rect> {
-    let overlap = |a: &Rect| {
-        let w = (win.x + win.w).min(a.x + a.w) - win.x.max(a.x);
-        let h = (win.y + win.h).min(a.y + a.h) - win.y.max(a.y);
-        i64::from(w.max(0)) * i64::from(h.max(0))
-    };
     let on_screen = |x: i32, y: i32| {
         areas
             .iter()
@@ -158,8 +153,8 @@ fn fit_to_screen(win: Rect, areas: &[Rect]) -> Option<Rect> {
     };
     let held = areas
         .iter()
-        .max_by_key(|a| overlap(a))
-        .filter(|a| overlap(a) > 0);
+        .max_by_key(|a| overlap(&win, a))
+        .filter(|a| overlap(&win, a) > 0);
     let area = held.or(areas.first())?;
     let too_big = win.w > area.w || win.h > area.h;
     let bar = win.y + 8;
@@ -179,34 +174,147 @@ fn fit_to_screen(win: Rect, areas: &[Rect]) -> Option<Rect> {
     (fitted != win).then_some(fitted)
 }
 
-/// Applies `fit_to_screen` to the main window once the saved state is back.
-fn fit_restored_window(window: &tauri::WebviewWindow) {
-    if window.is_maximized().unwrap_or(false) || window.is_minimized().unwrap_or(false) {
+/// The area two rectangles share.
+fn overlap(a: &Rect, b: &Rect) -> i64 {
+    let w = (a.x + a.w).min(b.x + b.w) - a.x.max(b.x);
+    let h = (a.y + a.h).min(b.y + b.h) - a.y.max(b.y);
+    i64::from(w.max(0)) * i64::from(h.max(0))
+}
+
+/// A monitor in physical pixels: all of it, and its work area (the part the taskbar
+/// leaves).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Screen {
+    whole: Rect,
+    work: Rect,
+}
+
+/// `fit_to_screen` for the size and place a maximised window restores to (row 28). Windows
+/// keeps them in workspace coordinates, which start at the work area's top-left corner,
+/// not the screen's (WINDOWPLACEMENT, S-129): they differ where a monitor's taskbar is
+/// docked at the top or on the left. Taken and given back in workspace coordinates.
+fn fit_placement(normal: Rect, screens: &[Screen]) -> Option<Rect> {
+    let offset = |r: &Rect| {
+        screens
+            .iter()
+            .max_by_key(|s| overlap(r, &s.whole))
+            .filter(|s| overlap(r, &s.whole) > 0)
+            .or(screens.first())
+            .map_or((0, 0), |s| (s.work.x - s.whole.x, s.work.y - s.whole.y))
+    };
+    let (dx, dy) = offset(&normal);
+    let on_screen = Rect {
+        x: normal.x + dx,
+        y: normal.y + dy,
+        ..normal
+    };
+    let areas: Vec<Rect> = screens.iter().map(|s| s.work).collect();
+    let fitted = fit_to_screen(on_screen, &areas)?;
+    let (dx, dy) = offset(&fitted);
+    Some(Rect {
+        x: fitted.x - dx,
+        y: fitted.y - dy,
+        ..fitted
+    })
+}
+
+/// The window's monitors, the primary first: `fit_to_screen` centres on the first.
+fn screens_of(window: &tauri::WebviewWindow) -> Option<Vec<Screen>> {
+    let screen = |m: &tauri::Monitor| {
+        let (p, s, a) = (m.position(), m.size(), m.work_area());
+        Screen {
+            whole: Rect {
+                x: p.x,
+                y: p.y,
+                w: s.width as i32,
+                h: s.height as i32,
+            },
+            work: Rect {
+                x: a.position.x,
+                y: a.position.y,
+                w: a.size.width as i32,
+                h: a.size.height as i32,
+            },
+        }
+    };
+    let mut all: Vec<Screen> = window
+        .available_monitors()
+        .ok()?
+        .iter()
+        .map(screen)
+        .collect();
+    if let Ok(Some(primary)) = window.primary_monitor() {
+        let p = screen(&primary);
+        all.retain(|s| *s != p);
+        all.insert(0, p);
+    }
+    Some(all)
+}
+
+/// Applies `fit_placement` to a window that came back maximised. It looked right, but
+/// Restore Down took it back to the saved size the plugin had set unfitted, the title bar's
+/// buttons past the edge of a smaller screen (row 28).
+fn fit_restored_placement(window: &tauri::WebviewWindow, screens: &[Screen]) {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowPlacement, SetWindowPlacement, WINDOWPLACEMENT,
+    };
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    // SAFETY: an empty placement whose length is set as both calls below require.
+    let mut wp: WINDOWPLACEMENT = unsafe { std::mem::zeroed() };
+    wp.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
+    // SAFETY: a live window of this process and a struct that outlives the call.
+    if unsafe { GetWindowPlacement(hwnd.0 as _, &mut wp) } == 0 {
         return;
     }
-    let (Ok(pos), Ok(outer), Ok(inner), Ok(monitors)) = (
+    let n = wp.rcNormalPosition;
+    let normal = Rect {
+        x: n.left,
+        y: n.top,
+        w: n.right - n.left,
+        h: n.bottom - n.top,
+    };
+    let Some(f) = fit_placement(normal, screens) else {
+        return;
+    };
+    wp.rcNormalPosition = RECT {
+        left: f.x,
+        top: f.y,
+        right: f.x + f.w,
+        bottom: f.y + f.h,
+    };
+    // The show state goes back as it came, maximised: only the restored place changes.
+    // SAFETY: as above.
+    if unsafe { SetWindowPlacement(hwnd.0 as _, &wp) } != 0 {
+        log_info!(
+            "app",
+            "the saved restored place did not fit the screens: {normal:?} -> {f:?} (workspace)"
+        );
+    }
+}
+
+/// Applies `fit_to_screen` to the main window once the saved state is back.
+fn fit_restored_window(window: &tauri::WebviewWindow) {
+    if window.is_minimized().unwrap_or(false) {
+        return;
+    }
+    let Some(screens) = screens_of(window) else {
+        return;
+    };
+    if window.is_maximized().unwrap_or(false) {
+        fit_restored_placement(window, &screens);
+        return;
+    }
+    let (Ok(pos), Ok(outer), Ok(inner)) = (
         window.outer_position(),
         window.outer_size(),
         window.inner_size(),
-        window.available_monitors(),
     ) else {
         return;
     };
-    let rect = |m: &tauri::Monitor| {
-        let a = m.work_area();
-        Rect {
-            x: a.position.x,
-            y: a.position.y,
-            w: a.size.width as i32,
-            h: a.size.height as i32,
-        }
-    };
-    let mut areas: Vec<Rect> = monitors.iter().map(rect).collect();
-    if let Ok(Some(primary)) = window.primary_monitor() {
-        let p = rect(&primary);
-        areas.retain(|a| *a != p);
-        areas.insert(0, p);
-    }
+    let areas: Vec<Rect> = screens.iter().map(|s| s.work).collect();
     let win = Rect {
         x: pos.x,
         y: pos.y,
@@ -227,13 +335,19 @@ fn fit_restored_window(window: &tauri::WebviewWindow) {
     );
 }
 
-/// Set once the window may close: the page has kept what it had to, or had its time.
+/// Set at the first request to close: the page is keeping what it has to.
 static CLOSING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Set once the window may close: the page has kept what it had to, or had its time. Only
+/// `finish_close`'s own close passes; a second Alt+F4 or click on × during the page's
+/// work closed the window at once, before it was done (row 28).
+static CLOSE_NOW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Closes the main window for good (row 27): the page answered `app:closing`
 /// (`commands::close_ready`), or 1.5 s went by without it.
 pub(crate) fn finish_close(app: &tauri::AppHandle) {
     CLOSING.store(true, std::sync::atomic::Ordering::SeqCst);
+    CLOSE_NOW.store(true, std::sync::atomic::Ordering::SeqCst);
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.close();
     }
@@ -745,13 +859,6 @@ pub fn run() {
                 tauri::webview_version().ok().as_deref().unwrap_or("?"),
                 elevation()
             );
-            // Started while DayZ plays (relaunched by an update, or by hand): this instance
-            // never launched the game, so D-119's step-down never ran and it sat at High
-            // beside the game for the rest of the session (D-279).
-            if let Some(pid) = steam::registry::process::find_named("DayZ_x64.exe") {
-                log_info!("app", "DayZ is running (pid {pid}); starting below normal priority");
-                proc::step_down_while_running(pid);
-            }
             let product = app.package_info().name.clone();
             let _ = std::thread::Builder::new()
                 .name("temp-sweep".into())
@@ -1203,6 +1310,16 @@ pub fn run() {
             // The plugin restored the saved place inside `build` (tauri 2.11.6 runs the
             // window-ready hooks there): now onto a screen if it left it off one (row 27).
             fit_restored_window(&window);
+            // Started while DayZ plays (relaunched by an update, or by hand): this instance
+            // never launched the game, so D-119's step-down never ran and it sat at High
+            // beside the game for the rest of the session (D-279). Only once the window is
+            // built: `build` waits for WebView2's processes (wry 0.55 `wait_with_pump`),
+            // which take the launcher's class, and born below normal they stayed so after
+            // the game, when the launcher went back to High (CreateProcessW, S-127; row 28).
+            if let Some(pid) = steam::registry::process::find_named("DayZ_x64.exe") {
+                log_info!("app", "DayZ is running (pid {pid}); below normal priority");
+                proc::step_down_while_running(pid);
+            }
             answer_handovers(app.handle());
             proc::watch_for_game();
             Ok(())
@@ -1279,18 +1396,23 @@ pub fn run() {
                 ..
             } = &event
             {
-                if label == "main" {
+                if label == "main" && !CLOSE_NOW.load(std::sync::atomic::Ordering::SeqCst) {
                     note_maximized(handle);
+                    // Every request waits for the page; the first one asks it.
+                    api.prevent_close();
                     if !CLOSING.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                        api.prevent_close();
                         let _ = handle.emit_to("main", "app:closing", ());
                         let app = handle.clone();
-                        let _ = std::thread::Builder::new()
+                        let timer = std::thread::Builder::new()
                             .name("close-wait".into())
                             .spawn(move || {
                                 std::thread::sleep(std::time::Duration::from_millis(1500));
                                 finish_close(&app);
                             });
+                        // With no timer, nothing else would close it.
+                        if timer.is_err() {
+                            finish_close(handle);
+                        }
                     }
                 }
             }
@@ -1369,6 +1491,38 @@ mod tests {
             Some(r(1920, 100, 2560, 1300))
         );
         assert_eq!(fit_to_screen(r(0, 0, 100, 100), &[]), None);
+    }
+
+    /// Row 28: a window that came back maximised gets a restored place that fits too, in
+    /// Windows' workspace coordinates, which start below a taskbar docked at the top.
+    #[test]
+    fn a_maximised_window_restores_onto_the_screen() {
+        let r = |x, y, w, h| Rect { x, y, w, h };
+        let s = |whole, work| super::Screen { whole, work };
+        // Taskbar at the bottom: workspace and screen coordinates are the same.
+        let laptop = [s(r(0, 0, 1920, 1080), r(0, 0, 1920, 1032))];
+        assert_eq!(
+            super::fit_placement(r(320, 140, 2400, 1300), &laptop),
+            Some(r(0, 0, 1920, 1032))
+        );
+        assert_eq!(super::fit_placement(r(100, 100, 1440, 900), &laptop), None);
+        // Taskbar at the top, 48 px: workspace (0,0) is screen (0,48). The window that fits
+        // below it is left alone, and one too big comes back at the workspace origin.
+        let top = [s(r(0, 0, 1920, 1080), r(0, 48, 1920, 1032))];
+        assert_eq!(super::fit_placement(r(100, 0, 1440, 900), &top), None);
+        assert_eq!(
+            super::fit_placement(r(0, 0, 2000, 1200), &top),
+            Some(r(0, 0, 1920, 1032))
+        );
+        // Its buttons past the right edge of a second screen whose taskbar is on the left.
+        let two = [
+            s(r(0, 0, 1920, 1080), r(0, 0, 1920, 1032)),
+            s(r(1920, 0, 2560, 1440), r(1982, 0, 2498, 1440)),
+        ];
+        assert_eq!(
+            super::fit_placement(r(3000, 100, 1600, 1000), &two),
+            Some(r(2818, 100, 1600, 1000))
+        );
     }
 
     /// Row 27: the window-state file keeps "maximised" for a window closed while

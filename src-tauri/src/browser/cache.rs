@@ -113,7 +113,30 @@ fn is_lan_id(id: &str) -> bool {
         .is_some_and(|ip| ip.is_private() || ip.is_loopback() || ip.is_link_local())
 }
 
-/// The upsert, in two flavours that differ in four columns: a Steam listing writes what
+/// DZSA's keywords, with the stored ones it has no field for: its six kinds —
+/// `battleye`, `no3rd`, `privHive`, `etm…`, `mod` and the `HH:MM` clock — come from
+/// DZSA, whose word on them is the newer; every other stored token stays (row 28).
+pub(crate) fn keep_tags_dzsa_lacks(stored: &str, dzsa: &str) -> String {
+    let dzsas_kind = |t: &str| {
+        matches!(t, "battleye" | "no3rd" | "privHive" | "mod")
+            || t.starts_with("etm")
+            || (t.len() == 5 && t.as_bytes()[2] == b':')
+    };
+    let mut out: Vec<&str> = dzsa
+        .split(',')
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .collect();
+    out.extend(
+        stored
+            .split(',')
+            .map(str::trim)
+            .filter(|t| !t.is_empty() && !dzsas_kind(t)),
+    );
+    out.join(",")
+}
+
+/// The upsert, in two flavours that differ in five columns: a Steam listing writes what
 /// it measured, a DZSA listing keeps what Steam measured when it has only a placeholder
 /// (D-242). `None` in a verification column never erases a stored one, in either.
 ///
@@ -126,10 +149,11 @@ fn upsert_sql(keep_measured: bool) -> String {
         "ping_ms=CASE WHEN excluded.ping_ms = 0 THEN servers.ping_ms ELSE excluded.ping_ms END,
          bots=CASE WHEN excluded.bots = 0 THEN servers.bots ELSE excluded.bots END,
          steam_id=CASE WHEN excluded.steam_id = 0 THEN servers.steam_id ELSE excluded.steam_id END,
-         description=CASE WHEN excluded.description = '' THEN servers.description ELSE excluded.description END"
+         description=CASE WHEN excluded.description = '' THEN servers.description ELSE excluded.description END,
+         secure=CASE WHEN servers.steam_id <> 0 THEN servers.secure ELSE excluded.secure END"
     } else {
         "ping_ms=excluded.ping_ms, bots=excluded.bots, steam_id=excluded.steam_id,
-         description=excluded.description"
+         description=excluded.description, secure=excluded.secure"
     };
     format!(
         "INSERT INTO servers ({SELECT_COLUMNS})
@@ -140,7 +164,7 @@ fn upsert_sql(keep_measured: bool) -> String {
            players=CASE WHEN excluded.steam_empty IS NULL AND servers.steam_empty = 1
                         THEN servers.players ELSE excluded.players END,
            max_players=excluded.max_players,
-           password=excluded.password, secure=excluded.secure, server_version=excluded.server_version,
+           password=excluded.password, server_version=excluded.server_version,
            keywords=excluded.keywords, last_seen=excluded.last_seen, {measured},
            verified_players=COALESCE(excluded.verified_players, servers.verified_players),
            steam_empty=COALESCE(excluded.steam_empty, servers.steam_empty),
@@ -771,8 +795,28 @@ impl Cache {
     /// no ping, bot count, Steam id or description, and its placeholders (0, 0, 0, "")
     /// were written over the values Steam had stored — a 0 ms ping reads as "good" and
     /// passes every ping filter, and a bot count of 0 erases R9's prior (D-242).
+    /// Its keywords too: DZSA has no field for DLC, file patching, the login queue, the
+    /// night rate or the shard, and an import wrote a row's keywords over with its six
+    /// (`dzsa::keywords`), so every server it listed lost them until Steam listed it
+    /// again (row 28). Those stay as stored; DZSA's own six replace theirs.
     pub fn upsert_keeping_measured(&mut self, rows: &[ServerRow]) -> rusqlite::Result<()> {
-        self.upsert_with(rows, &UPSERT_KEEPING_MEASURED_SQL)
+        let mut merged = Vec::with_capacity(rows.len());
+        {
+            let mut stored = self
+                .conn
+                .prepare_cached("SELECT keywords FROM servers WHERE id = ?1")?;
+            for r in rows {
+                let old: Option<String> =
+                    stored.query_row(params![r.id], |x| x.get(0)).optional()?;
+                let mut r = r.clone();
+                if let Some(old) = old.filter(|k| !k.is_empty()) {
+                    r.keywords = keep_tags_dzsa_lacks(&old, &r.keywords);
+                    r.tags = crate::a2s::DayzTags::parse(&r.keywords);
+                }
+                merged.push(r);
+            }
+        }
+        self.upsert_with(&merged, &UPSERT_KEEPING_MEASURED_SQL)
     }
 
     fn upsert_with(&mut self, rows: &[ServerRow], sql: &str) -> rusqlite::Result<()> {
@@ -1854,6 +1898,44 @@ mod tests {
         zero.bots = 0;
         c.upsert(std::slice::from_ref(&zero)).unwrap();
         assert_eq!(c.get(&steam.id).unwrap().unwrap().bots, 0);
+    }
+
+    /// Row 28: a DZSA row keeps the tags it has no field for, and Steam's secure flag;
+    /// its own six kinds replace the stored ones.
+    #[test]
+    fn a_dzsa_listing_keeps_the_tags_it_lacks() {
+        let mut c = Cache::open_in_memory().unwrap();
+        let mut steam = row(27018, 5);
+        steam.keywords =
+            "battleye,no3rd,lqs3,etm4.000000,entm6.500000,isDLC,allowedFilePatching,shardABC,mod,15:12".into();
+        steam.tags = DayzTags::parse(&steam.keywords);
+        c.upsert(std::slice::from_ref(&steam)).unwrap();
+        let mut dzsa = row(27018, 9);
+        dzsa.steam_id = 0;
+        dzsa.secure = false;
+        dzsa.keywords = "battleye,etm2.000000,mod,16:00".into();
+        dzsa.tags = DayzTags::parse(&dzsa.keywords);
+        c.upsert_keeping_measured(std::slice::from_ref(&dzsa))
+            .unwrap();
+        let w = c.get(&steam.id).unwrap().unwrap();
+        let t = &w.tags;
+        assert!(t.dlc && t.allowed_file_patching, "{}", w.keywords);
+        assert_eq!((t.queue, t.night_multiplier), (Some(3), Some(6.5)));
+        assert_eq!(t.shard.as_deref(), Some("ABC"));
+        // DZSA's word on its own kinds: third person allowed now, the day rate, the clock.
+        assert!(!t.first_person_only);
+        assert_eq!(
+            (t.time_multiplier, t.time_minutes),
+            (Some(2.0), Some(16 * 60))
+        );
+        assert!(w.secure, "Steam's secure flag stays");
+        // A row DZSA alone ever listed takes DZSA's as they are.
+        let mut only = row(27019, 4);
+        only.steam_id = 0;
+        only.keywords = "battleye,16:00".into();
+        c.upsert_keeping_measured(std::slice::from_ref(&only))
+            .unwrap();
+        assert_eq!(c.get(&only.id).unwrap().unwrap().keywords, "battleye,16:00");
     }
 
     /// The cached list a launch falls back to keeps the server's order and leaves out

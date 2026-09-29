@@ -245,21 +245,31 @@ test("a picture that could not be made says so to the page, which then shows the
   news.stop();
 });
 
-test("the News grid's rows come out full, maximised or not (D-326)", async (t) => {
+test("the News grid's rows come out full, maximised or not (D-326, D-327)", async (t) => {
   const app = await freshApp(t, { timers: false });
   const { newsGrid, CARDS_MAX } = await app.load("newsgrid");
+  const shape = (g) => [g.cols, g.count];
   // Maximised on 1920 px (1624 px of grid): eight update cards were five and three.
-  assert.deepEqual(newsGrid(1624, 8), { cols: 4, count: 8 });
-  assert.deepEqual(newsGrid(1624, 12), { cols: 4, count: 12 });
-  // Nine cannot come out even within the card widths: the fewest gaps, the most columns.
-  assert.deepEqual(newsGrid(1624, 9), { cols: 5, count: 9 });
-  // The window's usual size holds three a row; eight leave one gap there, not a column of giants.
-  assert.deepEqual(newsGrid(1010, 8), { cols: 3, count: 8 });
+  assert.deepEqual(shape(newsGrid(1624, 8)), [4, 8]);
+  assert.deepEqual(newsGrid(1624, 8).tracks, 4, "full rows: nothing widened");
+  assert.deepEqual(shape(newsGrid(1624, 12)), [4, 12]);
   // "All news": more posts than the grid shows, so whole rows of the most columns.
-  assert.deepEqual(newsGrid(1624, 59), { cols: 5, count: 25 });
-  assert.deepEqual(newsGrid(1010, 59), { cols: 3, count: 24 });
+  assert.deepEqual(shape(newsGrid(1624, 59)), [5, 25]);
+  assert.deepEqual(shape(newsGrid(1010, 59)), [3, 24]);
   assert.equal(CARDS_MAX, 24);
   // Before the grid has a width: the style sheet's own columns.
-  assert.deepEqual(newsGrid(0, 8), { cols: 0, count: 8 });
-  assert.deepEqual(newsGrid(1624, 0).count, 0);
+  assert.deepEqual(shape(newsGrid(0, 8)), [0, 8]);
+  assert.equal(newsGrid(1624, 0).count, 0);
+});
+
+test("a short last row is widened to the edge, a lone card is not (D-327)", async (t) => {
+  const app = await freshApp(t, { timers: false });
+  const { newsGrid } = await app.load("newsgrid");
+  // Nine maximised: five, then four a quarter wider, on twenty tracks.
+  assert.deepEqual(newsGrid(1624, 9), { cols: 5, count: 9, tracks: 20, span: 4, lastSpan: 5, lastFrom: 5 });
+  // Eight at the usual size: three, three, then two half as wide again.
+  assert.deepEqual(newsGrid(1010, 8), { cols: 3, count: 8, tracks: 6, span: 2, lastSpan: 3, lastFrom: 6 });
+  // Seven at the usual size: one card alone would be three times as wide; the gaps stay.
+  const seven = newsGrid(1010, 7);
+  assert.deepEqual([seven.cols, seven.tracks, seven.lastFrom], [3, 3, 7]);
 });

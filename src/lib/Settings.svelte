@@ -219,6 +219,13 @@
   // An emptied number field binds as null and Rust's u32 refuses it, so the save
   // throws — and because the null stays in `launch`, every later save throws too and
   // the whole page silently stops persisting. Clamp before scheduling (D-209).
+  /** Saved while typing, as the other fields are, whenever the value is one the setting
+   *  takes: saved only on `change`, a number typed just before Alt+F4 was lost (row 28).
+   *  An emptied field waits for `change`, which clamps it. */
+  function idleInput() {
+    const n = Number(launch?.steamIdleMinutes);
+    if (launch && Number.isInteger(n) && n >= 0 && n <= 1440) scheduleSave();
+  }
   function saveIdle() {
     if (!launch) return;
     const n = Math.round(Number(launch.steamIdleMinutes));
@@ -346,8 +353,9 @@
         <div class="cbody">
           <dl class="kv">
             <dt>Status</dt>
-            <dd class={servers.steam?.initialized ? "ok" : "warn"}>
-              {servers.steam?.initialized ? `connected as ${servers.steam.persona ?? "?"}` : (servers.steam?.error ?? "not connected")}
+            <!-- "Starting up…" before Steam's first status, as Servers says (row 28). -->
+            <dd class={servers.steam?.initialized ? "ok" : servers.steam ? "warn" : "muted"}>
+              {servers.steam == null ? "Starting up…" : servers.steam.initialized ? `connected as ${servers.steam.persona ?? "?"}` : (servers.steam.error ?? "not connected")}
               {#if servers.steam?.idle}<span class="muted"> · disconnected while idle; reconnects when needed</span>{/if}
             </dd>
             <dt>Local DayZ</dt>
@@ -359,7 +367,7 @@
             <label class="row">
               <span class="label">Disconnect when idle</span>
               <span class="inline">
-                after <input class="text num" type="number" min="0" max="1440" step="1" bind:value={launch.steamIdleMinutes} onchange={saveIdle} aria-label="Disconnect when idle, minutes" aria-describedby="idle-zero" /> min
+                after <input class="text num" type="number" min="0" max="1440" step="1" bind:value={launch.steamIdleMinutes} oninput={idleInput} onchange={saveIdle} aria-label="Disconnect when idle, minutes" aria-describedby="idle-zero" /> min
                 <span class="muted" id="idle-zero">0 = never</span>
               </span>
             </label>

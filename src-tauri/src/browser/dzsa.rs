@@ -71,6 +71,15 @@ fn failed(detail: impl std::fmt::Display) -> String {
     DZSA_FAILED.to_string()
 }
 
+/// The `last_seen` the latest download gave its rows; 0 before the first.
+static STAMP: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// Whether a row's `last_seen` is the latest DZSA download's: its player count is DZSA's,
+/// of an age nobody knows, though the stamp says now (row 28).
+pub fn stamped(last_seen: i64) -> bool {
+    last_seen != 0 && last_seen == STAMP.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Downloads and converts the whole list. Blocking network work happens inside
 /// reqwest's own runtime; the JSON is deserialised once into the typed structs.
 pub async fn fetch() -> Result<Vec<DzsaRow>, String> {
@@ -104,6 +113,7 @@ pub async fn fetch() -> Result<Vec<DzsaRow>, String> {
     let doc: Document =
         serde_json::from_slice(&bytes).map_err(|e| failed(format!("DZSA JSON: {e}")))?;
     let now = ServerRow::now_unix();
+    STAMP.store(now, std::sync::atomic::Ordering::Relaxed);
     Ok(doc
         .result
         .into_iter()
@@ -209,5 +219,29 @@ mod tests {
         assert!(r.tags.modded);
         assert_eq!(rows[0].mods, vec![(2_888_277_755, "Item Info".to_string())]);
         assert_eq!(r.steam_empty, None);
+    }
+
+    /// Row 28: a count the latest download wrote is of unknown age to a check, however
+    /// new its stamp; one a listing wrote since is not.
+    #[test]
+    fn a_dzsa_count_is_of_unknown_age() {
+        // A stamp no other test uses: `STAMP` is the whole process's.
+        let at = 1_000_003;
+        STAMP.store(at, std::sync::atomic::Ordering::Relaxed);
+        let json = r#"{"result":[{"gamePort":2302,"endpoint":{"ip":"185.216.144.79","port":2303},
+          "name":"x","map":"chernarusplus","players":40,"maxPlayers":60}]}"#;
+        let doc: Document = serde_json::from_str(json).unwrap();
+        let mut row = convert(doc.result.into_iter().next().unwrap(), at)
+            .unwrap()
+            .row;
+        let reported_at = |r: &ServerRow| {
+            crate::browser::verify::Target::from_row(r)
+                .unwrap()
+                .reported_at
+        };
+        assert_eq!(reported_at(&row), 0);
+        row.last_seen = at + 1;
+        assert_eq!(reported_at(&row), at + 1);
+        assert!(!stamped(0));
     }
 }

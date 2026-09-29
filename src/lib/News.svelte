@@ -203,9 +203,10 @@
           </div>
         </div>
       </article>
-      <div class="grid" bind:clientWidth={gridWidth} style:grid-template-columns={layout.cols ? `repeat(${layout.cols}, minmax(0, 1fr))` : null}>
-        {#each rest as n (n.gid)}
-          <article class="card" class:update={n.update} use:lazy={n.gid}>
+      <div class="grid" bind:clientWidth={gridWidth} style:grid-template-columns={layout.cols ? `repeat(${layout.tracks}, minmax(0, 1fr))` : null}>
+        {#each rest as n, i (n.gid)}
+          <!-- A short last row is widened to the edge (`newsGrid`, D-327). -->
+          <article class="card" class:update={n.update} use:lazy={n.gid} style:grid-column={layout.cols ? `span ${i >= layout.lastFrom ? layout.lastSpan : layout.span}` : null}>
             {#if hasPic(n)}
               {@const src = cardThumb(n)}
               <!-- Named for its post: every card's picture was "Play the video" or "Open the

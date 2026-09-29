@@ -91,7 +91,7 @@ export type ServerRow = {
 export const isInflated = (r: ServerRow): boolean => r.steamEmpty === true && r.players > 0;
 
 /**
- * Any rule fired: hidden by the default "Hide inflated" filter.
+ * Any rule fired: hidden by the default "Hide untrusted" filter.
  * R4 (refuses PLAYER) only counts when Steam has not vouched for the server:
  * a small minority of servers drop A2S_PLAYER at the host firewall — D-050 measured 6 of 2 858, and D-047 retracts the earlier 24 % reading as burst loss. Steam's vouch keeps an "unverifiable" row trusted only when a head-count was taken before (R6, D-233).
  */

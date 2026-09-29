@@ -74,7 +74,15 @@ impl Target {
             addr,
             reported: r.players,
             max_players: r.max_players,
-            reported_at: r.last_seen,
+            // A count DZSA wrote is judged against a fresh INFO, never against itself
+            // (D-237), in the minute after an import too: a check of the rows on screen
+            // then took it as a fresh listing's and, with INFO lost, judged a head-count
+            // against it (row 28).
+            reported_at: if super::dzsa::stamped(r.last_seen) {
+                0
+            } else {
+                r.last_seen
+            },
             was_synthetic: r.verdict.as_deref() == Some("synthetic"),
             known: InfoFacts::of_row(r),
         })
@@ -432,9 +440,11 @@ const CONTINUITY_MISSING: usize = 2;
 /// 90 minutes apart could strike it twice. At 30 minutes ~60 % remain (D-237). The
 /// invariant needs no cap: churn does not enter it (D-314).
 const CONTINUITY_FLOOR_MAX_GAP_SECS: f32 = 1800.0;
-/// The reason given while a standing R11 verdict waits for a check it can compare.
+/// The reason given while a standing verdict waits for a check it can compare. Any rule
+/// may have given it — R5, R13 and R14 as well as R11 — and it said sessions had not
+/// carried over whichever did (row 28).
 pub const CONTINUITY_STANDING: &str =
-    "sessions did not carry over at earlier checks; none since was close enough to compare";
+    "judged fake at an earlier check; none since was close enough to compare";
 
 /// Lines `now` up with `prev` advanced by `shift`: of the sessions in `now` at least
 /// `min_age` long, how many there were and how many found one in `prev` within

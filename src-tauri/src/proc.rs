@@ -20,7 +20,7 @@ use windows_sys::Win32::Security::{
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, GetCurrentProcessId, OpenProcess, OpenProcessToken, SetPriorityClass,
     WaitForSingleObject, BELOW_NORMAL_PRIORITY_CLASS, HIGH_PRIORITY_CLASS, INFINITE,
-    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+    NORMAL_PRIORITY_CLASS, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
 };
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -39,17 +39,44 @@ pub enum Priority {
 /// Whether the last `set_priority` asked for below normal, for the game watch.
 static BELOW_NORMAL: AtomicBool = AtomicBool::new(false);
 
+/// Held while the class changes, so `at_normal_priority` cannot put back a class the game
+/// watch changed meanwhile.
+static PRIORITY: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn set_class(class: u32) {
+    // SAFETY: the pseudo-handle of the current process is always valid.
+    unsafe {
+        let _ = SetPriorityClass(GetCurrentProcess(), class);
+    }
+}
+
 /// Sets this process's priority class; failures are ignored (best effort).
 pub fn set_priority(p: Priority) {
     let class = match p {
         Priority::High => HIGH_PRIORITY_CLASS,
         Priority::BelowNormal => BELOW_NORMAL_PRIORITY_CLASS,
     };
+    let _held = PRIORITY.lock().unwrap_or_else(|e| e.into_inner());
     BELOW_NORMAL.store(p == Priority::BelowNormal, Ordering::SeqCst);
-    // SAFETY: the pseudo-handle of the current process is always valid.
-    unsafe {
-        let _ = SetPriorityClass(GetCurrentProcess(), class);
+    set_class(class);
+}
+
+/// Runs `start`, which starts a program for the player through Windows' shell, at normal
+/// priority while the launcher is below normal for a game. A program started then is
+/// born below normal and stays so after the game (CreateProcessW, S-127), and the shell
+/// takes no priority class to name: a browser opened from a News link while DayZ ran
+/// stayed below normal until it was closed (row 28).
+pub fn at_normal_priority<T>(start: impl FnOnce() -> T) -> T {
+    let _held = PRIORITY.lock().unwrap_or_else(|e| e.into_inner());
+    let below = BELOW_NORMAL.load(Ordering::SeqCst);
+    if below {
+        set_class(NORMAL_PRIORITY_CLASS);
     }
+    let started = start();
+    if below {
+        set_class(BELOW_NORMAL_PRIORITY_CLASS);
+    }
+    started
 }
 
 /// Below normal while DayZ runs however it was started, high again once it has gone,

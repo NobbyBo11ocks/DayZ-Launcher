@@ -29,7 +29,7 @@ test("every rule's reason has its sentence, the three of D-314 their own (D-248,
     [check("synthetic", "5 of 25 sessions older than the gap were missing from the list 300 s earlier"), "The player list looks fake: players it lists as older were not there at the previous check."],
     // R11's count, the standing verdict, and R5.
     [check("synthetic", "4 of 20 sessions carried over between checks 120 s apart"), "The player list looks fake: the sessions seen at the previous check did not carry over."],
-    [check("synthetic", "sessions did not carry over at earlier checks; none since was close enough to compare"), "Sessions did not carry over at earlier checks; waiting for a check close enough to compare."],
+    [check("synthetic", "judged fake at an earlier check; none since was close enough to compare"), "The player list looked fake at an earlier check; waiting for a check close enough to compare."],
     [check("synthetic", "6 entries, 1 distinct durations, all_young=true, named=false"), "The player list looks fake: 6 entries with only 1 different session length."],
     [check("synthetic", "6 entries, 6 distinct durations, all_young=false, named=true"), "The player list looks fake: its entries carry names, which real DayZ lists never do."],
     // R12, R3, R2 and the rest.

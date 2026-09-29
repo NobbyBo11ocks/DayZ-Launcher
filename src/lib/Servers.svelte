@@ -149,7 +149,9 @@
     if (v?.skipped) return "Player counts are already being checked.";
     if (v) return `${fmt.format(v.verified)} verified, ${fmt.format(v.inflated + v.unverifiable + v.synthetic)} untrusted, ${v.offline} not answering.`;
     const d = servers.done;
-    if (d && !d.rejected) return `${fmt.format(d.responded)} servers listed.`;
+    // Each server once: a full Refresh's partitions overlap (a capped map's follow-up, the
+    // catch-all), and their sum said more than were listed (row 28).
+    if (d && !d.rejected) return `${fmt.format(d.source === "steam" && servers.refreshListed > 0 ? servers.refreshListed : d.responded)} servers listed.`;
     return "";
   });
 </script>

@@ -632,7 +632,9 @@
     <header>
       <h2 id="join-title">{plan?.name ?? "Join server"}</h2>
       <span class="muted">
-        {#if plan}{plan.ip}:{plan.gamePort} · v{plan.serverVersion}{/if}
+        <!-- "version unknown" when the server has not said, as the pane and the list say it
+             (D-324 (6)): it read "· v" (row 28). -->
+        {#if plan}{plan.ip}:{plan.gamePort} · {plan.serverVersion ? `v${plan.serverVersion}` : "version unknown"}{/if}
         {#if slots}
           · <span class:warn={full}>{slots.players}/{slots.maxPlayers}{#if queue}{" "}· {queue} in queue{/if}</span>
         {/if}

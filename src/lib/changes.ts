@@ -10,6 +10,16 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.102",
+    notes: [
+      { kind: "changed", text: "News cards on a short last row now stretch to fill it." },
+      { kind: "fixed", text: "Friends shows the same player counts as the server list." },
+      { kind: "fixed", text: "Sorting by version or time puts servers without one at the bottom." },
+      { kind: "fixed", text: "Joining no longer uses another game's port when it answers at that address." },
+      { kind: "fixed", text: "Steam or a browser opened while DayZ runs no longer stays slowed down." },
+    ],
+  },
+  {
     version: "0.1.101",
     notes: [
       { kind: "removed", text: "The News page's With press tab: only Bohemia's own posts are shown." },

@@ -8,7 +8,7 @@
   import { invokeLogged as invoke } from "./log";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { revealItemInDir } from "@tauri-apps/plugin-opener";
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { external } from "./external";
   import { modUpdates } from "./state/mods.svelte";
@@ -81,7 +81,10 @@
   }
 
   $effect(() => {
-    void load();
+    // Untracked: `load` reads `servers.modsIndexLoaded` before its first await, so the
+    // index read landing re-ran this effect — its listeners torn down and made again, a
+    // `mods:done` in the gap lost with "Updating…" left on screen (row 28).
+    untrack(() => void load());
     // Every argument is awaited before `push` runs, so the array stayed empty until
     // all of them resolved and an early unmount unsubscribed nothing. Keep the
     // promises instead (D-222).

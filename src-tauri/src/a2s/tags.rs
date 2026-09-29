@@ -88,12 +88,24 @@ fn parse_clock(s: &str) -> Option<u16> {
     let (h, m) = s.split_once(':')?;
     let h: u16 = h.parse().ok()?;
     let m: u16 = m.parse().ok()?;
-    (h < 24 && m < 60).then_some(h * 60 + m)
+    // `then`, not `then_some`: its argument is worked out first, and an hour of 1093 or
+    // more overflowed u16 there, which a debug build turns into a panic (row 28).
+    (h < 24 && m < 60).then(|| h * 60 + m)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Row 28: a clock tag no server should send is no clock, and no panic in a debug
+    /// build (the hour times 60 overflowed u16 before the range check).
+    #[test]
+    fn an_impossible_clock_is_no_clock() {
+        for bad in ["1093:00", "1100:00", "65535:59", "24:00", "12:60"] {
+            assert_eq!(DayzTags::parse(bad).time_minutes, None, "{bad}");
+        }
+        assert_eq!(DayzTags::parse("23:59").time_minutes, Some(23 * 60 + 59));
+    }
 
     #[test]
     fn live_keywords() {

@@ -29,7 +29,8 @@ export function explainVerdict(v: Verification): string {
       if (v.reason.includes("under a second beside")) return "The player list looks fake: several players joined within the same second as long-running ones.";
       if (v.reason.includes("missing from the list")) return "The player list looks fake: players it lists as older were not there at the previous check.";
       if (v.reason.includes("carried over between checks")) return "The player list looks fake: the sessions seen at the previous check did not carry over.";
-      if (v.reason.includes("earlier checks")) return "Sessions did not carry over at earlier checks; waiting for a check close enough to compare.";
+      // A standing verdict, from whichever rule gave it (row 28).
+      if (v.reason.includes("earlier check")) return "The player list looked fake at an earlier check; waiting for a check close enough to compare.";
       const m = /^(\d+) entries, (\d+) distinct/.exec(v.reason);
       if (m) return `The player list looks fake: ${m[1]} entries with only ${m[2]} different session length${m[2] === "1" ? "" : "s"}.`;
       return "The player list looks fake.";

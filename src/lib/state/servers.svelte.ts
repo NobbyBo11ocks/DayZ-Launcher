@@ -377,7 +377,8 @@ class ServersStore {
       }
     }, ROW_FLUSH_MS);
   }
-  /** A deferred recompute must also bump the row-set version: rows were removed. */
+  /** A deferred recompute must also bump the row-set version: rows were removed, or a
+   *  check moved one to another map, which the Map dropdown counts (row 28). */
   #setDirty = false;
 
   /**
@@ -529,7 +530,9 @@ class ServersStore {
    *  directly, and with focus let out of the modal, Enter behind it replaced a dialog
    *  that was waiting, downloading or holding a typed password (D-295). */
   requestJoin(id: string) {
-    if (this.joiningId === null) this.joiningId = id;
+    if (this.joiningId !== null) return;
+    this.joiningId = id;
+    this.succeeded("join");
   }
 
   /** Set from a "Start Steam" press until Steam has had time to come up (row 16). */
@@ -913,14 +916,17 @@ class ServersStore {
           k1[i] = r.tags.timeMinutes ?? -1;
           break;
         case "version":
-          k1[i] = r.serverVersion;
+          // Unknown (0) goes last with the other unknowns below (row 28).
+          k1[i] = r.serverVersion > 0 ? r.serverVersion : -1;
           break;
       }
     }
     // Unscanned servers (-1) go below every scanned one whichever way the column
     // sorts, as D-146 says, and so do unmeasured pings (D-242); multiplied by `dir` like the rest, an ascending sort put
     // every one of them first (D-240).
-    const unscannedLast = key === "mods" || key === "ping";
+    // Unknown times and versions too: one click on either column put every row without
+    // a clock or a version first (row 28).
+    const unscannedLast = key === "mods" || key === "ping" || key === "time" || key === "version";
 
     // One number per row and the engine's own numeric sort (D-284): the comparator
     // below cost 12 ms at 40 000 rows with the default filters and 47 ms at 71 000 with
@@ -1715,6 +1721,10 @@ class ServersStore {
       if (r.pingMs === 0) m.pingMs = prev.pingMs;
       if (!r.bots) m.bots = prev.bots;
       if (r.description === "") m.description = prev.description;
+      // And the tags DZSA has no field for, as the cache keeps them (`keep_tags_dzsa_lacks`):
+      // the DLC and file-patching marks, the queue and the night rate went with an import
+      // until Steam listed the server again (row 28).
+      m.tags = { ...r.tags, dlc: prev.tags.dlc, allowedFilePatching: prev.tags.allowedFilePatching, queue: prev.tags.queue, nightMultiplier: prev.tags.nightMultiplier };
     }
     return m;
   }
@@ -1766,7 +1776,9 @@ class ServersStore {
     // mid-download without a word, a typed password with it (D-296).
     if (this.joiningId && !this.rows.has(this.joiningId)) {
       this.joiningId = null;
-      if (joinGone !== null) this.error = `${joinGone} dropped out of the server list, so its join was closed. Join it again from Recent or with Direct connect.`;
+      // Through `fail`, so the next join takes it down: set directly, it stayed after the
+      // player did what it said, until a Refresh (row 28).
+      if (joinGone !== null) this.fail("join", `${joinGone} dropped out of the server list, so its join was closed. Join it again from Recent or with Direct connect.`);
     }
     // It only ever went from false to true, so once the prune took the last row Steam
     // listed as empty, the empty state kept saying "widen the filters" instead of
@@ -1842,7 +1854,10 @@ class ServersStore {
         next.password = f.password;
         next.bots = f.bots;
         if (next.name !== r.name) this.#namesDirty = true;
-        // A new map moves the map counts, which `#put` keeps.
+        // A new map moves the map counts, which `#put` keeps; the dropdown reads them on
+        // the row-set version, which only a removal moved, so it kept the old counts
+        // until the next refresh (row 28).
+        if (next.map.toLowerCase() !== r.map.toLowerCase()) this.#setDirty = true;
         this.#put(next);
       } else this.rows.set(v.id, next);
     }

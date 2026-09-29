@@ -14,7 +14,7 @@
   import { avatarDataUrl, initialOf } from "./avatar";
   import { mapLabel } from "./maps";
   import { servers } from "./state/servers.svelte";
-  import { trustedPlayers, type FriendInfo, type FriendState } from "./types";
+  import { isUntrusted, playersShown, type FriendInfo, type FriendState } from "./types";
 
   // Avatars (D-115): 32 px, requested once per friend when the row renders; Steam
   // answers from its cache, so a miss is retried once a few seconds later.
@@ -177,7 +177,9 @@
   </div>
   {#if !steamOk}
     <div class="empty">
-      <p>{servers.steam?.signedOut ? "Steam is running but nobody is signed in; the launcher connects once you sign in." : "Steam is not running."}</p>
+      <!-- Before Steam's first status the launcher does not know yet: "Starting up…", as the
+           Servers page says, where this said Steam was not running (row 28). -->
+      <p>{servers.steam == null ? "Starting up…" : servers.steam.signedOut ? "Steam is running but nobody is signed in; the launcher connects once you sign in." : "Steam is not running."}</p>
       <p class="muted">The friends list comes from Steam; it fills in by itself once Steam is up.</p>
     </div>
   {:else if !loadedAt}
@@ -215,7 +217,8 @@
               <td class={f.inDayz ? "accent" : "muted"}>{f.inDayz ? "In DayZ" : LABEL[f.state]}</td>
               <td>
                 {#if row}
-                  {row.name} <span class="muted">· {mapLabel(row.map)} · {trustedPlayers(row)}/{row.maxPlayers}</span>
+                  <!-- The list's number, with its ⚠ on an untrusted one (D-324 (3); row 28). -->
+                  {row.name} <span class="muted">· {mapLabel(row.map)} · {#if isUntrusted(row)}<span class="warn" aria-hidden="true">⚠</span><span class="sr-only">not trusted,</span>{" "}{/if}{playersShown(row)}/{row.maxPlayers}</span>
                 {:else if f.server}
                   <span class="mono">{f.server.ip}:{f.server.gamePort}</span>
                 {:else if f.inDayz}
@@ -240,6 +243,8 @@
 
 <style>
   .friends { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  /* The ⚠ beside a count the list does not trust, as the list and the pane draw it. */
+  .warn { color: var(--warn); }
   .top { padding: 8px 16px; border-bottom: 1px solid var(--border); }
   .bar { display: flex; align-items: center; gap: 12px; font-size: 12px; }
   .check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
