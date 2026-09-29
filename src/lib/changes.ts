@@ -10,6 +10,15 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.98",
+    notes: [
+      { kind: "fixed", text: "Joining a modded server no longer starts DayZ without its mods." },
+      { kind: "fixed", text: "A server's details no longer call it unverified after one lost reply." },
+      { kind: "fixed", text: "A server's details stay up to date while you keep them open." },
+      { kind: "fixed", text: "A server opened in its details gets its population chart at once." },
+    ],
+  },
+  {
     version: "0.1.97",
     notes: [
       { kind: "changed", text: "Muting an area in Logs still keeps its warnings and errors." },

@@ -1516,6 +1516,107 @@ fn news_thumb_dir(app: &AppHandle) -> AppResult<PathBuf> {
         .join("news-thumbs"))
 }
 
+/// The list a check read becomes the cached one: a launch whose own RULES read drops
+/// falls back to the cache, which could be a day-old scan rather than the list the
+/// player was shown seconds earlier (D-265). In the scan's shape, and sent to the list
+/// as a scan's is, so the Mods column agrees with it (D-295); from the details pane as
+/// well, which showed its live list beside a column a day old (row 26).
+async fn keep_mod_list(
+    app: &AppHandle,
+    cache: &Arc<Mutex<Cache>>,
+    id: &str,
+    rules: &a2s::A2sResult<a2s::Reply<a2s::Rules>>,
+) {
+    let Ok(r) = rules else { return };
+    if r.value.dayz.is_none() {
+        return;
+    }
+    let stored = r.value.stored_mods();
+    let payload = vec![ServerMods {
+        id: id.to_string(),
+        mods: stored.iter().map(|(m, _)| *m).collect(),
+    }];
+    let names: Vec<(u64, String)> = stored.iter().filter(|(m, _)| *m > 0).cloned().collect();
+    let list = vec![(id.to_string(), stored)];
+    let c = Arc::clone(cache);
+    let now = ServerRow::now_unix();
+    let saved = tauri::async_runtime::spawn_blocking(move || {
+        c.lock().is_ok_and(|mut c| {
+            c.replace_server_mods_many(&list, now)
+                .map_err(|e| crate::log_warn!("cache", "a server's mod list was not stored: {e}"))
+                .is_ok()
+        })
+    })
+    .await
+    .unwrap_or(false);
+    // Stored first, then sent, as the scan does (D-281).
+    if saved {
+        send_rows(app, "mods", &(payload, names, Vec::<String>::new()));
+    }
+}
+
+/// The server's own mod list from its RULES reply, or why there is none. A reply
+/// without its DayZ part is no list either: read as "no mods", a modded server was
+/// planned and launched bare, and turned away (row 26).
+fn mod_list_of(
+    rules: &a2s::A2sResult<a2s::Reply<a2s::Rules>>,
+) -> Result<Vec<(u64, String)>, String> {
+    match rules {
+        Ok(r) if r.value.dayz.is_some() => Ok(r.value.required_mods()),
+        Ok(_) => Err("the reply had no DayZ part".into()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// INFO, RULES and PLAYER together, and a second, patient look at what the first lost
+/// when PLAYER was among it. The pass and the visible rows have held a lost PLAYER back
+/// for that look since D-308 (5); the pane gave it only when INFO was lost too, so one
+/// dropped PLAYER reply published "unverifiable" and a never-counted server left the
+/// default list for four minutes (row 26). Without one: one timed-out click published
+/// "offline" and hid a server verified a minute before (D-272).
+async fn details_queries(
+    client: &Client,
+    addr: SocketAddr,
+) -> (
+    a2s::A2sResult<a2s::Reply<a2s::Info>>,
+    a2s::A2sResult<a2s::Reply<a2s::Rules>>,
+    a2s::A2sResult<a2s::Reply<a2s::Players>>,
+) {
+    let (mut info, mut rules, mut players) =
+        tokio::join!(client.info(addr), client.rules(addr), client.players(addr));
+    // Another game answering: nothing of this server to look at again.
+    let other_game = info.as_ref().is_ok_and(|r| !r.value.is_dayz());
+    if players.is_err() && !other_game {
+        let patient = client.clone().with_timeout(PATIENT_TIMEOUT);
+        let (info_lost, rules_lost) = (info.is_err(), rules.is_err());
+        let (i, r, p) = tokio::join!(
+            async {
+                if info_lost {
+                    Some(patient.info(addr).await)
+                } else {
+                    None
+                }
+            },
+            async {
+                if rules_lost {
+                    Some(patient.rules(addr).await)
+                } else {
+                    None
+                }
+            },
+            patient.players(addr)
+        );
+        if let Some(i) = i {
+            info = i;
+        }
+        if let Some(r) = r {
+            rules = r;
+        }
+        players = p;
+    }
+    (info, rules, players)
+}
+
 /// Latest DayZ news from Steam (D-099); the result is kept in the cache's meta table
 /// so the next start paints it before the network answers. Thumbnails of posts that
 /// dropped off the list are removed (D-111).
@@ -1747,32 +1848,7 @@ pub async fn server_details(
         .is_some_and(|r| r.verdict.as_deref() == Some("synthetic"));
     let known = cached.as_ref().map(verify::InfoFacts::of_row);
 
-    let (mut info, mut rules, mut players) =
-        tokio::join!(client.info(addr), client.rules(addr), client.players(addr));
-    // A server that answered nothing gets the second, patient look every other check
-    // gives one (the pass and the visible rows, D-047). Without it one timed-out click
-    // published "offline" and hid a server verified a minute before, and a hidden row
-    // is checked again only when something else looks at it (D-272).
-    if info.is_err() && players.is_err() {
-        let patient = client.clone().with_timeout(PATIENT_TIMEOUT);
-        let rules_failed = rules.is_err();
-        let (i, r, p) = tokio::join!(
-            patient.info(addr),
-            async {
-                if rules_failed {
-                    Some(patient.rules(addr).await)
-                } else {
-                    None
-                }
-            },
-            patient.players(addr)
-        );
-        info = i;
-        players = p;
-        if let Some(r) = r {
-            rules = r;
-        }
-    }
+    let (mut info, mut rules, mut players) = details_queries(&client, addr).await;
     // Another game answering on the port is no answer from this server (row 18).
     if info.as_ref().is_ok_and(|r| !r.value.is_dayz()) {
         let other = || a2s::A2sError::Malformed("reply from another game");
@@ -1809,7 +1885,9 @@ pub async fn server_details(
         verified,
         max_players,
         ping_ms: info.as_ref().ok().map(|r| r.rtt.as_millis() as u32),
-        player_rtt_ms: None,
+        // As the pass sends it: a ping never measured takes PLAYER's round trip (D-247),
+        // and after a PLAYER-only answer the pane's check left it at "—" (row 26).
+        player_rtt_ms: players.as_ref().ok().map(|r| r.rtt.as_millis() as u32),
         keywords: info.as_ref().ok().and_then(|r| r.value.keywords.clone()),
         tags: info.as_ref().ok().map(|r| r.value.tags.clone()),
         verified_at: ServerRow::now_unix(),
@@ -1823,11 +1901,6 @@ pub async fn server_details(
     // The pane still says what it saw; the row keeps its verdict while this PC cannot
     // reach the internet, as for every other check (row 14, F1/H1).
     if verdict != Verdict::Offline || connection_up().await {
-        if verdict != Verdict::Offline {
-            set_net(&app, true);
-        }
-        let persist = vec![verification.clone()];
-        send_rows(&app, "verified", &persist);
         // Hidden now, and a hidden row is checked again only when something looks at it:
         // read once more a few minutes on, as the list's checks are (row 18).
         if matches!(verdict, Verdict::Offline | Verdict::Unverifiable) {
@@ -1835,18 +1908,18 @@ pub async fn server_details(
                 schedule_reread(&app, &cache, &client, vec![t], "the details pane");
             }
         }
-        let _ = tauri::async_runtime::spawn_blocking(move || {
-            if let Ok(mut c) = cache.lock() {
-                // Noted like the pass's own writes: a verdict the cache refused was
-                // dropped without a word (row 17).
-                let applied = c.apply_verifications(&persist);
-                crate::browser::cache::note_write(&applied);
-                if let Err(e) = applied {
-                    crate::log_warn!("cache", "the pane's verdict was not stored: {e}");
-                }
-            }
-        })
+        // As every check publishes: the verdict sent and stored, and a verified count
+        // kept as a population sample. The pane stored the verdict only, so a server
+        // opened in it read "No population samples yet" under its own count until the
+        // list's check came round (row 26).
+        publish(
+            &app,
+            &cache,
+            &mut HashMap::new(),
+            vec![verification.clone()],
+        )
         .await;
+        keep_mod_list(&app, &cache, &id, &rules).await;
     } else {
         crate::log_warn!(
             "verify",
@@ -2050,39 +2123,7 @@ pub async fn join_plan(
                 format!("diagnostics task failed: {e}"),
             )
         })??;
-    // The list this plan read becomes the cached one: a launch whose own RULES read
-    // drops falls back to the cache, which could be a day-old scan rather than the
-    // list the player was shown seconds earlier (D-265). In the scan's shape, and sent
-    // to the list as a scan's is, so the Mods column agrees with it (D-295).
-    if let Ok(r) = &rules {
-        if r.value.dayz.is_some() {
-            let stored = r.value.stored_mods();
-            let payload = vec![ServerMods {
-                id: id.clone(),
-                mods: stored.iter().map(|(m, _)| *m).collect(),
-            }];
-            let names: Vec<(u64, String)> =
-                stored.iter().filter(|(m, _)| *m > 0).cloned().collect();
-            let list = vec![(id.clone(), stored)];
-            let c = Arc::clone(&state.cache);
-            let now = ServerRow::now_unix();
-            let saved = tauri::async_runtime::spawn_blocking(move || {
-                c.lock().is_ok_and(|mut c| {
-                    c.replace_server_mods_many(&list, now)
-                        .map_err(|e| {
-                            crate::log_warn!("cache", "the plan's mod list was not stored: {e}")
-                        })
-                        .is_ok()
-                })
-            })
-            .await
-            .unwrap_or(false);
-            // Stored first, then sent, as the scan does (D-281).
-            if saved {
-                send_rows(&app, "mods", &(payload, names, Vec::<String>::new()));
-            }
-        }
-    }
+    keep_mod_list(&app, &state.cache, &id, &rules).await;
     let server_version = info
         .as_ref()
         .map_or_else(|| row.version.clone(), |i| i.version.clone());
@@ -2096,9 +2137,9 @@ pub async fn join_plan(
     }
 
     let mut warnings = Vec::new();
-    let required: Vec<(u64, String)> = match &rules {
+    let required: Vec<(u64, String)> = match mod_list_of(&rules) {
         // Published mods only, each once (D-221, D-265).
-        Ok(r) => r.value.required_mods(),
+        Ok(mods) => mods,
         // A server that will not answer RULES is not a vanilla server. Launching
         // without its mods is a kick on arrival, so fall back to the list the mod scan
         // recorded and say how old it is rather than inventing an empty one (D-209).
@@ -2468,9 +2509,9 @@ pub async fn launch_game(
     if let Some(i) = &info {
         keep_join_facts(&app, &state.cache, &row, game_port, i.password).await;
     }
-    let required: Vec<(u64, String)> = match &rules {
+    let required: Vec<(u64, String)> = match mod_list_of(&rules) {
         // Published mods only, each once (D-221, D-265).
-        Ok(r) => r.value.required_mods(),
+        Ok(mods) => mods,
         Err(e) => {
             // This used to fall back to an empty list, which does not mean "no mods" —
             // it means "we could not ask". DayZ then started vanilla and connected to a
@@ -3236,6 +3277,89 @@ pub async fn import_official_favourites(
 
 #[cfg(test)]
 mod tests {
+    use super::{details_queries, mod_list_of};
+    use crate::a2s::{self, Client};
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::net::UdpSocket;
+
+    /// A server on 127.0.0.1 answering INFO and RULES at once and PLAYER after
+    /// `player_ms`, with the challenge A2S asks for first.
+    async fn slow_player_server(player_ms: u64) -> std::net::SocketAddr {
+        let info: &'static [u8] = include_bytes!("../tests/fixtures/a2s/kingofgames.info.bin");
+        let rules: &'static [u8] = include_bytes!("../tests/fixtures/a2s/kingofgames.rules.0.bin");
+        let player: &'static [u8] = include_bytes!("../tests/fixtures/a2s/kingofgames.player.bin");
+        let sock = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let addr = sock.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 1400];
+            loop {
+                let Ok((n, from)) = sock.recv_from(&mut buf).await else {
+                    return;
+                };
+                let kind = buf.get(4).copied();
+                if buf[..n].ends_with(&[0xFF; 4]) {
+                    let _ = sock
+                        .send_to(&[0xFF, 0xFF, 0xFF, 0xFF, 0x41, 1, 2, 3, 4], from)
+                        .await;
+                    continue;
+                }
+                let (reply, delay) = match kind {
+                    Some(0x54) => (info, 0),
+                    Some(0x56) => (rules, 0),
+                    Some(0x55) => (player, player_ms),
+                    _ => continue,
+                };
+                let sock = Arc::clone(&sock);
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                    let _ = sock.send_to(reply, from).await;
+                });
+            }
+        });
+        addr
+    }
+
+    /// Row 26: a PLAYER reply the first look lost gets the patient second look, while
+    /// INFO answered; the pane published "unverifiable" from the first alone.
+    #[tokio::test]
+    async fn a_lost_player_reply_gets_a_second_look() {
+        let addr = slow_player_server(1500).await;
+        let client = Client::new(8)
+            .with_timeout(Duration::from_millis(1000))
+            .with_retries(0);
+        let (info, _rules, players) = details_queries(&client, addr).await;
+        assert!(info.is_ok(), "INFO answered at once");
+        assert!(players.is_ok(), "the 2.5 s look waits for the 1.5 s answer");
+    }
+
+    /// Row 26: a RULES reply without its DayZ part is no mod list, as a failed read is not.
+    #[test]
+    fn a_reply_without_its_dayz_part_is_no_mod_list() {
+        let bytes = include_bytes!("../tests/fixtures/a2s/kingofgames.rules.0.bin");
+        let a2s::packet::Datagram::Single(payload) = a2s::packet::classify(bytes).unwrap() else {
+            panic!("single")
+        };
+        let rules = a2s::rules::parse(payload).unwrap();
+        assert!(rules.dayz.is_some());
+        let reply = |value: a2s::Rules| -> a2s::A2sResult<a2s::Reply<a2s::Rules>> {
+            Ok(a2s::Reply {
+                value,
+                rtt: Duration::from_millis(20),
+            })
+        };
+        assert!(mod_list_of(&reply(rules.clone())).is_ok());
+        let bare = a2s::Rules {
+            dayz: None,
+            ..rules
+        };
+        assert_eq!(
+            mod_list_of(&reply(bare)),
+            Err("the reply had no DayZ part".to_string())
+        );
+        assert!(mod_list_of(&Err(a2s::A2sError::Timeout)).is_err());
+    }
+
     use super::fallback_query_ports;
 
     /// Row 23: a caller that knows the game port has it tried as well, the typed port is

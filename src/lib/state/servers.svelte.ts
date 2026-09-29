@@ -1539,6 +1539,7 @@ class ServersStore {
         return this.dropRows(m.data);
       case "verified":
         this.applyVerifications(m.data);
+        for (const v of m.data) if (v.id === this.selectedId) this.#lastForSelected = v;
         for (const f of this.#verifiedListeners) f(m.data);
         return;
       case "verify-done":
@@ -1566,6 +1567,13 @@ class ServersStore {
   }
 
   #verifiedListeners = new Set<(list: Verification[]) => void>();
+  /** The newest verification the row stream brought for the selected server, so the
+   *  details pane can tell a check that landed while its own was answering from its own
+   *  older one: the newer was dropped, and the trust box contradicted the list (row 26). */
+  #lastForSelected: Verification | null = null;
+  lastVerified(id: string): Verification | null {
+    return this.#lastForSelected?.id === id ? this.#lastForSelected : null;
+  }
   /** Verification results as they arrive, for the details pane, which listened to the
    *  event itself before the row stream (D-297). Returns the unsubscribe. */
   onVerified(f: (list: Verification[]) => void): () => void {

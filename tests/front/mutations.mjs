@@ -270,6 +270,12 @@ const MUTATIONS = [
   ["pages", "a failing friends poll is logged once", "row 25", S,
     "      if (!this.#friendsFailing) logWarn(\"friends\", `poll failed: ${describe(e)}`);",
     "      logWarn(\"friends\", `poll failed: ${describe(e)}`);", "a line every minute while Steam fails"],
+  ["pages", "the newest verification of the selected server", "row 26", S,
+    "        for (const v of m.data) if (v.id === this.selectedId) this.#lastForSelected = v;\n",
+    "", "a check that landed during the pane's own is dropped"],
+  ["pages", "onVerified hands each list", "D-297", S,
+    "        for (const f of this.#verifiedListeners) f(m.data);\n",
+    "", "the pane never hears of later checks"],
   // news.test.mjs
   ["news", "no alert for an update post older than two weeks", "row 24 (1)", N,
     " && n.date >= recent && !known.has(n.gid)",

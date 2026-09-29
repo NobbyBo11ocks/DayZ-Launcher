@@ -6,7 +6,7 @@
   // Every command through the logging wrapper: a failure is recorded with its
   // command name before it is rethrown (D-158/D-165).
   import { listen } from "@tauri-apps/api/event";
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import { invokeLogged as invoke } from "./log";
   import Flag from "./Flag.svelte";
   import Sparkline from "./Sparkline.svelte";
@@ -57,7 +57,7 @@
    *  deliberate click still feels immediate. */
   const DETAILS_SETTLE_MS = 220;
 
-  let samples = $state<PopulationSample[]>([]);
+  let samples = $state.raw<PopulationSample[]>([]);
   let samplesFor: string | null = null;
 
   // Population samples for the selected server; refetched (without blanking) when a
@@ -70,24 +70,30 @@
       samplesFor = null;
       return;
     }
+    const refetch = samplesFor === cur && untrack(() => samples.length > 0);
     if (samplesFor !== cur) {
       samples = [];
       samplesFor = cur;
     }
     let cancelled = false;
-    invoke<PopulationSample[]>("population_history", { id: cur, hours: 72 })
-      .then((s) => {
-        if (!cancelled) samples = s;
-      })
-      .catch(() => {
-        /* keep what we have */
-      });
+    // After the selection holds still, as the check does (D-193): arrow-keying down the
+    // list read a server's whole history at every step (row 26).
+    const timer = setTimeout(() => {
+      invoke<PopulationSample[]>("population_history", { id: cur, hours: 72 })
+        .then((s) => {
+          if (!cancelled) samples = s;
+        })
+        .catch(() => {
+          /* keep what we have */
+        });
+    }, refetch ? 0 : DETAILS_SETTLE_MS);
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
   });
 
-  let details = $state<ServerDetails | null>(null);
+  let details = $state.raw<ServerDetails | null>(null);
   let loading = $state(false);
   let error = $state<string | null>(null);
   /** Workshop items with a folder on disk; null while unknown (not read yet, or the
@@ -161,7 +167,12 @@
     const timer = setTimeout(() => {
       invoke<ServerDetails>("server_details", { id: cur })
         .then((d) => {
-          if (!cancelled) details = d;
+          if (cancelled) return;
+          // A check that landed while this one was answering is the newer word: the
+          // pane's own echo comes before its reply, so the last one the stream brought
+          // is the newest (row 26).
+          const later = servers.lastVerified(d.id);
+          details = later && later.verifiedAt >= d.verification.verifiedAt ? { ...d, verification: later } : d;
         })
         .catch((e) => {
           if (!cancelled) error = String(e);
@@ -174,6 +185,20 @@
       cancelled = true;
       clearTimeout(timer);
     };
+  });
+
+  // Checked again while the pane stays open. Only the list's visible rows were, so a
+  // selection scrolled away, hidden by a search or opened as a sibling kept its first
+  // check's trust box, count and chart for as long as the pane was open (row 26). The
+  // store's own rules pace it: nothing sooner than two minutes after the last check, ten
+  // for a row that could not be counted, and nothing while one is in flight.
+  $effect(() => {
+    const cur = id;
+    if (!cur) return;
+    const t = setInterval(() => {
+      if (document.visibilityState === "visible") void servers.verifyVisible([cur]);
+    }, 60_000);
+    return () => clearInterval(t);
   });
 
   const MODS_COLLAPSED = 10;
@@ -346,7 +371,9 @@
         {#if row.verifiedPlayers != null && row.players !== row.verifiedPlayers} <span class="muted">· server claims {row.players}</span>{/if}
       </dd>
       <dt>Ping</dt>
-      <dd>{details?.infoRttMs != null ? `${details.infoRttMs} ms` : pingUnmeasured(row) ? "—" : `${row.pingMs} ms`}</dd>
+      <!-- The row's, which every later check updates; the pane's first check's own round
+           trip stayed on screen while the list's Ping moved on (row 26). -->
+      <dd>{pingUnmeasured(row) ? "—" : `${row.pingMs} ms`}</dd>
       <dt>Perspective</dt>
       <dd>{row.tags.firstPersonOnly ? "1PP only" : "1PP and 3PP"}</dd>
       <dt>Time</dt>

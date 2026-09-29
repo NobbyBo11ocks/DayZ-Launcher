@@ -433,3 +433,49 @@ test("a failing friends poll is logged once until it answers again (row 25)", as
   await servers.pollFriends();
   assert.equal(friendsLines() - before, 3, "a new episode is said again");
 });
+
+// ---- Row 26: the details pane's store paths ----
+
+test("the newest verification of the selected server is kept for the pane, and only that server's (row 26)", async (t) => {
+  const { app, servers } = await started(t);
+  const a = row();
+  const b = row();
+  deliver(app, servers, [a, b]);
+  servers.select(a.id);
+  const v = (id, at, verdict = "verified") => ({ id, verdict, reported: 10, verified: 10, maxPlayers: 60, pingMs: 30, playerRttMs: 30, tags: null, verifiedAt: at, reason: "INFO 10 vs PLAYER 10" });
+  app.mock.send({ kind: "verified", data: [v(a.id, 100)] });
+  app.mock.send({ kind: "verified", data: [v(b.id, 300), v(a.id, 200, "synthetic")] });
+  assert.equal(servers.lastVerified(a.id)?.verifiedAt, 200, "the newer of the two");
+  assert.equal(servers.lastVerified(a.id)?.verdict, "synthetic");
+  assert.equal(servers.lastVerified(b.id), null, "not the selected server");
+  servers.select(b.id);
+  assert.equal(servers.lastVerified(b.id), null, "only what came while it was selected");
+  app.mock.send({ kind: "verified", data: [v(b.id, 400)] });
+  assert.equal(servers.lastVerified(b.id)?.verifiedAt, 400);
+});
+
+test("onVerified hands each list to its subscribers after the rows took it, and nothing once unsubscribed (D-281, D-297)", async (t) => {
+  const { app, servers } = await started(t);
+  const a = row({ verdict: "verified", verifiedPlayers: 10 });
+  deliver(app, servers, [a]);
+  const got = [];
+  const off = servers.onVerified((list) => got.push({ ids: list.map((x) => x.id), verdictSeen: servers.rows.get(a.id)?.verdict }));
+  app.mock.send({ kind: "verified", data: [{ id: a.id, verdict: "inflated", reported: 40, verified: 10, maxPlayers: 60, pingMs: 30, playerRttMs: 30, tags: null, verifiedAt: 1, reason: "INFO 40 vs PLAYER 10" }] });
+  assert.deepEqual(got, [{ ids: [a.id], verdictSeen: "inflated" }], "the row already carries it");
+  off();
+  app.mock.send({ kind: "verified", data: [{ id: a.id, verdict: "verified", reported: 10, verified: 10, maxPlayers: 60, pingMs: 30, playerRttMs: 30, tags: null, verifiedAt: 2, reason: "INFO 10 vs PLAYER 10" }] });
+  assert.equal(got.length, 1);
+});
+
+test("the address index follows a prune (D-284, D-235)", async (t) => {
+  const { app, servers } = await started(t);
+  const ip = "198.51.100.80";
+  const a = row({ ip, queryPort: 27016 });
+  const b = row({ ip, queryPort: 27017 });
+  deliver(app, servers, [a, b]);
+  assert.deepEqual([...servers.idsAt(ip)].sort(), [a.id, b.id].sort());
+  app.mock.send({ kind: "pruned", data: [a.id] });
+  assert.deepEqual([...servers.idsAt(ip)], [b.id]);
+  app.mock.send({ kind: "pruned", data: [b.id] });
+  assert.equal(servers.idsAt(ip).size, 0);
+});
