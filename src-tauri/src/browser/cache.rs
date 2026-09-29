@@ -224,25 +224,41 @@ static WRITE_FAILURE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(N
 /// verdicts. Only failures of the file itself count — full, read-only, I/O — not a busy
 /// moment or a bad statement.
 pub fn note_write<T>(r: &rusqlite::Result<T>) {
-    use rusqlite::ErrorCode::{CannotOpen, DiskFull, ReadOnly, SystemIoFailure};
     let Ok(mut failure) = WRITE_FAILURE.lock() else {
         return;
     };
     match r {
-        Ok(_) => *failure = None,
-        Err(e)
-            if matches!(
-                e.sqlite_error_code(),
-                Some(DiskFull | ReadOnly | SystemIoFailure | CannotOpen)
-            ) =>
-        {
+        Ok(_) => {
+            // The end of an episode, with what it cost (row 25).
+            if failure.take().is_some() {
+                let n = FAILED_WRITES.swap(0, std::sync::atomic::Ordering::Relaxed);
+                crate::log_info!("cache", "writes work again; {n} failed while they did not");
+            }
+        }
+        Err(e) if is_file_failure(e) => {
             if failure.is_none() {
                 crate::log_warn!("cache", "writes failing: {e}");
             }
+            FAILED_WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             *failure = Some(plain_reason(e).to_string());
         }
         Err(_) => {}
     }
+}
+
+/// Writes lost in the current episode of failing writes.
+static FAILED_WRITES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// The file itself refused the write: full, read-only, unwritable or unopenable.
+/// `note_write` says those once an episode, so a batch site leaves them to it: one
+/// ERROR per refused batch was about a hundred lines a full Refresh on a full disk,
+/// most of the 400-line ring (row 25).
+pub fn is_file_failure(e: &rusqlite::Error) -> bool {
+    use rusqlite::ErrorCode::{CannotOpen, DiskFull, ReadOnly, SystemIoFailure};
+    matches!(
+        e.sqlite_error_code(),
+        Some(DiskFull | ReadOnly | SystemIoFailure | CannotOpen)
+    )
 }
 
 /// Why a write failed, in the player's words: SQLite's own ("database or disk is full",

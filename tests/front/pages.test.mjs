@@ -416,3 +416,20 @@ test("a pruned row takes its friend marker with it (D-235)", async (t) => {
   app.mock.send({ kind: "pruned", data: [on.id] });
   assert.equal(servers.friendsOn.has(on.id), false);
 });
+
+test("a failing friends poll is logged once until it answers again (row 25)", async (t) => {
+  const { app, servers } = await started(t);
+  app.mock.handle("servers_refresh", true);
+  app.mock.emit("steam:status", steam());
+  app.mock.fail("friends_list", "Steam did not answer", { always: true });
+  const friendsLines = () => app.mock.logs.filter((l) => l.target === "friends" || (l.target === "ipc" && l.message.startsWith("friends_list"))).length;
+  const before = friendsLines();
+  for (let i = 0; i < 5; i++) await servers.pollFriends();
+  assert.equal(friendsLines() - before, 1, "one line for five failed polls");
+  app.mock.handle("friends_list", []);
+  await servers.pollFriends();
+  assert.ok(app.mock.logs.some((l) => l.target === "friends" && l.message === "the friends list answers again"));
+  app.mock.fail("friends_list", "Steam did not answer", { always: true });
+  await servers.pollFriends();
+  assert.equal(friendsLines() - before, 3, "a new episode is said again");
+});

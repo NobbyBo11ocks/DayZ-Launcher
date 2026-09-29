@@ -85,12 +85,18 @@ pub struct JunctionInfo {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Diagnostics {
+    // Read by the join plan, never by the page: the Steam account id went to the page
+    // with every Mods visit for nothing (row 25).
+    #[serde(skip_serializing)]
     pub steam: SteamInfo,
+    #[serde(skip_serializing)]
     pub libraries: Vec<LibraryInfo>,
+    #[serde(skip_serializing)]
     pub dayz: Option<GameInfo>,
     pub workshop: Option<WorkshopInfo>,
     pub junctions: Vec<JunctionInfo>,
     pub warnings: Vec<String>,
+    #[serde(skip_serializing)]
     pub timing_ms: u64,
 }
 

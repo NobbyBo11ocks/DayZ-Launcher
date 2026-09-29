@@ -3,42 +3,6 @@
 // Note: u64 fields (steamId, workshopId) arrive as JSON numbers; Steam IDs exceed
 // 2^53 and lose precision, so they are never used for identity in the UI.
 
-export type SteamInfo = {
-  path: string | null;
-  exe: string | null;
-  /** Registry hive the path came from: "HKCU", "HKLM" or "none". */
-  source: string;
-  running: boolean;
-  /** Live steam.exe PID from process enumeration (0 when not running). */
-  pid: number;
-  /** ActiveProcess\pid from the registry; known to go stale. */
-  registryPid: number;
-  activeUser: number;
-};
-
-export type LibraryInfo = {
-  path: string;
-  label: string;
-  appCount: number;
-  hasDayz: boolean;
-};
-
-export type GameInfo = {
-  library: string;
-  folder: string;
-  exe: string;
-  /** ProductVersion of DayZ_x64.exe, e.g. "1.29.0.163709". */
-  exeVersion: string | null;
-  /** Same version in the A2S form servers announce, e.g. "1.29.163709". */
-  gameVersion: string | null;
-  buildId: string;
-  lastUpdated: number;
-  sizeOnDisk: number;
-  stateFlags: number;
-  hasBattleyeExe: boolean;
-  hasOfficialLauncher: boolean;
-};
-
 export type WorkshopItemInfo = {
   id: number;
   size: number;
@@ -489,14 +453,12 @@ export type ServerDetails = {
   verification: Verification;
 };
 
+/** What the Mods page and the details pane read of the Steam, DayZ and Workshop check; the
+ *  rest (the Steam account, the libraries, the game folder) stays on the host (row 25). */
 export type Diagnostics = {
-  steam: SteamInfo;
-  libraries: LibraryInfo[];
-  dayz: GameInfo | null;
   workshop: WorkshopInfo | null;
   junctions: JunctionInfo[];
   warnings: string[];
-  timingMs: number;
 };
 
 /** Country name for an ISO 3166-1 alpha-2 code in the UI language, or the code itself. */

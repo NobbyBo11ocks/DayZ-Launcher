@@ -264,6 +264,12 @@ const MUTATIONS = [
   ["log", "anything thrown becomes a line", "row 25", "src/lib/log.ts",
     "    return JSON.stringify(e) ?? String(e);",
     "    return JSON.stringify(e);", "a rejection without a reason leaves no line"],
+  ["log", "Copy's report", "row 25", "src/lib/logreport.ts",
+    "  const body = [...lines].sort((a, b) => a.at - b.at)",
+    "  const body = [...lines]", "newest first, as the page shows it"],
+  ["pages", "a failing friends poll is logged once", "row 25", S,
+    "      if (!this.#friendsFailing) logWarn(\"friends\", `poll failed: ${describe(e)}`);",
+    "      logWarn(\"friends\", `poll failed: ${describe(e)}`);", "a line every minute while Steam fails"],
   // news.test.mjs
   ["news", "no alert for an update post older than two weeks", "row 24 (1)", N,
     " && n.date >= recent && !known.has(n.gid)",

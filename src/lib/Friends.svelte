@@ -5,6 +5,10 @@
   // Every command through the logging wrapper: a failure is recorded with its
   // command name before it is rethrown (D-158).
   import { invokeLogged as invoke } from "./log";
+  // Avatars without the wrapper: one failed line per friend, hundreds with Show offline
+  // and a Steam that hangs, filled the 400-line log (row 25). A missing picture is drawn
+  // as the friend's initial.
+  import { invoke as invokeQuiet } from "@tauri-apps/api/core";
   import { untrack } from "svelte";
   import { SvelteMap } from "svelte/reactivity";
   import { avatarDataUrl, initialOf } from "./avatar";
@@ -30,7 +34,7 @@
   function requestAvatar(id: string, retry: boolean) {
     // Raw bytes, not a JSON array of numbers: the same 4 096-byte picture crossed
     // IPC as 14 657 bytes of decimal text before (D-181).
-    void invoke<ArrayBuffer>("friend_avatar", { steamId: id })
+    void invokeQuiet<ArrayBuffer>("friend_avatar", { steamId: id })
       .then((buf) => {
         const url = buf.byteLength === AVATAR_PX * AVATAR_PX * 4 ? avatarDataUrl({ width: AVATAR_PX, height: AVATAR_PX, rgba: new Uint8ClampedArray(buf) }) : null;
         if (url) avatars.set(id, url);

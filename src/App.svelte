@@ -2,7 +2,7 @@
   import { listen } from "@tauri-apps/api/event";
   import { tick, untrack } from "svelte";
   import { type Release, whatsNewPlan } from "./lib/changes";
-  import { describe, installErrorHooks, invokeLogged, logError } from "./lib/log";
+  import { describe, invokeLogged, logError } from "./lib/log";
   import Favourites from "./lib/Favourites.svelte";
   import FilterPanel from "./lib/FilterPanel.svelte";
   import Friends from "./lib/Friends.svelte";
@@ -27,8 +27,8 @@
   import { uiPrefs } from "./lib/state/uiprefs.svelte";
   import { updates } from "./lib/state/updates.svelte";
 
-  // Uncaught errors and rejected promises reach the log before anything else runs (D-158).
-  installErrorHooks();
+  // Uncaught errors and rejected promises reach the log before anything else runs
+  // (D-158): installed by main.ts's first import, ahead of the stores (row 25).
 
   // Workshop updates are checked at start and every fifteen minutes, so a mod its
   // author updated shows up without opening the Mods page (D-191).

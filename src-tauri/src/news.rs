@@ -586,7 +586,9 @@ pub async fn fetch(count: u32) -> Result<Vec<NewsItem>, String> {
         .get(url)
         .send()
         .await
-        .map_err(|e| crate::http::request_error(e, "news request", NEWS_OFFLINE, NEWS_FAILED))?
+        .map_err(|e| {
+            crate::http::request_error(e, "news", "news request", NEWS_OFFLINE, NEWS_FAILED)
+        })?
         .error_for_status()
         .map_err(|e| failed(format!("news request failed: {e}")))?;
     // 60 posts are well under 100 KB gzipped; 8 MB is far above any honest reply (D-163).

@@ -6,12 +6,12 @@
 // command name before it is rethrown (D-158).
 import { invokeLogged as invoke } from "../log";
 import { mapHaystack, mapLabel } from "../maps";
-import { Channel } from "@tauri-apps/api/core";
+import { Channel, invoke as invokeQuiet } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { notices } from "./notices.svelte";
 import { uiPrefs } from "./uiprefs.svelte";
-import { describe, logError, logWarn } from "../log";
+import { describe, logError, logInfo, logWarn } from "../log";
 import { type CacheStatus, type CachedServers, compactRow, decodeCachedRows, type Favourite, type FriendInfo, type FriendServer, type HistoryEntry, type ImportResult, isInflated, isUntrusted, type ModScanSummary, type ModsIndex, queueOf, type RefreshDone, type ServerMods, type ServerRow, type SteamStatus, trustedPlayers, type Verification, type VerifySummary } from "../types";
 
 export type SortKey = "name" | "map" | "mods" | "players" | "ping" | "time" | "version";
@@ -1326,13 +1326,20 @@ class ServersStore {
     }
     if (s.idle) return;
     try {
-      await this.loadFriends();
+      await this.loadFriends(true);
+      if (this.#friendsFailing) logInfo("friends", "the friends list answers again");
+      this.#friendsFailing = false;
     } catch (e) {
       // Keep the last value on screen, but a friends list that keeps failing is the
-      // first visible sign that the Steam session has gone (D-288).
-      logWarn("friends", `poll failed: ${describe(e)}`);
+      // first visible sign that the Steam session has gone (D-288). Said once until it
+      // answers again: two lines a minute through the wrapper and this pushed the rest
+      // of the 400-line log out within hours (row 25).
+      if (!this.#friendsFailing) logWarn("friends", `poll failed: ${describe(e)}`);
+      this.#friendsFailing = true;
     }
   }
+
+  #friendsFailing = false;
 
   #clearFriends() {
     this.friendsInDayz = null;
@@ -1344,8 +1351,8 @@ class ServersStore {
   /** Reads the friends list: the page's list, the title bar's count and the rows' markers,
    *  from one answer. Asking re-opens a released session, so only the poll (never while
    *  released) and the player's own Refresh call it (D-165). Throws when Steam fails. */
-  async loadFriends() {
-    const list = await invoke<FriendInfo[]>("friends_list");
+  async loadFriends(quiet = false) {
+    const list = quiet ? await invokeQuiet<FriendInfo[]>("friends_list") : await invoke<FriendInfo[]>("friends_list");
     this.friendsList = list;
     this.friendsAt = Date.now();
     this.friendsInDayz = list.filter((f) => f.inDayz).length;

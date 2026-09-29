@@ -150,9 +150,14 @@ pub struct AppInfo {
     /// Running with an administrator token (matched to an elevated Steam, D-119): the
     /// News page then keeps the third-party video frame out of the process (D-248).
     elevated: bool,
+    /// Windows' own build, "10.0.26200.6584"; `os` only ever says "windows" (row 25).
+    windows: Option<String>,
+    /// The WebView2 runtime the page runs in.
+    webview: Option<String>,
 }
 
-/// Static build information for the Settings page (the Diagnostics view went in D-168) and the M0 smoke test.
+/// Static build information for the Settings page (the Diagnostics view went in D-168),
+/// the Logs page's copied report and the M0 smoke test.
 #[tauri::command]
 pub fn app_info() -> AppInfo {
     #[cfg(debug_assertions)]
@@ -163,7 +168,22 @@ pub fn app_info() -> AppInfo {
         tauri: tauri::VERSION,
         os: std::env::consts::OS,
         elevated: crate::proc::current_is_elevated(),
+        windows: windows_build(),
+        webview: tauri::webview_version().ok(),
     }
+}
+
+/// "10.0.26200.6584" from the registry: what a bug report needs to tell one Windows
+/// update from another (row 25).
+pub(crate) fn windows_build() -> Option<String> {
+    let key = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
+        .open_subkey(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion")
+        .ok()?;
+    let build: String = key.get_value("CurrentBuild").ok()?;
+    let major: u32 = key.get_value("CurrentMajorVersionNumber").unwrap_or(10);
+    let minor: u32 = key.get_value("CurrentMinorVersionNumber").unwrap_or(0);
+    let ubr: u32 = key.get_value("UBR").unwrap_or(0);
+    Some(format!("{major}.{minor}.{build}.{ubr}"))
 }
 
 /// Full Steam / DayZ / Workshop inventory (M1).
@@ -173,6 +193,7 @@ pub async fn diagnostics() -> AppResult<Diagnostics> {
         .await
         .map_err(|e| {
             AppError::logged(
+                "steam",
                 "The check of Steam and DayZ did not finish",
                 format!("diagnostics task failed: {e}"),
             )
@@ -206,6 +227,7 @@ pub async fn local_game_version() -> AppResult<Option<String>> {
     .await
     .map_err(|e| {
         AppError::logged(
+            "steam",
             "The installed DayZ version could not be read",
             format!("version task failed: {e}"),
         )
@@ -215,7 +237,11 @@ pub async fn local_game_version() -> AppResult<Option<String>> {
 /// The saved data (the cache) could not do what was asked: a poisoned lock or a lost
 /// worker task. One sentence on screen, the detail in the log (row 16).
 fn saved_data(detail: impl std::fmt::Display) -> AppError {
-    AppError::logged("The launcher's saved data could not be used", detail)
+    AppError::logged(
+        "cache",
+        "The launcher's saved data could not be used",
+        detail,
+    )
 }
 
 /// SQLite refused: a file that cannot be written is said in words ("the disk is full"),
@@ -1027,11 +1053,14 @@ async fn publish(
             let applied = c.apply_verifications(&results);
             crate::browser::cache::note_write(&applied);
             if let Err(e) = applied {
-                crate::log_error!(
-                    "cache",
-                    "apply_verifications of {} failed: {e}",
-                    results.len()
-                );
+                // A refusal of the file itself is `note_write`'s, once an episode (row 25).
+                if !crate::browser::cache::is_file_failure(&e) {
+                    crate::log_error!(
+                        "cache",
+                        "apply_verifications of {} failed: {e}",
+                        results.len()
+                    );
+                }
             }
             let samples: Vec<(String, i64, i32, i32)> = results
                 .iter()
@@ -1042,12 +1071,18 @@ async fn publish(
                 })
                 .collect();
             if !samples.is_empty() {
-                if let Err(e) = c.population_add(&samples) {
-                    crate::log_error!(
-                        "cache",
-                        "population_add of {} sample(s) failed: {e}",
-                        samples.len()
-                    );
+                // Through `note_write` as well, and a refusal of the file itself is its to
+                // say, once an episode (row 25).
+                let added = c.population_add(&samples);
+                crate::browser::cache::note_write(&added);
+                if let Err(e) = added {
+                    if !crate::browser::cache::is_file_failure(&e) {
+                        crate::log_error!(
+                            "cache",
+                            "population_add of {} sample(s) failed: {e}",
+                            samples.len()
+                        );
+                    }
                 }
             }
         }
@@ -1292,6 +1327,7 @@ pub async fn mods_stale(state: State<'_, AppState>, ids: Vec<u64>) -> AppResult<
         .await
         .map_err(|e| {
             AppError::logged(
+                "mods",
                 "Steam could not be asked about mod updates",
                 format!("stale check failed: {e}"),
             )
@@ -1311,6 +1347,7 @@ pub async fn mods_index(state: State<'_, AppState>) -> AppResult<crate::browser:
     .await
     .map_err(|e| {
         AppError::logged(
+            "mods",
             "The servers' mod lists could not be loaded",
             format!("mods index task failed: {e}"),
         )
@@ -1364,6 +1401,7 @@ pub async fn mods_unsubscribe(
         .await
         .map_err(|e| {
             AppError::logged(
+                "mods",
                 "The unsubscribe did not finish",
                 format!("unsubscribe task failed: {e}"),
             )
@@ -1461,7 +1499,7 @@ pub async fn junctions_remove_dangling() -> AppResult<JunctionCleanup> {
         Ok(out)
     })
     .await
-    .map_err(|e| AppError::logged("The mod links could not be checked", format!("junction task failed: {e}")))?
+    .map_err(|e| AppError::logged("mods", "The mod links could not be checked", format!("junction task failed: {e}")))?
 }
 
 #[derive(Serialize)]
@@ -1545,6 +1583,7 @@ pub async fn news_cached(state: State<'_, AppState>) -> AppResult<NewsCached> {
     .await
     .map_err(|e| {
         AppError::logged(
+            "news",
             "The news could not be loaded",
             format!("news task failed: {e}"),
         )
@@ -1565,6 +1604,7 @@ pub async fn friend_avatar(
         .await
         .map_err(|e| {
             AppError::logged(
+                "steam",
                 "A Steam picture could not be loaded",
                 format!("avatar task failed: {e}"),
             )
@@ -1582,10 +1622,25 @@ pub fn logs_recent(limit: Option<usize>) -> Vec<crate::log::Entry> {
     crate::log::recent(limit.unwrap_or(200).min(400))
 }
 
+/// The log file for the Logs page: where it is, whether it is there, and why it cannot
+/// be written while it cannot (row 25).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogFile {
+    path: Option<String>,
+    exists: bool,
+    error: Option<String>,
+}
+
 /// Where the log file lives, for "show me the folder".
 #[tauri::command]
-pub fn logs_path() -> Option<String> {
-    crate::log::path().map(|p| p.to_string_lossy().into_owned())
+pub fn logs_path() -> LogFile {
+    let path = crate::log::path();
+    LogFile {
+        exists: path.as_ref().is_some_and(|p| p.is_file()),
+        path: path.map(|p| p.to_string_lossy().into_owned()),
+        error: crate::log::file_error(),
+    }
 }
 
 /// The WebView's own diagnostics: unhandled errors, failed commands, view timings.
@@ -1621,6 +1676,7 @@ pub async fn friends_list(state: State<'_, AppState>) -> AppResult<Vec<FriendInf
         .await
         .map_err(|e| {
             AppError::logged(
+                "steam",
                 "Your friends could not be loaded",
                 format!("friends task failed: {e}"),
             )
@@ -1645,6 +1701,7 @@ pub struct ServerSlots {
 pub async fn server_slots(state: State<'_, AppState>, id: String) -> AppResult<ServerSlots> {
     let addr: SocketAddr = id.parse().map_err(|_| {
         AppError::logged(
+            "join",
             "That server could not be found",
             format!("bad server id {id}"),
         )
@@ -1674,6 +1731,7 @@ pub async fn server_details(
 ) -> AppResult<ServerDetails> {
     let addr: SocketAddr = id.parse().map_err(|_| {
         AppError::logged(
+            "verify",
             "That server could not be found",
             format!("bad server id {id}"),
         )
@@ -1972,6 +2030,7 @@ pub async fn join_plan(
         .ok_or_else(|| AppError::Internal("That server is no longer in the server list.".into()))?;
     let addr: SocketAddr = id.parse().map_err(|_| {
         AppError::logged(
+            "join",
             "That server could not be found",
             format!("bad server id {id}"),
         )
@@ -1986,6 +2045,7 @@ pub async fn join_plan(
         .await
         .map_err(|e| {
             AppError::logged(
+                "join",
                 "The check of Steam and DayZ did not finish",
                 format!("diagnostics task failed: {e}"),
             )
@@ -2392,6 +2452,7 @@ pub async fn launch_game(
         .ok_or_else(|| AppError::Internal("That server is no longer in the server list.".into()))?;
     let addr: SocketAddr = id.parse().map_err(|_| {
         AppError::logged(
+            "launch",
             "That server could not be found",
             format!("bad server id {id}"),
         )
@@ -2472,6 +2533,8 @@ pub async fn launch_game(
         let row = row_for_spec;
         let steam = registry::detect();
         if !steam.running {
+            // In the log under Launching, not only as the page's failed call (row 25).
+            crate::log_warn!("launch", "refused: Steam is not running");
             return Err(AppError::Internal("Steam is not running. Start Steam, then join again.".into()));
         }
         let path = steam
@@ -2521,6 +2584,7 @@ pub async fn launch_game(
         let mut items = Vec::with_capacity(required.len());
         for (id, name) in &required {
             let (folder, meta) = by_id.get(id).cloned().ok_or_else(|| {
+                crate::log_warn!("launch", "refused: {name} ({id}) is not downloaded");
                 AppError::Internal(format!(
                     "{name} is not downloaded yet. Download the missing mods, then join."
                 ))
@@ -2558,7 +2622,7 @@ pub async fn launch_game(
         Ok::<_, AppError>((game.folder, links, spec))
     })
     .await
-    .map_err(|e| AppError::logged("DayZ could not be started", format!("launch task failed: {e}")))??;
+    .map_err(|e| AppError::logged("launch", "DayZ could not be started", format!("launch task failed: {e}")))??;
 
     let args = launch::build_args(&spec);
     // Spawn FIRST, then step aside (D-119, corrected in D-151): a child started by a
@@ -2677,6 +2741,7 @@ pub async fn game_running() -> AppResult<bool> {
     .await
     .map_err(|e| {
         AppError::logged(
+            "launch",
             "The check for a running DayZ did not finish",
             format!("process check failed: {e}"),
         )

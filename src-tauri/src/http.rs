@@ -40,7 +40,15 @@ pub fn offline(e: &reqwest::Error) -> bool {
 /// The error the page shows for a request that failed, a sentence either way with the
 /// raw text only in the log: `no_connection` when there was no connection (row 14, F6,
 /// approved), `failed` when the other end answered badly (row 16).
-pub fn request_error(e: reqwest::Error, what: &str, no_connection: &str, failed: &str) -> String {
-    crate::log_warn!("app", "{what} failed: {e}");
+/// Logged under `target`, the caller's area: under App, a muted App lost the news and
+/// DZSA failures the page pointed at (row 25).
+pub fn request_error(
+    e: reqwest::Error,
+    target: &str,
+    what: &str,
+    no_connection: &str,
+    failed: &str,
+) -> String {
+    crate::log_warn!(target, "{what} failed: {e}");
     if offline(&e) { no_connection } else { failed }.to_string()
 }

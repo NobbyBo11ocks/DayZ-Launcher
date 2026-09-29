@@ -10,6 +10,15 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.96",
+    notes: [
+      { kind: "changed", text: "Copying the log adds your launcher and Windows versions, oldest line first." },
+      { kind: "fixed", text: "The log no longer shows any part of your Windows account name." },
+      { kind: "fixed", text: "The log keeps every line when several parts of the launcher write at once." },
+      { kind: "fixed", text: "Failures are logged under their own area, like Joining or Mods." },
+    ],
+  },
+  {
     version: "0.1.95",
     notes: [
       { kind: "changed", text: "The News badge counts new game updates only, not sales or dev blogs." },

@@ -66,7 +66,8 @@ const DZSA_FAILED: &str =
     "Could not download the DZSA list: the DZSA site did not answer properly. Try again later.";
 
 fn failed(detail: impl std::fmt::Display) -> String {
-    crate::log_warn!("app", "DZSA list: {detail}");
+    // Under Steam, with the list's own success line (row 25).
+    crate::log_warn!("steam", "DZSA list: {detail}");
     DZSA_FAILED.to_string()
 }
 
@@ -87,6 +88,7 @@ pub async fn fetch() -> Result<Vec<DzsaRow>, String> {
     let resp = client.get(DZSA_URL).send().await.map_err(|e| {
         crate::http::request_error(
             e,
+            "steam",
             "DZSA request",
             "Could not download the DZSA list: no connection. Try again once you are online.",
             DZSA_FAILED,

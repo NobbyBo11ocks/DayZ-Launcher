@@ -7,18 +7,24 @@
   // Every command through the logging wrapper: a failure is recorded with its
   // command name before it is rethrown (D-158).
   import { invokeLogged as invoke } from "./log";
+  import { formatReport, type ReportFacts } from "./logreport";
   import type { Settings } from "./types";
 
   type LogEntry = { at: number; level: "info" | "warn" | "error"; target: string; message: string };
 
   let logs = $state<LogEntry[]>([]);
-  let logPath = $state<string | null>(null);
+  /** The log file: where, whether it is there, and why it cannot be written (row 25). */
+  let logFile = $state<{ path: string | null; exists: boolean; error: string | null } | null>(null);
+  const logPath = $derived(logFile?.path ?? null);
   let onlyProblems = $state(false);
   let error = $state<string | null>(null);
   /** Its own line: `load()` clears `error` every five seconds, which erased this message
    *  and left the chips disabled with nothing to say why (D-197, D-240). */
   let settingsError = $state<string | null>(null);
   let copied = $state(false);
+  /** Why Copy or Show the file failed, kept until the next of them: in `error`, the next
+   *  five-second read erased it (row 25, as D-197 did for settings). */
+  let actionError = $state<string | null>(null);
 
   // Recording can be switched off entirely (D-169): nothing is written to the file
   // and nothing is kept in memory. The setting lives with the rest of them, so it
@@ -56,53 +62,57 @@
   ];
   let muted = $state<string[]>([]);
   const isMuted = (id: string) => muted.includes(id);
-  async function toggleArea(id: string) {
-    // The guard comes first. Mutating `muted` before it left the chip struck through
-    // while logging carried on exactly as before, with nothing said (D-194).
-    if (!settings) return;
-    const before = { muted, settings };
-    muted = isMuted(id) ? muted.filter((m) => m !== id) : [...muted, id];
-    try {
-      // The file as it is now, with only this page's field changed: the copy read when
-      // the page opened wrote back over anything Settings saved since (D-281).
-      settings = { ...(await invoke<Settings>("settings_get")), logMuted: muted };
-      await invoke("settings_set", { settings });
-      settingsError = null;
-      await load();
-    } catch (e) {
-      // The host keeps its stored areas when the save fails, so the chips go back too.
-      // The reason goes on its own line: `error` is cleared by the next 5 s refresh,
-      // which left a struck-through chip over an area still being recorded (D-256).
-      muted = before.muted;
-      settings = before.settings;
-      settingsError = `That change was not saved (${String(e)}).`;
-    }
+
+  /** Settings writes, one at a time (row 25, as D-307 (3) did for the preferences): two
+   *  quick clicks sent two, the first already carrying the second's change, and the
+   *  second's failure put the chips back to a state the host no longer had. After a
+   *  failure the chips show the file as it is. */
+  let writes: Promise<void> = Promise.resolve();
+  function saveSetting(patch: Partial<Settings>, after: () => Promise<void> | void): Promise<void> {
+    const run = async () => {
+      try {
+        // The file as it is now, with only this page's field changed: the copy read when
+        // the page opened wrote back over anything Settings saved since (D-281).
+        settings = { ...(await invoke<Settings>("settings_get")), ...patch };
+        await invoke("settings_set", { settings });
+        settingsError = null;
+        await after();
+      } catch (e) {
+        // The reason goes on its own line: `error` is cleared by the next 5 s refresh,
+        // which left a struck-through chip over an area still being recorded (D-256).
+        settingsError = `That change was not saved (${String(e)}).`;
+        const reason = settingsError;
+        await loadSettings();
+        settingsError ??= reason;
+      }
+    };
+    writes = writes.then(run);
+    return writes;
   }
 
-  async function setRecording(on: boolean) {
-    if (!settings) return;
-    const before = { recording, settings };
+  function toggleArea(id: string): Promise<void> {
+    // The guard comes first. Mutating `muted` before it left the chip struck through
+    // while logging carried on exactly as before, with nothing said (D-194).
+    if (!settings) return Promise.resolve();
+    muted = isMuted(id) ? muted.filter((m) => m !== id) : [...muted, id];
+    const want = muted;
+    return saveSetting({ logMuted: want }, load);
+  }
+
+  function setRecording(on: boolean): Promise<void> {
+    if (!settings) return Promise.resolve();
     recording = on;
-    try {
-      // As in toggleArea: the current file, with only `logging` changed (D-281).
-      settings = { ...(await invoke<Settings>("settings_get")), logging: on };
-      await invoke("settings_set", { settings });
-      settingsError = null;
+    return saveSetting({ logging: on }, async () => {
       if (!on) logs = [];
       else await load();
-    } catch (e) {
-      // As in toggleArea: back to what the host still has, with a reason that stays.
-      recording = before.recording;
-      settings = before.settings;
-      settingsError = `That change was not saved (${String(e)}).`;
-    }
+    });
   }
 
   async function load() {
     try {
-      const [entries, path] = await Promise.all([invoke<LogEntry[]>("logs_recent", { limit: 400 }), invoke<string | null>("logs_path")]);
+      const [entries, file] = await Promise.all([invoke<LogEntry[]>("logs_recent", { limit: 400 }), invoke<{ path: string | null; exists: boolean; error: string | null }>("logs_path")]);
       logs = entries.reverse();
-      logPath = path;
+      logFile = file;
       error = null;
     } catch (e) {
       error = String(e);
@@ -111,7 +121,7 @@
 
   /** The host's `log::area`, mirrored (D-256): heads without a chip of their own count
    *  under the chip that covers them, which is also what muting that chip silences. */
-  const FOLDED: Record<string, string> = { ui: "app", news: "app", update: "app", junctions: "mods" };
+  const FOLDED: Record<string, string> = { ui: "app", ipc: "app", news: "app", update: "app", junctions: "mods" };
   const area = (t: string) => {
     const head = t.split(":")[0] ?? t;
     return FOLDED[head] ?? head;
@@ -126,21 +136,33 @@
   const time = (ms: number) => new Date(ms).toLocaleTimeString();
 
   async function reveal() {
-    if (!logPath) return;
+    if (!logFile?.path) return;
     try {
-      await revealItemInDir(logPath);
+      // The folder when the file is not there (deleted, or not written yet): the opener
+      // said "path doesn't exist" and the next read erased even that (row 25).
+      const path = logFile.exists ? logFile.path : logFile.path.replace(/[\\/][^\\/]*$/, "");
+      await revealItemInDir(path);
+      actionError = null;
     } catch (e) {
-      error = String(e);
+      actionError = String(e);
     }
   }
 
+  /** The report's header facts, read once. */
+  let facts: ReportFacts | null = null;
   async function copy() {
     try {
-      await navigator.clipboard.writeText(shown.map((l) => `${time(l.at)} ${l.level.toUpperCase()} ${l.target} ${l.message}`).join("\n"));
+      // The list as it is now: with the keyboard in the list the page stops refreshing,
+      // and Copy took that frozen list, without the error that came after (row 25).
+      const [entries, info] = await Promise.all([invoke<LogEntry[]>("logs_recent", { limit: 400 }), facts ? Promise.resolve(facts) : invoke<ReportFacts>("app_info")]);
+      facts = info;
+      const lines = onlyProblems ? entries.filter((l) => l.level === "warn" || l.level === "error") : entries;
+      await navigator.clipboard.writeText(formatReport(lines, facts));
       copied = true;
+      actionError = null;
       setTimeout(() => (copied = false), 1500);
     } catch (e) {
-      error = String(e);
+      actionError = String(e);
     }
   }
 
@@ -185,6 +207,7 @@
 
   {#if settingsError}<p class="note bad" role="alert">{settingsError}</p>{/if}
   {#if error}<p class="note bad" role="alert">{error}</p>{/if}
+  {#if actionError}<p class="note bad" role="alert">{actionError}</p>{/if}
 
   <!-- One chip per area; switching one off stops it being recorded at all, in the
        file as well as here (D-172). -->

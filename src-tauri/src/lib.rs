@@ -491,10 +491,13 @@ pub fn run() {
                 log::set_enabled(s.logging);
                 log::set_muted(s.log_muted);
             }
+            // The facts a bug report needs, in the line every log starts with (row 25).
             log_info!(
                 "app",
-                "start v{} · elevation {:?}",
+                "start v{} · Windows {} · WebView2 {} · elevation {:?}",
                 env!("CARGO_PKG_VERSION"),
+                commands::windows_build().as_deref().unwrap_or("?"),
+                tauri::webview_version().ok().as_deref().unwrap_or("?"),
                 elevation()
             );
             // Started while DayZ plays (relaunched by an update, or by hand): this instance
@@ -579,8 +582,12 @@ pub fn run() {
                                     if let Err(e) = stored {
                                         // Release builds have no console, so this used to
                                         // vanish entirely (D-162): a full disk lost the
-                                        // whole cached list without a trace.
-                                        log_error!("cache", "upsert of {} row(s) failed: {e}", rows.len());
+                                        // whole cached list without a trace. A refusal
+                                        // of the file itself is `note_write`'s, once
+                                        // an episode (row 25).
+                                        if !browser::cache::is_file_failure(&e) {
+                                            log_error!("cache", "upsert of {} row(s) failed: {e}", rows.len());
+                                        }
                                     }
                                 }
                             })
