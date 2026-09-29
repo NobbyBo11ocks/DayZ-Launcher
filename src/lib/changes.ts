@@ -10,6 +10,14 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.97",
+    notes: [
+      { kind: "changed", text: "Muting an area in Logs still keeps its warnings and errors." },
+      { kind: "changed", text: "The Logs page says when its list is paused and when the file cannot be saved." },
+      { kind: "changed", text: "Error messages say how to keep the details when recording is off." },
+    ],
+  },
+  {
     version: "0.1.96",
     notes: [
       { kind: "changed", text: "Copying the log adds your launcher and Windows versions, oldest line first." },

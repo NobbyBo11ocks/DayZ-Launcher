@@ -46,7 +46,20 @@ impl AppError {
     /// the screen pointed (row 25).
     pub fn logged(area: &str, what: &str, detail: impl std::fmt::Display) -> Self {
         crate::log_error!(area, "{what}: {detail}");
-        Self::Internal(format!("{what}. The details are on the Logs page."))
+        Self::Internal(format!(
+            "{what}. {}",
+            details_sentence(crate::log::enabled())
+        ))
+    }
+}
+
+/// Where the details are: with Recording off there are none, and the sentence sent the
+/// player to an empty Logs page (row 25, approved).
+fn details_sentence(recording: bool) -> &'static str {
+    if recording {
+        "The details are on the Logs page."
+    } else {
+        "Turn Recording on in Logs to keep the details."
     }
 }
 
@@ -62,6 +75,19 @@ pub type AppResult<T> = Result<T, AppError>;
 mod tests {
     /// Row 25: a failure goes in the log under the area of the chip that covers it, not
     /// under App, which a player may have muted to read Joining.
+    /// Row 25 (approved): with Recording off the sentence says how to keep the details.
+    #[test]
+    fn the_sentence_says_where_the_details_are() {
+        assert_eq!(
+            super::details_sentence(true),
+            "The details are on the Logs page."
+        );
+        assert_eq!(
+            super::details_sentence(false),
+            "Turn Recording on in Logs to keep the details."
+        );
+    }
+
     #[test]
     fn a_failure_is_filed_under_its_own_area() {
         let e = super::AppError::logged("launch", "DayZ could not be started", "row25-test-detail");

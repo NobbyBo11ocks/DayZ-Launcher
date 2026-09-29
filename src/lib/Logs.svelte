@@ -6,7 +6,7 @@
   import { revealItemInDir } from "@tauri-apps/plugin-opener";
   // Every command through the logging wrapper: a failure is recorded with its
   // command name before it is rethrown (D-158).
-  import { invokeLogged as invoke } from "./log";
+  import { describe, invokeLogged as invoke, logWarn } from "./log";
   import { formatReport, type ReportFacts } from "./logreport";
   import type { Settings } from "./types";
 
@@ -58,7 +58,7 @@
     { id: "verify", label: "Verification", hint: "Player-count checks against the servers" },
     { id: "cache", label: "Cache", hint: "The local database: writes, prunes and failures" },
     { id: "settings", label: "Settings", hint: "Reading and writing the settings file" },
-    { id: "app", label: "App", hint: "Start-up and anything the interface reports" },
+    { id: "app", label: "App", hint: "Start-up, news, updates and anything the interface reports" },
   ];
   let muted = $state<string[]>([]);
   const isMuted = (id: string) => muted.includes(id);
@@ -80,7 +80,8 @@
       } catch (e) {
         // The reason goes on its own line: `error` is cleared by the next 5 s refresh,
         // which left a struck-through chip over an area still being recorded (D-256).
-        settingsError = `That change was not saved (${String(e)}).`;
+        // In words; the host's text is in the log with the failed call (row 25, approved).
+        settingsError = "That change was not saved: the settings file could not be written. Try again in a moment.";
         const reason = settingsError;
         await loadSettings();
         settingsError ??= reason;
@@ -144,7 +145,8 @@
       await revealItemInDir(path);
       actionError = null;
     } catch (e) {
-      actionError = String(e);
+      logWarn("logs", `the log's folder could not be opened: ${describe(e)}`);
+      actionError = "Could not open the log's folder.";
     }
   }
 
@@ -162,7 +164,8 @@
       actionError = null;
       setTimeout(() => (copied = false), 1500);
     } catch (e) {
-      actionError = String(e);
+      logWarn("logs", `the log could not be copied: ${describe(e)}`);
+      actionError = "Could not copy the log. Try again.";
     }
   }
 
@@ -171,6 +174,9 @@
   // list: newest first, each new entry moved every line under a screen reader's cursor
   // down by one (WCAG 2.2.2, D-291).
   let listEl = $state<HTMLElement | null>(null);
+  /** The keyboard is in the list, so it is not refreshed: said, where it only stopped
+   *  (row 25, approved). */
+  let reading = $state(false);
   $effect(() => {
     void loadSettings();
     void load();
@@ -188,6 +194,7 @@
       <span class="sub">
         {recording ? "What the launcher has been doing, both halves of it. Nothing leaves this machine." : "Recording is off: nothing is written to disk or kept in memory."}
         {#if recording && problems}&nbsp;· {problems} problem{problems === 1 ? "" : "s"}{/if}
+        {#if recording && reading}&nbsp;· Paused while you read{/if}
       </span>
     </div>
     <div class="acts">
@@ -208,13 +215,14 @@
   {#if settingsError}<p class="note bad" role="alert">{settingsError}</p>{/if}
   {#if error}<p class="note bad" role="alert">{error}</p>{/if}
   {#if actionError}<p class="note bad" role="alert">{actionError}</p>{/if}
+  {#if recording && logFile?.error}<p class="note bad" role="alert">The log file cannot be written ({logFile.error}), so these entries are kept only until the launcher closes.</p>{/if}
 
   <!-- One chip per area; switching one off stops it being recorded at all, in the
        file as well as here (D-172). -->
   <div class="areas" role="group" aria-label="What to record">
     <span class="muted rec" aria-hidden="true">Record:</span>
     {#each AREAS as a (a.id)}
-      <button class="chip sm" aria-pressed={!isMuted(a.id)} class:off={isMuted(a.id)} onclick={() => void toggleArea(a.id)} title={isMuted(a.id) ? `Not recording: ${a.hint}. Click to record.` : `Recording: ${a.hint}. Click to stop.`} disabled={!recording || !settings}>
+      <button class="chip sm" aria-pressed={!isMuted(a.id)} class:off={isMuted(a.id)} onclick={() => void toggleArea(a.id)} title={isMuted(a.id) ? `Not recording: ${a.hint}. Warnings and errors are still recorded. Click to record.` : `Recording: ${a.hint}. Click to stop.`} disabled={!recording || !settings}>
         {a.label}
         {#if !isMuted(a.id) && counts.get(a.id)}<span class="n">{counts.get(a.id)}</span>{/if}
       </button>
@@ -225,7 +233,7 @@
        keyboard; not `role="log"`, which with these unkeyed rows would read out every
        line that changes (D-176, D-291). -->
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-  <div class="list" role="region" aria-label="Log entries" tabindex="0" bind:this={listEl}>
+  <div class="list" role="region" aria-label="Log entries" tabindex="0" bind:this={listEl} onfocusin={() => (reading = true)} onfocusout={(e) => (reading = !!listEl && listEl.contains(e.relatedTarget as Node | null))}>
     {#if shown.length}
       <!-- Unkeyed on purpose (D-176): newest first means one new entry shifts every
            index, so a key made Svelte destroy and rebuild all 400 rows on each poll.

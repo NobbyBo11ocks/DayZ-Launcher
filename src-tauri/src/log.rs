@@ -40,7 +40,10 @@ pub fn enabled() -> bool {
 
 /// Areas the user has switched off (D-172). An entry's area is its target up to the
 /// first `:`, folded by `area` into the Logs page chip that covers it, so muting `app`
-/// silences `ui:ipc`, `ui:window`, `ipc`, `news` and `update` together.
+/// silences `ui:ipc`, `ui:window`, `ipc`, `news` and `update` together. Muting
+/// silences an area's information lines only: its warnings and errors are what every
+/// "The details are on the Logs page" points at, and a muted App lost them (row 25,
+/// approved).
 static MUTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 pub fn set_muted(areas: Vec<String>) {
@@ -371,7 +374,7 @@ pub fn write_from_page(level: Level, target: &str, message: impl Into<String>, a
 }
 
 fn write_at(level: Level, target: &str, message: String, at: u64, unmuted: bool) {
-    if !enabled() || (!unmuted && muted(target)) {
+    if !enabled() || (!unmuted && level == Level::Info && muted(target)) {
         return;
     }
     let entry = Entry {
@@ -587,6 +590,23 @@ mod tests {
             "newest entry is last"
         );
         assert_eq!(recent(5).len(), 5, "limit respected");
+    }
+
+    /// Row 25 (approved): a muted area loses its information lines, never its warnings
+    /// or errors.
+    #[test]
+    fn muting_keeps_warnings_and_errors() {
+        set_muted(vec!["mutetest".into()]);
+        write(Level::Info, "mutetest", "row25-mute-info");
+        write(Level::Warn, "mutetest:sub", "row25-mute-warn");
+        write(Level::Error, "mutetest", "row25-mute-error");
+        set_muted(Vec::new());
+        let seen: Vec<String> = recent(RING)
+            .into_iter()
+            .filter(|e| e.message.starts_with("row25-mute"))
+            .map(|e| e.message)
+            .collect();
+        assert_eq!(seen, ["row25-mute-warn", "row25-mute-error"]);
     }
 
     #[test]
