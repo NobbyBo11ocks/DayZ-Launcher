@@ -194,9 +194,23 @@
     const idx = rows.findIndex((r) => r.id === id);
     if (idx < 0 || !body) return;
     const top = idx * ROW;
+    // The box's own height: when the list has just opened, the observer has not said yet.
+    const h = body.clientHeight || height;
     if (top < body.scrollTop) body.scrollTop = top;
-    else if (top + ROW > body.scrollTop + height) body.scrollTop = top + ROW - height;
+    else if (top + ROW > body.scrollTop + h) body.scrollTop = top + ROW - h;
   }
+
+  // Coming back to Servers, Favourites or LAN, the list opens with the selected server in
+  // view, as a keyboard sort keeps it; it opened at the top every time (row 27, approved).
+  // Once, when the rows are first there.
+  let placed = false;
+  $effect(() => {
+    if (placed || !body || rows.length === 0) return;
+    placed = true;
+    untrack(() => {
+      if (selectedId) ensureVisible(selectedId);
+    });
+  });
 
   function onKey(e: KeyboardEvent) {
     // Belt and braces with D-197's focus fix: while a modal is open the grid answers

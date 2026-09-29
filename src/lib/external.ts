@@ -3,6 +3,9 @@
 // the launcher runs as administrator, and logs why one could not be opened (row 27).
 import { invoke } from "@tauri-apps/api/core";
 
+/** What News and a DayZ update toast say when a post could not be opened (row 27). */
+export const POST_NOT_OPENED = "The post could not be opened in your browser. The details are on the Logs page.";
+
 /** Opens `url` in the player's browser; `false` when it could not, the reason in the log. */
 export async function openExternal(url: string): Promise<boolean> {
   try {

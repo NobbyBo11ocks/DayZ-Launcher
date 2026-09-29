@@ -8,6 +8,7 @@ import { invokeLogged as invoke } from "../log";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
+import { openExternal } from "../external";
 import { uiPrefs } from "./uiprefs.svelte";
 import type { NewsCached, NewsItem } from "../types";
 
@@ -20,7 +21,8 @@ const FIRST_RUN_UNREAD = 5;
  *  months, or a stale stored copy, toasted posts weeks old (row 24, approved). */
 const ALERT_MAX_AGE_SECS = 14 * 86_400;
 
-export type NewsAlert = { gid: string; title: string; url: string };
+/** `failed`: its Read could not open the post, and the toast says so (row 27). */
+export type NewsAlert = { gid: string; title: string; url: string; failed?: boolean };
 /** `updates`: official game-update posts (default); `official`: every Bohemia post. The press
  *  feeds went with the "With press" view at the player's request (D-326). */
 export type NewsView = "updates" | "official";
@@ -190,6 +192,16 @@ class NewsStore {
 
   dismissAlert(gid: string) {
     this.alerts = this.alerts.filter((a) => a.gid !== gid);
+  }
+
+  /** A toast's Read: the post in the player's browser, and the toast gone once it has
+   *  opened. It went at the press whatever happened, so a post that could not be opened
+   *  left nothing on screen; now the toast stays and says so (row 27, approved). */
+  async readAlert(gid: string) {
+    const a = this.alerts.find((x) => x.gid === gid);
+    if (!a) return;
+    if (await openExternal(a.url)) this.dismissAlert(gid);
+    else this.alerts = this.alerts.map((x) => (x.gid === gid ? { ...x, failed: true } : x));
   }
 
   /** The tab is on screen: freeze the "New" boundary for this visit. */

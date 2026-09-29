@@ -12,6 +12,7 @@
   import { SvelteSet } from "svelte/reactivity";
   import { external } from "./external";
   import { modUpdates } from "./state/mods.svelte";
+  import { pageState, type ModsSortKey, type ModsView } from "./state/pages";
   import { servers } from "./state/servers.svelte";
   import { fmtBytes, type Diagnostics, type JunctionCleanup, type JunctionInfo, type SyncDone, type SyncProgress, type UnsubscribeResult, type WorkshopItemInfo } from "./types";
 
@@ -32,15 +33,21 @@
   // a join…" (D-276).
   /** The download in flight was started elsewhere (the join dialog), not by this page. */
   let fromJoin = $state(false);
-  let search = $state("");
+  // The search, sort and view are the session's, not the visit's (row 27, approved).
+  let search = $state(pageState.mods.search);
   /** "one" confirms a single unsubscribe, "bulk" the selection. */
   let confirming = $state<{ kind: "one"; id: number; name: string } | { kind: "bulk" } | null>(null);
   const selected = new SvelteSet<number>();
 
-  type SortKey = "name" | "size" | "updated" | "servers";
-  let sort = $state<{ key: SortKey; dir: 1 | -1 }>({ key: "size", dir: -1 });
-  type View = "all" | "updates" | "unused" | "nojunction";
-  let view = $state<View>("all");
+  type SortKey = ModsSortKey;
+  let sort = $state<{ key: SortKey; dir: 1 | -1 }>({ ...pageState.mods.sort });
+  type View = ModsView;
+  // Not "On no server" before the stored mod lists are in: every mod counts 0 until then,
+  // and the view would offer them all for a bulk Unsubscribe (D-277).
+  let view = $state<View>(pageState.mods.view === "unused" && !servers.modsIndexLoaded ? "all" : pageState.mods.view);
+  $effect(() => {
+    pageState.mods = { search, sort: { key: sort.key, dir: sort.dir }, view };
+  });
 
   async function load() {
     // The server counts come from the server list's stored mod lists; a failed first

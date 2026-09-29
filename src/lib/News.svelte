@@ -7,7 +7,7 @@
   // Every command through the logging wrapper: a failure is recorded with its
   // command name before it is rethrown (D-158).
   import { invokeLogged as invoke } from "./log";
-  import { openExternal } from "./external";
+  import { openExternal, POST_NOT_OPENED } from "./external";
   import { untrack } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { news, type NewsView } from "./state/news.svelte";
@@ -155,7 +155,7 @@
   function open(url: string) {
     // In words; the host logs the reason (row 24, approved; row 27).
     void openExternal(url).then((ok) => {
-      openError = ok ? null : "The post could not be opened in your browser. The details are on the Logs page.";
+      openError = ok ? null : POST_NOT_OPENED;
     });
   }
 </script>

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { listen } from "@tauri-apps/api/event";
   import { tick, untrack } from "svelte";
+  import { isBrowserKey, keepsContextMenu } from "./lib/browserkeys";
   import { type Release, whatsNewPlan } from "./lib/changes";
   import { describe, invokeLogged, logError } from "./lib/log";
   import Favourites from "./lib/Favourites.svelte";
@@ -67,16 +68,24 @@
     });
   });
 
-  // The browser's reload keys are on in WebView2 unless something turns them off: F5,
-  // pressed out of habit to refresh the list, reloaded the whole page, back to News with
-  // an open join dialog — a slot wait, a typed password — gone, and the stores started
-  // over beside a host that had not (row 14, F9).
+  // The browser's own keys are on in WebView2 unless something turns them off (Tauri 2.11
+  // passes no switch for them): F5, pressed out of habit to refresh the list, reloaded the
+  // whole page, back to News with an open join dialog — a slot wait, a typed password —
+  // gone, and the stores started over beside a host that had not (row 14, F9). Find and
+  // Print went too, and the right-click menu outside text fields (row 27, approved).
   $effect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "F5" || ((e.ctrlKey || e.metaKey) && (e.key === "r" || e.key === "R"))) e.preventDefault();
+      if (isBrowserKey(e)) e.preventDefault();
+    };
+    const onMenu = (e: MouseEvent) => {
+      if (!keepsContextMenu(e.target)) e.preventDefault();
     };
     window.addEventListener("keydown", onKey, { capture: true });
-    return () => window.removeEventListener("keydown", onKey, { capture: true });
+    window.addEventListener("contextmenu", onMenu, { capture: true });
+    return () => {
+      window.removeEventListener("keydown", onKey, { capture: true });
+      window.removeEventListener("contextmenu", onMenu, { capture: true });
+    };
   });
 
   // Coming back to the window checks for a release again once an hour has passed, so

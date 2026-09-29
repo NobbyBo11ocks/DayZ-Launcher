@@ -10,6 +10,16 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.103",
+    notes: [
+      { kind: "changed", text: "The launcher opens straight in its place, with no white flash first." },
+      { kind: "changed", text: "Right-click, Ctrl+F and Ctrl+P no longer bring up browser menus." },
+      { kind: "changed", text: "Pages keep your place, search and sort until you close the launcher." },
+      { kind: "fixed", text: "A DayZ update alert that cannot open its post now stays and says so." },
+      { kind: "changed", text: "The crash message says whether the details were kept in the log." },
+    ],
+  },
+  {
     version: "0.1.102",
     notes: [
       { kind: "changed", text: "News cards on a short last row now stretch to fill it." },

@@ -24,6 +24,7 @@ const CL = "src/lib/state/closing.ts";
 const ES = "src/lib/escape.ts";
 const EX = "src/lib/external.ts";
 const NG = "src/lib/newsgrid.ts";
+const BK = "src/lib/browserkeys.ts";
 
 /** [test file, the test's name as it starts, the fix, the source, text, replacement, what the revert does] */
 const MUTATIONS = [
@@ -211,6 +212,17 @@ const MUTATIONS = [
     " || modalOpen", "", "the notices clear behind a modal"],
   ["shell", "links go through the host", "row 27 (1)", EX,
     '    await invoke("open_link", { url });', '    await invoke("plugin:opener|open_url", { url });', "links opened in-process again"],
+  ["shell", "the browser's own keys", "row 27 (1)", BK,
+    '  if (e.key === "F5" || e.key === "F3") return true;', '  if (e.key === "F5") return true;', "F3 finds again"],
+  ["shell", "the browser's own keys", "row 27 (1)", BK,
+    '  return k === "r" || k === "f" || k === "p";', '  return k === "r";', "Ctrl+F and Ctrl+P open find and print"],
+  ["shell", "the browser's own keys", "row 27 (1)", BK,
+    " || e.altKey) return false;", ") return false;", "AltGr+P typed nothing"],
+  ["shell", "the browser's own keys", "row 27 (1)", BK,
+    '  return el.tagName === "INPUT" && TEXT_TYPES.has((el.type || "text").toLowerCase());', '  return el.tagName === "INPUT";', "a checkbox gets the browser's menu"],
+  ["shell", "a toast whose post cannot be opened", "row 27 (2)", N,
+    "    if (await openExternal(a.url)) this.dismissAlert(gid);\n    else this.alerts = this.alerts.map((x) => (x.gid === gid ? { ...x, failed: true } : x));",
+    "    await openExternal(a.url);\n    this.dismissAlert(gid);", "the toast goes whatever happened"],
   // news.test.mjs, the grid (D-326)
   ["news", "the News grid's rows come out full", "D-326", NG,
     "    if (e < empty) {", "    if (c === most) {", "columns from the width alone: five and three"],

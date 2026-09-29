@@ -67,3 +67,41 @@ test("links go through the host, and one that cannot be opened says so (row 27)"
   app.mock.fail("open_link", "The page could not be opened in your browser. The details are on the Logs page.");
   assert.equal(await openExternal("https://example.com/"), false);
 });
+
+test("the browser's own keys and right-click menu are off, a text field's menu stays (row 27, approved)", async (t) => {
+  const app = await freshApp(t, { timers: false });
+  const { isBrowserKey, keepsContextMenu } = await app.load("browserkeys");
+  const key = (k, mods = {}) => ({ key: k, ctrlKey: false, metaKey: false, altKey: false, ...mods });
+  for (const k of ["F5", "F3"]) assert.equal(isBrowserKey(key(k)), true, k);
+  for (const k of ["r", "R", "f", "F", "p", "P"]) assert.equal(isBrowserKey(key(k, { ctrlKey: true })), true, `Ctrl+${k}`);
+  assert.equal(isBrowserKey(key("f")), false, "a bare F favourites the selected server");
+  assert.equal(isBrowserKey(key("p", { ctrlKey: true, altKey: true })), false, "AltGr types a character");
+  assert.equal(isBrowserKey(key("c", { ctrlKey: true })), false, "Copy stays");
+  assert.equal(isBrowserKey(key("Escape")), false);
+  assert.equal(keepsContextMenu({ tagName: "INPUT", type: "search" }), true);
+  assert.equal(keepsContextMenu({ tagName: "INPUT", type: "" }), true, "an input with no type is text");
+  assert.equal(keepsContextMenu({ tagName: "TEXTAREA" }), true);
+  assert.equal(keepsContextMenu({ tagName: "DIV", isContentEditable: true }), true);
+  assert.equal(keepsContextMenu({ tagName: "INPUT", type: "checkbox" }), false);
+  assert.equal(keepsContextMenu({ tagName: "DIV" }), false, "a server row, a log line");
+  assert.equal(keepsContextMenu(null), false);
+});
+
+test("a toast whose post cannot be opened stays and says so; one that opens goes (row 27, approved)", async (t) => {
+  const app = await freshApp(t, { timers: false });
+  const { news } = await app.load("state/news.svelte");
+  const { POST_NOT_OPENED } = await app.load("external");
+  assert.equal(POST_NOT_OPENED, "The post could not be opened in your browser. The details are on the Logs page.");
+  news.alerts = [
+    { gid: "1", title: "1.29 Stable Update", url: "https://store.steampowered.com/news/app/221100/view/1" },
+    { gid: "2", title: "1.30 Experimental", url: "https://store.steampowered.com/news/app/221100/view/2" },
+  ];
+  app.mock.fail("open_link", POST_NOT_OPENED);
+  await news.readAlert("1");
+  assert.deepEqual(news.alerts.map((a) => [a.gid, a.failed === true]), [["1", true], ["2", false]]);
+  app.mock.handle("open_link", null);
+  await news.readAlert("1");
+  assert.deepEqual(news.alerts.map((a) => a.gid), ["2"], "read again, it opened, and the toast went");
+  await news.readAlert("2");
+  assert.deepEqual(news.alerts, []);
+});

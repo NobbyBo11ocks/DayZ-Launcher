@@ -13,6 +13,7 @@
   import { SvelteMap } from "svelte/reactivity";
   import { avatarDataUrl, initialOf } from "./avatar";
   import { mapLabel } from "./maps";
+  import { pageState } from "./state/pages";
   import { servers } from "./state/servers.svelte";
   import { isUntrusted, playersShown, type FriendInfo, type FriendState } from "./types";
 
@@ -85,7 +86,11 @@
   let loading = $state(false);
   const loadedAt = $derived(servers.friendsAt == null ? "" : new Date(servers.friendsAt).toLocaleTimeString());
   let joining = $state<string | null>(null);
-  let showOffline = $state(false);
+  // The session's, not the visit's (row 27, approved).
+  let showOffline = $state(pageState.friends.showOffline);
+  $effect(() => {
+    pageState.friends.showOffline = showOffline;
+  });
 
   const steamOk = $derived(servers.steam?.initialized === true);
 

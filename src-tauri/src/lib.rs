@@ -343,11 +343,26 @@ static CLOSING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 /// work closed the window at once, before it was done (row 28).
 static CLOSE_NOW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// When the page was asked (`app:closing`), in ms since the start, for the close's line.
+static CLOSE_ASKED_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Closes the main window for good (row 27): the page answered `app:closing`
-/// (`commands::close_ready`), or 1.5 s went by without it.
-pub(crate) fn finish_close(app: &tauri::AppHandle) {
+/// (`commands::close_ready`, `page`), or 1.5 s went by without it. The first says which
+/// in the log, so a close that waited out the timer shows (row 27).
+pub(crate) fn finish_close(app: &tauri::AppHandle, page: bool) {
     CLOSING.store(true, std::sync::atomic::Ordering::SeqCst);
-    CLOSE_NOW.store(true, std::sync::atomic::Ordering::SeqCst);
+    if !CLOSE_NOW.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        let asked = CLOSE_ASKED_MS.load(std::sync::atomic::Ordering::SeqCst);
+        let waited = (uptime_ms() as u64).saturating_sub(asked);
+        if page {
+            log_info!("app", "close: the page was ready after {waited} ms");
+        } else {
+            log_warn!(
+                "app",
+                "close: the page did not answer within {waited} ms; closing anyway"
+            );
+        }
+    }
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.close();
     }
@@ -628,15 +643,42 @@ fn move_aside(db_path: &std::path::Path) -> std::io::Result<std::path::PathBuf> 
     Ok(aside)
 }
 
-/// A dialog for the failures that happen before there is a window to put a message in.
-///
-/// `panic = "abort"` and `windows_subsystem = "windows"` between them mean a panic in
-/// `setup` — which is how Tauri reports a failed setup — ends the process with no
-/// window, no console and, if the data directory is the thing that failed, no log line
-/// either. The icon flashes and nothing else ever happens. One message box is the
-/// difference between "it doesn't work" and a sentence the user can act on (D-194).
-fn fatal_dialog(message: &str) {
-    message_box("DZSA CrayZ Launcher could not start", message);
+/// Set once the main window exists: a crash before it is a start that failed, one after is
+/// a launcher that stopped (row 27, approved).
+static WINDOW_MADE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The dialog a panic shows. `panic = "abort"` and `windows_subsystem = "windows"` between
+/// them mean a panic — in `setup` too, which is how Tauri reports a failed setup — ends
+/// the process with no console and, if the data directory is the thing that failed, no
+/// log line either; one message box is the difference between "it doesn't work" and a
+/// sentence the user can act on (D-194). Its caption and text (row 27, approved): "could
+/// not start" stood over crashes in the middle of a session too, and with Recording off
+/// the text sent the player to a log nothing had been written to (`log::write_at`).
+fn crash_dialog(what: &str, window_made: bool, recording: bool) -> (&'static str, String) {
+    let caption = if window_made {
+        "DZSA CrayZ Launcher stopped unexpectedly"
+    } else {
+        "DZSA CrayZ Launcher could not start"
+    };
+    let next = if recording {
+        "If this keeps happening, the log is at %LOCALAPPDATA%\\com.dayzlauncher.desktop\\logs\\launcher.log."
+    } else {
+        "Recording is off, so this was not written to the log. If this keeps happening, turn Recording on in Logs so the next time is kept."
+    };
+    (
+        caption,
+        format!("The launcher stopped unexpectedly.\n\n{what}\n\n{next}"),
+    )
+}
+
+/// The page's own background for a theme (app.css `--bg`), for the window and WebView2
+/// until the page paints (row 27, approved). Themes the page does not know are its default.
+fn theme_background(theme: &str) -> tauri::window::Color {
+    if theme == "light" {
+        tauri::window::Color(0xf6, 0xf7, 0xf9, 0xff)
+    } else {
+        tauri::window::Color(0x0f, 0x12, 0x16, 0xff)
+    }
 }
 
 /// A Windows message box with an error icon, for when there is no window yet.
@@ -786,10 +828,12 @@ pub fn run() {
             "app",
             panic_line(&what, location.as_deref(), thread.as_deref()),
         );
-        fatal_dialog(&format!(
-            "The launcher stopped unexpectedly.\n\n{what}\n\nIf this keeps happening, \
-             the log is at %LOCALAPPDATA%\\com.dayzlauncher.desktop\\logs\\launcher.log."
-        ));
+        let (caption, text) = crash_dialog(
+            &what,
+            WINDOW_MADE.load(std::sync::atomic::Ordering::SeqCst),
+            crate::log::enabled(),
+        );
+        message_box(caption, &text);
         previous(info);
     }));
     // A launch while the launcher is open goes to it before anything else, its elevation
@@ -845,11 +889,12 @@ pub fn run() {
             // happens (row 15, H7). The settings file's own read errors are still written,
             // since recording stays on until the file has been read (D-169).
             let settings = SettingsStore::load(&app.path().app_config_dir()?.join("settings.json"));
-            {
+            let theme = {
                 let s = settings.get();
                 log::set_enabled(s.logging);
                 log::set_muted(s.log_muted);
-            }
+                s.ui.theme
+            };
             // The facts a bug report needs, in the line every log starts with (row 25).
             log_info!(
                 "app",
@@ -1301,7 +1346,15 @@ pub fn run() {
                 let min = (main.min_width.unwrap_or(960.0), main.min_height.unwrap_or(600.0));
                 (main.width, main.height) = first_size(m.work_area().size, m.scale_factor(), min);
             }
+            // Hidden until it is placed, on the saved theme's own background: created
+            // visible, it showed a white frame at the config's size and place, then moved
+            // to the saved one, then the page painted (row 27, approved). A window saved
+            // maximised appears as the plugin maximises it inside `build` — tao shows a
+            // window with SW_MAXIMIZE — already in place.
+            main.visible = false;
+            main.background_color = Some(theme_background(&theme));
             let window = tauri::WebviewWindowBuilder::from_config(app.handle(), &main)?.build()?;
+            WINDOW_MADE.store(true, std::sync::atomic::Ordering::SeqCst);
             // The taskbar's icon from the exe's own icon group, at the right size: tao
             // only sets the small one, which the taskbar scaled up soft (Q31, D-264).
             if let Ok(hwnd) = window.hwnd() {
@@ -1310,6 +1363,7 @@ pub fn run() {
             // The plugin restored the saved place inside `build` (tauri 2.11.6 runs the
             // window-ready hooks there): now onto a screen if it left it off one (row 27).
             fit_restored_window(&window);
+            let _ = window.show();
             // Started while DayZ plays (relaunched by an update, or by hand): this instance
             // never launched the game, so D-119's step-down never ran and it sat at High
             // beside the game for the rest of the session (D-279). Only once the window is
@@ -1401,17 +1455,19 @@ pub fn run() {
                     // Every request waits for the page; the first one asks it.
                     api.prevent_close();
                     if !CLOSING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        CLOSE_ASKED_MS
+                            .store(uptime_ms() as u64, std::sync::atomic::Ordering::SeqCst);
                         let _ = handle.emit_to("main", "app:closing", ());
                         let app = handle.clone();
                         let timer = std::thread::Builder::new()
                             .name("close-wait".into())
                             .spawn(move || {
                                 std::thread::sleep(std::time::Duration::from_millis(1500));
-                                finish_close(&app);
+                                finish_close(&app, false);
                             });
                         // With no timer, nothing else would close it.
                         if timer.is_err() {
-                            finish_close(handle);
+                            finish_close(handle, false);
                         }
                     }
                 }
@@ -1449,6 +1505,43 @@ mod tests {
             super::panic_line("boom", None, None),
             "panic: boom at an unknown place on thread without a name"
         );
+    }
+
+    /// Row 27 (approved): "could not start" only before the window exists, and no log
+    /// named when Recording is off.
+    #[test]
+    fn a_crash_says_what_happened() {
+        let (caption, text) = super::crash_dialog("boom", false, true);
+        assert_eq!(caption, "DZSA CrayZ Launcher could not start");
+        assert!(text.starts_with("The launcher stopped unexpectedly.\n\nboom\n\n"));
+        assert!(text.ends_with(
+            "the log is at %LOCALAPPDATA%\\com.dayzlauncher.desktop\\logs\\launcher.log."
+        ));
+        let (caption, text) = super::crash_dialog("boom", true, false);
+        assert_eq!(caption, "DZSA CrayZ Launcher stopped unexpectedly");
+        assert!(text.ends_with("Recording is off, so this was not written to the log. If this keeps happening, turn Recording on in Logs so the next time is kept."));
+        assert!(!text.contains("launcher.log"));
+    }
+
+    /// Row 27 (approved): the window's first colour is the page's own background, for
+    /// both themes, as app.css defines it.
+    #[test]
+    fn the_window_opens_in_the_pages_background() {
+        let css = include_str!("../../src/app.css");
+        let bg_in = |block: &str| {
+            let start = css.find(block).expect(block);
+            let rest = &css[start..];
+            let v = &rest[rest.find("--bg:").expect("--bg") + 5..];
+            let hex = v.trim_start().trim_start_matches('#');
+            let byte = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).unwrap();
+            tauri::window::Color(byte(0), byte(2), byte(4), 0xff)
+        };
+        assert_eq!(super::theme_background("slate"), bg_in(":root {"));
+        assert_eq!(
+            super::theme_background("light"),
+            bg_in(":root[data-theme=\"light\"] {")
+        );
+        assert_eq!(super::theme_background("anything else"), bg_in(":root {"));
     }
 
     use super::{fit_to_screen, mark_maximized, Rect};

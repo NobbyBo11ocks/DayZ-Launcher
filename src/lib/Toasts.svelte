@@ -3,16 +3,11 @@
   // not be read, saved data moved, a join not added to Recent), stacked in the top-right
   // corner until dismissed. Favourite alerts used to share this rail (removed in D-182).
   import { MODAL, noticesTakeEscape } from "./escape";
-  import { openExternal } from "./external";
+  import { POST_NOT_OPENED } from "./external";
   import { news } from "./state/news.svelte";
   import { notices } from "./state/notices.svelte";
 
   const count = $derived(news.alerts.length + notices.items.length);
-
-  function read(gid: string, url: string) {
-    void openExternal(url);
-    news.dismissAlert(gid);
-  }
 
   /** Escape clears the stack. It stays until dismissed and sits over the top right of
    *  every page, where it hid the Logs page's header controls, Mods' Rescan and Update
@@ -55,10 +50,13 @@
           <div class="text">
             <strong>DayZ update</strong>
             <span class="muted" id="toast-{n.gid}">{n.title}</span>
+            <!-- The toast stays when its post could not be opened, and says so, in News's
+                 words (row 27, approved); Read tries again. -->
+            {#if n.failed}<span class="error" role="alert">{POST_NOT_OPENED}</span>{/if}
           </div>
           <!-- Each pair says which post it is for: up to three toasts stack, with the same
                two buttons in each (D-291). -->
-          <button class="btn" onclick={() => read(n.gid, n.url)} aria-describedby="toast-{n.gid}">Read</button>
+          <button class="btn" onclick={() => void news.readAlert(n.gid)} aria-describedby="toast-{n.gid}">Read</button>
           <button class="close" onclick={() => news.dismissAlert(n.gid)} aria-label="Dismiss" aria-describedby="toast-{n.gid}">✕</button>
         </div>
       {/each}

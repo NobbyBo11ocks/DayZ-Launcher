@@ -1855,7 +1855,7 @@ fn is_web_address(url: &str) -> bool {
 /// The page has kept what it had to before the window closes (`app:closing`, row 27).
 #[tauri::command]
 pub fn close_ready(app: AppHandle) {
-    crate::finish_close(&app);
+    crate::finish_close(&app, true);
 }
 
 /// The WebView's own diagnostics: unhandled errors, failed commands, view timings.

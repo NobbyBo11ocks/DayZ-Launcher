@@ -5,6 +5,8 @@ Goal: the fastest way from "open launcher" to "in game", in a dark, quiet, infor
 ## 1. Window and layout
 
 - First start at 1440×900, or 90 % of the work area where that is smaller (D-306 (1)), minimum 960×600; size, position and maximised state are remembered between runs (`tauri-plugin-window-state`, D-098); a saved place that no longer fits the screens comes back on one, and a window closed while minimised from maximised comes back maximised (D-325). Every way of closing the window (its button, Alt+F4, the taskbar) waits up to 1.5 s for changes not yet saved (D-325). Custom title bar (`decorations: false`, drag region) so the theme covers the whole window: 30 px high, no app name but the logo's gas mask at the left where a framed window shows its icon (D-258), an update notice when one is pending, and our own minimise/maximise/close buttons (D-091), drawn in the accent since D-300. **Moved:** the update notice now sits at the foot of the section rail, not in the title bar (D-216).
+- The window appears once, already at its saved place and size — a restored-down size that no longer fits comes back fitted too (D-327) — on the theme's own background (#0f1216 dark, #f6f7f9 light), with no white frame first (D-328). It is not a web page: right-click does nothing outside text fields, which keep Cut, Copy and Paste, and F5, Ctrl+R, Ctrl+F, Ctrl+P and F3 do nothing (D-328).
+- Pages keep their place for the session: coming back to Servers, Favourites or LAN, the selected server is in view; Mods keeps its search, sort and view, Friends its Show offline, Logs its Problems only (D-328).
 - Three regions:
 
 ```text
@@ -82,6 +84,8 @@ A column in the left rail, under the sections, while the Servers page is open (D
 | Steam signed out | the Servers header: "Steam is running but nobody is signed in; the launcher connects once you sign in."; Settings shows Steam's own reason (D-303) |
 | Cache in memory, damaged or not saving | the start-up box titled "…is running without its cache"; Favourites "Your favourites could not be read this session."; a notice once where a damaged cache went; the Servers header while writes fail (D-303) |
 | One-off notices | settings file unreadable, saved data moved, a join not added to Recent: cards in the toast corner with a dismiss button, beside the update posts (D-303) |
+| A post that cannot be opened | News: "The post could not be opened in your browser. The details are on the Logs page."; a DayZ update toast whose Read fails stays and says the same, Read trying again (D-328) |
+| Crash | a box titled "DZSA CrayZ Launcher could not start" before the window exists and "…stopped unexpectedly" after, with the panic's words; it ends with where the log is, or with Recording off "Recording is off, so this was not written to the log. If this keeps happening, turn Recording on in Logs so the next time is kept." (D-328) |
 | A name DayZ cannot take whole | a line under the join dialog's in-game name: which characters are lost and the name sent, or that none is (D-305) |
 | Settings not saved | the Settings header: a failed save is tried again and says so; while the file cannot be read, nothing is saved and the header says why (D-305) |
 | Launch profiles | "Replace “{name}”" when the typed name exists; Delete asks inline "Delete “{name}”? Yes / No" (D-305) |

@@ -8,6 +8,7 @@
   // command name before it is rethrown (D-158).
   import { describe, invokeLogged as invoke, logWarn } from "./log";
   import { formatReport, type ReportFacts } from "./logreport";
+  import { pageState } from "./state/pages";
   import type { Settings } from "./types";
 
   type LogEntry = { at: number; level: "info" | "warn" | "error"; target: string; message: string };
@@ -16,7 +17,11 @@
   /** The log file: where, whether it is there, and why it cannot be written (row 25). */
   let logFile = $state<{ path: string | null; exists: boolean; error: string | null } | null>(null);
   const logPath = $derived(logFile?.path ?? null);
-  let onlyProblems = $state(false);
+  // The session's, not the visit's (row 27, approved).
+  let onlyProblems = $state(pageState.logs.onlyProblems);
+  $effect(() => {
+    pageState.logs.onlyProblems = onlyProblems;
+  });
   let error = $state<string | null>(null);
   /** Its own line: `load()` clears `error` every five seconds, which erased this message
    *  and left the chips disabled with nothing to say why (D-197, D-240). */
