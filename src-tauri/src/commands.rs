@@ -1181,6 +1181,22 @@ fn scanned_list((at, mods): crate::browser::cache::ScannedMods, now: i64) -> Sca
 /// Mod lists are re-scanned when older than this.
 const MOD_SCAN_MAX_AGE_SECS: i64 = 24 * 3600;
 
+/// The scan's reasons for the servers it could not read, counted, with a few of each:
+/// which servers fail, and why, is Q41 (D-330). Addresses only, no names.
+fn unread_line(unread: &[(String, &'static str)]) -> String {
+    let mut by: std::collections::BTreeMap<&str, Vec<&str>> = std::collections::BTreeMap::new();
+    for (id, why) in unread {
+        by.entry(why).or_default().push(id);
+    }
+    by.iter()
+        .map(|(why, ids)| {
+            let shown: Vec<&str> = ids.iter().take(6).copied().collect();
+            format!("{} {why} (e.g. {})", ids.len(), shown.join(", "))
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 /// How long the scan waits before its second look at the reads its pace lost (D-329).
 const SECOND_LOOK_PAUSE: Duration = Duration::from_secs(30);
 
@@ -1200,18 +1216,33 @@ async fn read_mod_list(client: &Client, addr: SocketAddr) -> Option<Vec<(u64, St
         .map(|r| r.value.stored_mods())
 }
 
-/// The reads the scan's pace lost, once more: after `pause`, sixteen at a time at 40
-/// datagrams a second with a 2 s deadline. The scan runs straight after a start's
-/// refresh and check pass — thousands of flows in a minute — and there a large scan lost
-/// most of its replies (132 of 175 on 2026-09-29), where the same client read 246 of 246
-/// on a calm line. Each loss put the server away for six hours, then twelve, then a day,
-/// and its next read fell in another start's burst (D-329). A server that does not answer
-/// costs one more try. Returns the lists read and the ids that failed again.
+/// Why a server's mod list could not be read, for the scan's line (D-330); `None` for a
+/// list.
+fn why_unread(r: &a2s::A2sResult<a2s::Reply<a2s::Rules>>) -> Option<&'static str> {
+    match r {
+        Ok(reply) if reply.value.dayz.is_some() => None,
+        Ok(_) => Some("no DayZ data"),
+        Err(a2s::A2sError::Timeout) => Some("no answer"),
+        Err(a2s::A2sError::Unreachable) => Some("unreachable"),
+        Err(_) => Some("unreadable reply"),
+    }
+}
+
+/// The reads the scan lost, once more: after `pause`, sixteen at a time at 40 datagrams
+/// a second with a 2 s deadline, so a lost read is not put away for six hours, then
+/// twelve, then a day (D-244) on one try. Large scans have lost most of their reads —
+/// 132 of 175 on 2026-09-29 — while the same client read every live server asked, 246 of
+/// 246 and then 465 of 465, a start-sized burst of queries included; which servers fail,
+/// and why, is Q41 (D-329, D-330). A server that does not answer costs one more try.
+/// Returns the lists read and, for the rest, the id with why it was not read.
 async fn second_look(
     client: &Client,
     targets: Vec<(String, SocketAddr)>,
     pause: Duration,
-) -> (Vec<(String, Vec<(u64, String)>)>, Vec<String>) {
+) -> (
+    Vec<(String, Vec<(u64, String)>)>,
+    Vec<(String, &'static str)>,
+) {
     tokio::time::sleep(pause).await;
     let patient = client
         .clone()
@@ -1222,14 +1253,14 @@ async fn second_look(
     let mut set = tokio::task::JoinSet::new();
     for (id, addr) in targets {
         let c = patient.clone();
-        set.spawn(async move { (id, read_mod_list(&c, addr).await) });
+        set.spawn(async move { (id, c.rules(addr).await) });
     }
     let (mut read, mut again) = (Vec::new(), Vec::new());
     while let Some(joined) = set.join_next().await {
-        let Ok((id, mods)) = joined else { continue };
-        match mods {
-            Some(m) => read.push((id, m)),
-            None => again.push(id),
+        let Ok((id, reply)) = joined else { continue };
+        match why_unread(&reply) {
+            None => read.push((id, reply.map(|r| r.value.stored_mods()).unwrap_or_default())),
+            Some(why) => again.push((id, why)),
         }
     }
     (read, again)
@@ -1303,6 +1334,7 @@ pub async fn run_mod_scan(
     // of the challenge leg and made the retry do 99 % of the work (D-193).
     let client = client.with_concurrency(64).with_rate(100).with_retries(1);
     let mut second_looks = 0usize;
+    let mut unread: Vec<(String, &'static str)> = Vec::new();
     for chunk in targets.chunks(200) {
         let mut set = tokio::task::JoinSet::new();
         for (id, addr) in chunk.iter().cloned() {
@@ -1343,7 +1375,8 @@ pub async fn run_mod_scan(
             let (read, again) = second_look(&client, lost, SECOND_LOOK_PAUSE).await;
             second_looks += read.len();
             batch.extend(read);
-            failed = again;
+            failed = again.iter().map(|(id, _)| id.clone()).collect();
+            unread.extend(again);
         }
         summary.scanned += batch.len();
         summary.failed += failed.len();
@@ -1407,6 +1440,9 @@ pub async fn run_mod_scan(
             held_back,
             summary.elapsed_ms
         );
+    }
+    if !unread.is_empty() {
+        crate::log_info!("mods", "scan: not read: {}", unread_line(&unread));
     }
     #[cfg(debug_assertions)]
     eprintln!(
@@ -3561,7 +3597,23 @@ mod tests {
         let (read, again) =
             super::second_look(&fast, vec![("dead".into(), dead)], Duration::ZERO).await;
         assert!(read.is_empty());
-        assert_eq!(again, vec!["dead".to_string()]);
+        assert_eq!(again, vec![("dead".to_string(), "no answer")]);
+    }
+
+    /// D-330: the scan's line counts why the servers it could not read failed, with a few
+    /// addresses of each.
+    #[test]
+    fn the_scan_says_why_it_could_not_read() {
+        let unread: Vec<(String, &'static str)> = (1..=8)
+            .map(|i| (format!("198.51.100.{i}:2303"), "no answer"))
+            .chain([("203.0.113.9:27016".to_string(), "no DayZ data")])
+            .collect();
+        assert_eq!(
+            super::unread_line(&unread),
+            "1 no DayZ data (e.g. 203.0.113.9:27016); 8 no answer (e.g. 198.51.100.1:2303, \
+             198.51.100.2:2303, 198.51.100.3:2303, 198.51.100.4:2303, 198.51.100.5:2303, \
+             198.51.100.6:2303)"
+        );
     }
 
     /// Row 26: a PLAYER reply the first look lost gets the patient second look, while

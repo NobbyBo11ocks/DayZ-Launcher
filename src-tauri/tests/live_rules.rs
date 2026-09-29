@@ -6,6 +6,11 @@
 //! every failure once more, one at a time with a 3 s deadline. The error classes and the
 //! addresses tell a server that never answers from one the scan's pace loses. One NAT
 //! flow per address: keep the list short (D-037).
+//!
+//! With `DAYZ_RULES_BURST=<file>` the RULES reads follow a start's load instead: INFO and
+//! PLAYER to every address in that file, 128 at once at 400 datagrams a second (Steam's
+//! refresh pings and the check pass), and the failures get the scan's second look 30 s
+//! later (D-329) rather than the slow one. That is the load of one launcher start.
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -58,6 +63,39 @@ async fn live_rules() {
         .collect();
     println!("INFO: {} of {} answered", answered.len(), addrs.len());
 
+    let burst_path = std::env::var("DAYZ_RULES_BURST").ok();
+    if let Some(p) = &burst_path {
+        let burst: Vec<SocketAddr> = std::fs::read_to_string(p)
+            .expect("read burst list")
+            .lines()
+            .filter_map(|l| l.trim().parse().ok())
+            .collect();
+        let pass = Client::new(128);
+        let t = std::time::Instant::now();
+        let infos = pass.info_many(burst.iter().copied()).await;
+        let alive: Vec<SocketAddr> = infos
+            .iter()
+            .filter(|(_, r)| r.is_ok())
+            .map(|(a, _)| *a)
+            .collect();
+        let mut set = tokio::task::JoinSet::new();
+        for a in alive.iter().copied() {
+            let c = pass.clone();
+            set.spawn(async move { c.players(a).await.is_ok() });
+        }
+        let mut players = 0usize;
+        while let Some(Ok(ok)) = set.join_next().await {
+            players += usize::from(ok);
+        }
+        println!(
+            "burst: INFO to {} servers ({} answered), PLAYER {} answered, in {:?}",
+            burst.len(),
+            alive.len(),
+            players,
+            t.elapsed()
+        );
+    }
+
     let scan = Client::new(64).with_rate(100).with_retries(1);
     let mut set = tokio::task::JoinSet::new();
     for a in answered.iter().copied() {
@@ -81,6 +119,29 @@ async fn live_rules() {
         "RULES at the scan's pace: {read} read, {} failed {classes:?}",
         failed.len()
     );
+
+    if burst_path.is_some() {
+        // The scan's second look, as `second_look` makes it (D-329).
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        let patient = Client::new(16)
+            .with_rate(40)
+            .with_timeout(Duration::from_secs(2))
+            .with_retries(1);
+        let mut set = tokio::task::JoinSet::new();
+        for (a, _) in &failed {
+            let (a, c) = (*a, patient.clone());
+            set.spawn(async move { outcome(&c.rules(a).await).is_ok() });
+        }
+        let mut recovered = 0usize;
+        while let Some(Ok(ok)) = set.join_next().await {
+            recovered += usize::from(ok);
+        }
+        println!(
+            "second look 30 s later: {recovered} of {} read",
+            failed.len()
+        );
+        return;
+    }
 
     let slow = Client::new(1)
         .with_timeout(Duration::from_secs(3))
