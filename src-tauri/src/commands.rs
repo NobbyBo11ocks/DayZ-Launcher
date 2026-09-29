@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
@@ -1181,6 +1181,60 @@ fn scanned_list((at, mods): crate::browser::cache::ScannedMods, now: i64) -> Sca
 /// Mod lists are re-scanned when older than this.
 const MOD_SCAN_MAX_AGE_SECS: i64 = 24 * 3600;
 
+/// How long the scan waits before its second look at the reads its pace lost (D-329).
+const SECOND_LOOK_PAUSE: Duration = Duration::from_secs(30);
+
+/// One server's mod list, or `None` when it did not answer or its reply carried no DayZ
+/// data. Each id once, where it first appears (D-265), id 0 included: the cache keeps
+/// one row per id, so a list sent with every server-side mod counted more in the Mods
+/// column than the same list read back after a restart (D-276). The join plan stores the
+/// same shape (D-295). A reply with no DayZ data is no mod list: stored as one, the
+/// server read as vanilla for a day and a launch whose own read failed started DayZ
+/// without its mods, as the join plan already refuses (row 18).
+async fn read_mod_list(client: &Client, addr: SocketAddr) -> Option<Vec<(u64, String)>> {
+    client
+        .rules(addr)
+        .await
+        .ok()
+        .filter(|r| r.value.dayz.is_some())
+        .map(|r| r.value.stored_mods())
+}
+
+/// The reads the scan's pace lost, once more: after `pause`, sixteen at a time at 40
+/// datagrams a second with a 2 s deadline. The scan runs straight after a start's
+/// refresh and check pass — thousands of flows in a minute — and there a large scan lost
+/// most of its replies (132 of 175 on 2026-09-29), where the same client read 246 of 246
+/// on a calm line. Each loss put the server away for six hours, then twelve, then a day,
+/// and its next read fell in another start's burst (D-329). A server that does not answer
+/// costs one more try. Returns the lists read and the ids that failed again.
+async fn second_look(
+    client: &Client,
+    targets: Vec<(String, SocketAddr)>,
+    pause: Duration,
+) -> (Vec<(String, Vec<(u64, String)>)>, Vec<String>) {
+    tokio::time::sleep(pause).await;
+    let patient = client
+        .clone()
+        .with_concurrency(16)
+        .with_rate(40)
+        .with_timeout(Duration::from_secs(2))
+        .with_retries(1);
+    let mut set = tokio::task::JoinSet::new();
+    for (id, addr) in targets {
+        let c = patient.clone();
+        set.spawn(async move { (id, read_mod_list(&c, addr).await) });
+    }
+    let (mut read, mut again) = (Vec::new(), Vec::new());
+    while let Some(joined) = set.join_next().await {
+        let Ok((id, mods)) = joined else { continue };
+        match mods {
+            Some(m) => read.push((id, m)),
+            None => again.push(id),
+        }
+    }
+    (read, again)
+}
+
 #[derive(Serialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ModScanSummary {
@@ -1248,26 +1302,12 @@ pub async fn run_mod_scan(
     // the 1 s deadline — sharing `state.a2s`'s 128 permits put 1.28 s of queue in front
     // of the challenge leg and made the retry do 99 % of the work (D-193).
     let client = client.with_concurrency(64).with_rate(100).with_retries(1);
+    let mut second_looks = 0usize;
     for chunk in targets.chunks(200) {
         let mut set = tokio::task::JoinSet::new();
         for (id, addr) in chunk.iter().cloned() {
             let c = client.clone();
-            set.spawn(async move {
-                // Each id once, where it first appears (D-265), id 0 included: the
-                // cache keeps one row per id, so a list sent with every server-side mod
-                // counted more in the Mods column than the same list read back after a
-                // restart (D-276). The join plan stores the same shape (D-295).
-                // A reply with no DayZ data is no mod list: stored as one, the server
-                // read as vanilla for a day and a launch whose own read failed started
-                // DayZ without its mods, as the join plan already refuses (row 18).
-                let mods = c
-                    .rules(addr)
-                    .await
-                    .ok()
-                    .filter(|r| r.value.dayz.is_some())
-                    .map(|r| r.value.stored_mods());
-                (id, mods)
-            });
+            set.spawn(async move { (id, read_mod_list(&c, addr).await) });
         }
         let mut batch: Vec<(String, Vec<(u64, String)>)> = Vec::with_capacity(chunk.len());
         let mut failed: Vec<String> = Vec::new();
@@ -1292,6 +1332,18 @@ pub async fn run_mod_scan(
             );
             set_net(&app, false);
             break;
+        }
+        // Only a server that fails twice waits before its next read (D-329).
+        if !failed.is_empty() {
+            let lost: Vec<(String, SocketAddr)> = chunk
+                .iter()
+                .filter(|(id, _)| failed.contains(id))
+                .cloned()
+                .collect();
+            let (read, again) = second_look(&client, lost, SECOND_LOOK_PAUSE).await;
+            second_looks += read.len();
+            batch.extend(read);
+            failed = again;
         }
         summary.scanned += batch.len();
         summary.failed += failed.len();
@@ -1349,7 +1401,7 @@ pub async fn run_mod_scan(
     if summary.total > 0 || held_back > 0 {
         crate::log_info!(
             "mods",
-            "scan: {} server(s) read, {} failed, {} held back after failing, in {} ms",
+            "scan: {} server(s) read ({second_looks} on a second look), {} failed, {} held back after failing, in {} ms",
             summary.scanned,
             summary.failed,
             held_back,
@@ -3453,6 +3505,63 @@ mod tests {
             }
         });
         addr
+    }
+
+    /// A server on 127.0.0.1 that drops everything for its first `silent_ms`, as a line
+    /// busy with a start's passes did, then answers RULES, with the challenge first.
+    async fn rules_server_silent_for(silent_ms: u64) -> std::net::SocketAddr {
+        let rules: &'static [u8] = include_bytes!("../tests/fixtures/a2s/kingofgames.rules.0.bin");
+        let sock = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let addr = sock.local_addr().unwrap();
+        let t0 = std::time::Instant::now();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 1400];
+            loop {
+                let Ok((n, from)) = sock.recv_from(&mut buf).await else {
+                    return;
+                };
+                if t0.elapsed() < Duration::from_millis(silent_ms) {
+                    continue;
+                }
+                if buf[..n].ends_with(&[0xFF; 4]) {
+                    let _ = sock
+                        .send_to(&[0xFF, 0xFF, 0xFF, 0xFF, 0x41, 1, 2, 3, 4], from)
+                        .await;
+                } else if buf.get(4) == Some(&0x56) {
+                    let _ = sock.send_to(rules, from).await;
+                }
+            }
+        });
+        addr
+    }
+
+    /// D-329: a mod list the scan's pace lost gets a second look after the pause, and
+    /// only a server that fails twice is recorded as failing.
+    #[tokio::test]
+    async fn a_lost_mod_list_gets_a_second_look() {
+        let fast = Client::new(8)
+            .with_rate(0)
+            .with_timeout(Duration::from_millis(200))
+            .with_retries(0);
+        let busy = rules_server_silent_for(800).await;
+        assert!(
+            super::read_mod_list(&fast, busy).await.is_none(),
+            "lost in the burst"
+        );
+        let (read, again) = super::second_look(
+            &fast,
+            vec![("busy".into(), busy)],
+            Duration::from_millis(800),
+        )
+        .await;
+        assert_eq!(read.len(), 1);
+        assert!(!read[0].1.is_empty(), "the list itself");
+        assert!(again.is_empty());
+        let dead = rules_server_silent_for(60_000).await;
+        let (read, again) =
+            super::second_look(&fast, vec![("dead".into(), dead)], Duration::ZERO).await;
+        assert!(read.is_empty());
+        assert_eq!(again, vec!["dead".to_string()]);
     }
 
     /// Row 26: a PLAYER reply the first look lost gets the patient second look, while
