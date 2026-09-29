@@ -1,12 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window: core IPC plus the window controls the custom title bar needs. Add plugin permissions here only when a feature needs them.",
+  "description": "Main window: events, the window's own getters and controls, and closing resources, which the page uses; not core:default, whose paths, images, menus, tray and webview the page never calls (row 27). Links open through the host's open_link. Add plugin permissions here only when a feature needs them.",
   "windows": [
     "main"
   ],
   "permissions": [
-    "core:default",
+    "core:event:default",
+    "core:window:default",
+    "core:resources:default",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
@@ -21,8 +23,6 @@
     "notification:allow-is-permission-granted",
     "notification:allow-request-permission",
     "notification:allow-notify",
-    "opener:allow-open-url",
-    "opener:allow-default-urls",
     "opener:allow-reveal-item-in-dir"
   ]
 }

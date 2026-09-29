@@ -59,6 +59,242 @@ pub fn elevation() -> proc::ElevationState {
         .unwrap_or(proc::ElevationState::Matched)
 }
 
+/// The app, for the window procedure that answers a launch's hand-over (row 27).
+static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
+
+/// The main window to the front: the single-instance plugin's hand-over (D-079), and the
+/// message a launch sends before its elevation decision (row 27).
+fn bring_to_front(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
+/// Answers `proc::show_message` on the single-instance plugin's own window; everything
+/// else goes on to the plugin as before.
+unsafe extern "system" fn answer_show(
+    hwnd: windows_sys::Win32::Foundation::HWND,
+    message: u32,
+    wparam: windows_sys::Win32::Foundation::WPARAM,
+    lparam: windows_sys::Win32::Foundation::LPARAM,
+    _id: usize,
+    _data: usize,
+) -> windows_sys::Win32::Foundation::LRESULT {
+    if message == proc::show_message() {
+        if let Some(app) = APP.get() {
+            bring_to_front(app);
+        }
+        return 0;
+    }
+    // SAFETY: the arguments are the ones this procedure was called with.
+    unsafe { windows_sys::Win32::UI::Shell::DefSubclassProc(hwnd, message, wparam, lparam) }
+}
+
+/// Lets a later launch bring this instance to the front before it decides anything
+/// (`proc::hand_to_running_instance`, row 27): the plugin's window answers its message,
+/// from a launch without elevation too when this instance runs elevated.
+fn answer_handovers(app: &tauri::AppHandle) {
+    let _ = APP.set(app.clone());
+    let Some(hwnd) = proc::own_instance_window() else {
+        log_warn!("app", "the single-instance window was not found; a second launch asks for its elevation first");
+        return;
+    };
+    // SAFETY: this process's own window, subclassed on the thread that made it: setup
+    // runs on the main thread, as the plugin's setup did before it.
+    let hooked =
+        unsafe { windows_sys::Win32::UI::Shell::SetWindowSubclass(hwnd, Some(answer_show), 1, 0) }
+            != 0;
+    if !hooked {
+        log_warn!(
+            "app",
+            "the single-instance window could not be told to answer launches"
+        );
+        return;
+    }
+    if proc::current_is_elevated() && !proc::accept_show_from_lower_integrity() {
+        log_warn!(
+            "app",
+            "a launch without elevation cannot reach this elevated instance"
+        );
+    }
+}
+
+/// A rectangle in physical pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Rect {
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+}
+
+/// Where a restored window goes when the saved state left it unusable (row 27). The
+/// window-state plugin restores the saved size always, and the place only when a corner
+/// of the window lies on a monitor, with no fitting (tauri-plugin-window-state 2.4.1
+/// `restore_state`): after a monitor went, or with the scale changed, the window came back
+/// larger than the screen with its buttons past the edge, or with its title bar, the only
+/// handle to drag it by, above the top. It is left alone while it fits and both ends of its
+/// title bar are on a screen, a window across two screens included; otherwise it shrinks
+/// to the work area that holds most of it and moves the least it has to onto it, centred
+/// on the first area given (the primary) when no area holds any of it. `None` for "leave
+/// it".
+fn fit_to_screen(win: Rect, areas: &[Rect]) -> Option<Rect> {
+    let overlap = |a: &Rect| {
+        let w = (win.x + win.w).min(a.x + a.w) - win.x.max(a.x);
+        let h = (win.y + win.h).min(a.y + a.h) - win.y.max(a.y);
+        i64::from(w.max(0)) * i64::from(h.max(0))
+    };
+    let on_screen = |x: i32, y: i32| {
+        areas
+            .iter()
+            .any(|a| x >= a.x && x < a.x + a.w && y >= a.y && y < a.y + a.h)
+    };
+    let held = areas
+        .iter()
+        .max_by_key(|a| overlap(a))
+        .filter(|a| overlap(a) > 0);
+    let area = held.or(areas.first())?;
+    let too_big = win.w > area.w || win.h > area.h;
+    let bar = win.y + 8;
+    if !too_big && on_screen(win.x + 8, bar) && on_screen(win.x + win.w - 8, bar) {
+        return None;
+    }
+    let (w, h) = (win.w.min(area.w), win.h.min(area.h));
+    let (x, y) = if held.is_some() {
+        (
+            win.x.clamp(area.x, area.x + area.w - w),
+            win.y.clamp(area.y, area.y + area.h - h),
+        )
+    } else {
+        (area.x + (area.w - w) / 2, area.y + (area.h - h) / 2)
+    };
+    let fitted = Rect { x, y, w, h };
+    (fitted != win).then_some(fitted)
+}
+
+/// Applies `fit_to_screen` to the main window once the saved state is back.
+fn fit_restored_window(window: &tauri::WebviewWindow) {
+    if window.is_maximized().unwrap_or(false) || window.is_minimized().unwrap_or(false) {
+        return;
+    }
+    let (Ok(pos), Ok(outer), Ok(inner), Ok(monitors)) = (
+        window.outer_position(),
+        window.outer_size(),
+        window.inner_size(),
+        window.available_monitors(),
+    ) else {
+        return;
+    };
+    let rect = |m: &tauri::Monitor| {
+        let a = m.work_area();
+        Rect {
+            x: a.position.x,
+            y: a.position.y,
+            w: a.size.width as i32,
+            h: a.size.height as i32,
+        }
+    };
+    let mut areas: Vec<Rect> = monitors.iter().map(rect).collect();
+    if let Ok(Some(primary)) = window.primary_monitor() {
+        let p = rect(&primary);
+        areas.retain(|a| *a != p);
+        areas.insert(0, p);
+    }
+    let win = Rect {
+        x: pos.x,
+        y: pos.y,
+        w: outer.width as i32,
+        h: outer.height as i32,
+    };
+    let Some(fitted) = fit_to_screen(win, &areas) else {
+        return;
+    };
+    // `set_size` takes the inner size; the frame, if any, stays what it was.
+    let inner_w = (inner.width as i32 - (win.w - fitted.w)).max(1) as u32;
+    let inner_h = (inner.height as i32 - (win.h - fitted.h)).max(1) as u32;
+    let _ = window.set_size(tauri::PhysicalSize::new(inner_w, inner_h));
+    let _ = window.set_position(tauri::PhysicalPosition::new(fitted.x, fitted.y));
+    log_info!(
+        "app",
+        "the saved window place did not fit the screens: {win:?} -> {fitted:?}"
+    );
+}
+
+/// Set once the window may close: the page has kept what it had to, or had its time.
+static CLOSING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Closes the main window for good (row 27): the page answered `app:closing`
+/// (`commands::close_ready`), or 1.5 s went by without it.
+pub(crate) fn finish_close(app: &tauri::AppHandle) {
+    CLOSING.store(true, std::sync::atomic::Ordering::SeqCst);
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.close();
+    }
+}
+
+/// Whether the main window, minimised, will come back maximised, as last seen at a close
+/// or at the exit (row 27).
+static KEEP_MAXIMIZED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Notes whether the main window is minimised from maximised. tao reports a minimised
+/// window as not maximised, and the window-state plugin saves that (tauri-plugin-window-state
+/// 2.4.1 `update_state`): a launcher closed from the taskbar while minimised from maximised,
+/// or left so at sign-out, opened next time un-maximised at the maximised corner. Windows'
+/// own placement still knows (`WPF_RESTORETOMAXIMIZED`).
+fn note_maximized(app: &tauri::AppHandle) {
+    let Some(w) = app.get_webview_window("main") else {
+        return;
+    };
+    let restores_maximized = w.is_minimized().unwrap_or(false)
+        && w.hwnd().is_ok_and(|hwnd| {
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                GetWindowPlacement, WINDOWPLACEMENT, WPF_RESTORETOMAXIMIZED,
+            };
+            // SAFETY: a live window of this process; the struct's length is set as the
+            // call requires.
+            unsafe {
+                let mut wp: WINDOWPLACEMENT = std::mem::zeroed();
+                wp.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
+                GetWindowPlacement(hwnd.0 as _, &mut wp) != 0
+                    && wp.flags & WPF_RESTORETOMAXIMIZED != 0
+            }
+        });
+    KEEP_MAXIMIZED.store(restores_maximized, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// After the window-state plugin has written its file: the main window saved as maximised
+/// when `note_maximized` saw it minimised from maximised.
+fn keep_maximized(app: &tauri::AppHandle) {
+    if !KEEP_MAXIMIZED.load(std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    use tauri_plugin_window_state::AppHandleExt;
+    let Ok(dir) = app.path().app_config_dir() else {
+        return;
+    };
+    let path = dir.join(app.filename());
+    if let Some(text) = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| mark_maximized(&t, "main"))
+    {
+        let _ = std::fs::write(&path, text);
+    }
+}
+
+/// The window-state file's text with `label` saved as maximised; `None` when it has no
+/// such window, says so already, or is not the plugin's JSON.
+fn mark_maximized(json: &str, label: &str) -> Option<String> {
+    let mut all: serde_json::Value = serde_json::from_str(json).ok()?;
+    let window = all.get_mut(label)?.as_object_mut()?;
+    if window.get("maximized") == Some(&serde_json::Value::Bool(true)) {
+        return None;
+    }
+    window.insert("maximized".into(), serde_json::Value::Bool(true));
+    serde_json::to_string_pretty(&all).ok()
+}
+
 /// Last resort when `cache.db` can be neither opened nor moved out of the way: a
 /// cache that lives in memory for this run only. Nothing persists, and the user is
 /// told once, but the launcher starts and the server list — which comes from Steam,
@@ -337,7 +573,9 @@ impl Drop for ExitGuard {
         // The resource table is cleared before the windows are hidden, so they still
         // report where they are; after a normal exit this is a second, identical save.
         use tauri_plugin_window_state::AppHandleExt;
+        note_maximized(&self.0);
         let _ = self.0.save_window_state(WINDOW_STATE);
+        keep_maximized(&self.0);
         close_down(&self.0);
     }
 }
@@ -435,6 +673,12 @@ pub fn run() {
         ));
         previous(info);
     }));
+    // A launch while the launcher is open goes to it before anything else, its elevation
+    // decision included: that asked for administrator rights first whenever Steam ran
+    // elevated, only to hand over afterwards (row 27).
+    if proc::hand_to_running_instance() {
+        return;
+    }
     let steam_pid = steam::registry::detect().pid;
     let state = proc::elevation_state(steam_pid);
     if state == proc::ElevationState::SteamHigher && proc::relaunch_elevated() {
@@ -456,11 +700,7 @@ pub fn run() {
         // Must be the first plugin (its README): a second launch hands its arguments
         // to the running instance, which just comes to the front (D-079).
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.unminimize();
-                let _ = w.show();
-                let _ = w.set_focus();
-            }
+            bring_to_front(app);
         }))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -955,6 +1195,11 @@ pub fn run() {
             if let Ok(hwnd) = window.hwnd() {
                 icon::apply(hwnd.0 as _);
             }
+            // The plugin restored the saved place inside `build` (tauri 2.11.6 runs the
+            // window-ready hooks there): now onto a screen if it left it off one (row 27).
+            fit_restored_window(&window);
+            answer_handovers(app.handle());
+            proc::watch_for_game();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -990,6 +1235,8 @@ pub fn run() {
             commands::friend_avatar,
             commands::logs_recent,
             commands::logs_path,
+            commands::open_link,
+            commands::close_ready,
             commands::log_ui,
             commands::launch_game,
             commands::game_running,
@@ -1015,12 +1262,43 @@ pub fn run() {
                     icon::apply(hwnd.0 as _);
                 }
             }
+            // Every way of closing the window reaches the page's close-time work first
+            // (row 27): only the title bar's button waited for it, so Alt+F4 and the
+            // taskbar's Close lost a preference still in its 150 ms batch and a Settings
+            // edit inside its 300 ms debounce. The page answers `close_ready`; after
+            // 1.5 s the window closes whatever it does, so a page that stopped answering
+            // cannot keep it open.
+            if let tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::CloseRequested { api, .. },
+                ..
+            } = &event
+            {
+                if label == "main" {
+                    note_maximized(handle);
+                    if !CLOSING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        api.prevent_close();
+                        let _ = handle.emit_to("main", "app:closing", ());
+                        let app = handle.clone();
+                        let _ = std::thread::Builder::new()
+                            .name("close-wait".into())
+                            .spawn(move || {
+                                std::thread::sleep(std::time::Duration::from_millis(1500));
+                                finish_close(&app);
+                            });
+                    }
+                }
+            }
             // Tauri exits through `process::exit`, so `Drop` never runs: the Steamworks
             // threads were still live when the process went away, `steamclient` asserted
             // "Illegal termination of worker thread 'SocketThread'" and the app
             // fast-failed with 0xC0000409 instead of exiting 0 — abandoning anything
             // still in the write-ahead log on the way out (D-190).
             if matches!(event, tauri::RunEvent::Exit) {
+                // The plugins' Exit hooks ran first, the window-state file written: a
+                // sign-out comes here with the window still up and no close before it.
+                note_maximized(handle);
+                keep_maximized(handle);
                 close_down(handle);
                 log_info!("app", "exited cleanly");
             }
@@ -1044,6 +1322,76 @@ mod tests {
             super::panic_line("boom", None, None),
             "panic: boom at an unknown place on thread without a name"
         );
+    }
+
+    use super::{fit_to_screen, mark_maximized, Rect};
+
+    /// Row 27: a restored window is left where it fits, and brought onto a screen where
+    /// it does not.
+    #[test]
+    fn a_restored_window_is_fitted_to_the_screens() {
+        let r = |x, y, w, h| Rect { x, y, w, h };
+        let laptop = [r(0, 0, 1920, 1032)];
+        // Fits: left alone.
+        assert_eq!(fit_to_screen(r(100, 100, 1440, 900), &laptop), None);
+        // A 2000×1200 window from a larger screen: shrunk to the work area.
+        assert_eq!(
+            fit_to_screen(r(96, 51, 2000, 1200), &laptop),
+            Some(r(0, 0, 1920, 1032))
+        );
+        // Its title bar above the top: down onto the screen, size kept.
+        assert_eq!(
+            fit_to_screen(r(100, -400, 1440, 900), &laptop),
+            Some(r(100, 0, 1440, 900))
+        );
+        // Its buttons past the right edge.
+        assert_eq!(
+            fit_to_screen(r(1000, 100, 1440, 900), &laptop),
+            Some(r(480, 100, 1440, 900))
+        );
+        // On no screen at all: centred on the first, the primary.
+        assert_eq!(
+            fit_to_screen(r(5000, 5000, 1440, 900), &laptop),
+            Some(r(240, 66, 1440, 900))
+        );
+        // Two screens: one wholly on the second stays; one across both stays too.
+        let two = [r(0, 0, 1920, 1032), r(1920, 0, 2560, 1400)];
+        assert_eq!(fit_to_screen(r(2200, 100, 1600, 1000), &two), None);
+        assert_eq!(fit_to_screen(r(1500, 100, 1440, 900), &two), None);
+        // Larger than the screen it mostly sits on: fitted to that one, not the primary.
+        assert_eq!(
+            fit_to_screen(r(2000, 100, 2600, 1300), &two),
+            Some(r(1920, 100, 2560, 1300))
+        );
+        assert_eq!(fit_to_screen(r(0, 0, 100, 100), &[]), None);
+    }
+
+    /// Row 27: the window-state file keeps "maximised" for a window closed while
+    /// minimised from maximised; nothing else in it changes.
+    #[test]
+    fn a_window_minimised_from_maximised_is_saved_maximised() {
+        let saved = r#"{"main":{"width":1440,"height":900,"x":-8,"y":-8,"prev_x":200,"prev_y":100,"maximized":false,"visible":true,"decorated":false,"fullscreen":false}}"#;
+        let fixed: serde_json::Value =
+            serde_json::from_str(&mark_maximized(saved, "main").unwrap()).unwrap();
+        assert_eq!(fixed["main"]["maximized"], serde_json::Value::Bool(true));
+        assert_eq!(fixed["main"]["prev_x"], 200);
+        assert_eq!(fixed["main"]["width"], 1440);
+        assert_eq!(
+            mark_maximized(&fixed.to_string(), "main"),
+            None,
+            "already maximised"
+        );
+        assert_eq!(mark_maximized(saved, "other"), None);
+        assert_eq!(mark_maximized("not json", "main"), None);
+    }
+
+    /// Row 27: the hand-over finds the single-instance plugin's window by the identifier,
+    /// which must be tauri.conf.json's.
+    #[test]
+    fn the_hand_over_uses_the_apps_identifier() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(conf["identifier"], super::proc::IDENTIFIER);
     }
 
     use super::{first_size, move_aside, sweep_updater_leftovers, with_suffix};

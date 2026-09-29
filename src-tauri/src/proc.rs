@@ -10,18 +10,23 @@
 
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::time::Duration;
 
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, HWND};
 use windows_sys::Win32::Security::{
     GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
 };
 use windows_sys::Win32::System::Threading::{
-    GetCurrentProcess, OpenProcess, OpenProcessToken, SetPriorityClass, WaitForSingleObject,
-    BELOW_NORMAL_PRIORITY_CLASS, HIGH_PRIORITY_CLASS, INFINITE, PROCESS_QUERY_LIMITED_INFORMATION,
-    PROCESS_SYNCHRONIZE,
+    GetCurrentProcess, GetCurrentProcessId, OpenProcess, OpenProcessToken, SetPriorityClass,
+    WaitForSingleObject, BELOW_NORMAL_PRIORITY_CLASS, HIGH_PRIORITY_CLASS, INFINITE,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
 };
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
-use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    AllowSetForegroundWindow, ChangeWindowMessageFilterEx, FindWindowExW, GetWindowThreadProcessId,
+    PostMessageW, RegisterWindowMessageW, MSGFLT_ALLOW, SW_SHOWNORMAL,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Priority {
@@ -31,16 +36,48 @@ pub enum Priority {
     BelowNormal,
 }
 
+/// Whether the last `set_priority` asked for below normal, for the game watch.
+static BELOW_NORMAL: AtomicBool = AtomicBool::new(false);
+
 /// Sets this process's priority class; failures are ignored (best effort).
 pub fn set_priority(p: Priority) {
     let class = match p {
         Priority::High => HIGH_PRIORITY_CLASS,
         Priority::BelowNormal => BELOW_NORMAL_PRIORITY_CLASS,
     };
+    BELOW_NORMAL.store(p == Priority::BelowNormal, Ordering::SeqCst);
     // SAFETY: the pseudo-handle of the current process is always valid.
     unsafe {
         let _ = SetPriorityClass(GetCurrentProcess(), class);
     }
+}
+
+/// Below normal while DayZ runs however it was started, high again once it has gone,
+/// looked at every 30 s (row 27). The step-down came only with a game this instance
+/// launched, or one running when it started (D-279): a DayZ started from Steam's Play
+/// button or another launcher left it at high priority beside the game, where its
+/// checks, the Workshop walk and any Refresh ran above the game's threads, against
+/// D-119. The launches' own waits still answer at once; this catches the rest.
+pub fn watch_for_game() {
+    let _ = std::thread::Builder::new()
+        .name("game-watch".into())
+        .spawn(|| loop {
+            std::thread::sleep(Duration::from_secs(30));
+            let find = crate::steam::registry::process::find_named;
+            let running = find("DayZ_x64.exe").or_else(|| find(crate::launch::process::BE_EXE));
+            let below = BELOW_NORMAL.load(Ordering::SeqCst);
+            match running {
+                Some(pid) if !below => {
+                    set_priority(Priority::BelowNormal);
+                    crate::log_info!("app", "DayZ is running (pid {pid}); below normal priority");
+                }
+                None if below => {
+                    set_priority(Priority::High);
+                    crate::log_info!("app", "DayZ is not running; back to high priority");
+                }
+                _ => {}
+            }
+        });
 }
 
 fn token_elevated(process: HANDLE) -> Option<bool> {
@@ -199,5 +236,213 @@ pub fn elevation_state(steam_pid: u32) -> ElevationState {
         (true, Some(false)) => ElevationState::LauncherHigher,
         (false, Some(true)) => ElevationState::SteamHigher,
         _ => ElevationState::Matched,
+    }
+}
+
+/// `identifier` in tauri.conf.json, which names the single-instance plugin's window.
+pub const IDENTIFIER: &str = "com.dayzlauncher.desktop";
+
+fn wide(s: &str) -> Vec<u16> {
+    OsStr::new(s)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+/// The message that asks a running instance to come to the front: registered, so it is
+/// the same number in every process, and it carries no data to read.
+pub fn show_message() -> u32 {
+    static MESSAGE: AtomicU32 = AtomicU32::new(0);
+    let known = MESSAGE.load(Ordering::Relaxed);
+    if known != 0 {
+        return known;
+    }
+    let name = wide(&format!("{IDENTIFIER}-show"));
+    // SAFETY: a NUL-terminated string that outlives the call.
+    let message = unsafe { RegisterWindowMessageW(name.as_ptr()) };
+    MESSAGE.store(message, Ordering::Relaxed);
+    message
+}
+
+/// Every top-level window of the single-instance plugin, with the process that owns it
+/// (tauri-plugin-single-instance 2.4.5 names it "{identifier}-sic" / "{identifier}-siw").
+fn instance_windows() -> Vec<(HWND, u32)> {
+    let class = wide(&format!("{IDENTIFIER}-sic"));
+    let title = wide(&format!("{IDENTIFIER}-siw"));
+    let mut found = Vec::new();
+    let mut after: HWND = std::ptr::null_mut();
+    // SAFETY: plain window queries with NUL-terminated strings that outlive them; a
+    // window that goes meanwhile only ends the walk early.
+    unsafe {
+        loop {
+            after = FindWindowExW(std::ptr::null_mut(), after, class.as_ptr(), title.as_ptr());
+            if after.is_null() || found.len() > 8 {
+                return found;
+            }
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(after, &mut pid);
+            if pid != 0 {
+                found.push((after, pid));
+            }
+        }
+    }
+}
+
+/// Hands this launch to a launcher that is already running, and says whether it did
+/// (row 27). The plugin looks only while the app is being built, after the elevation
+/// decision: with Steam elevated, every shortcut click while the launcher was open asked
+/// for administrator rights first, and a launch that went without them met an elevated
+/// instance whose mutex it could not open and whose window dropped its message, and ran
+/// as a second launcher beside it (D-079). The running one's window is found whatever
+/// its elevation and asked to come to the front, with a message that carries nothing.
+pub fn hand_to_running_instance() -> bool {
+    let message = show_message();
+    if message == 0 {
+        return false;
+    }
+    // SAFETY: reads this process's own id.
+    let me = unsafe { GetCurrentProcessId() };
+    for (hwnd, pid) in instance_windows() {
+        if pid == me {
+            continue;
+        }
+        // SAFETY: `hwnd` came from the window walk; a window gone since fails the post.
+        unsafe {
+            // Windows lets the process the player just started take the foreground, not
+            // the one already running: that right goes over with the request.
+            AllowSetForegroundWindow(pid);
+            if PostMessageW(hwnd, message, 0, 0) != 0 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// This instance's own plugin window, which answers `show_message` (row 27).
+pub fn own_instance_window() -> Option<HWND> {
+    // SAFETY: reads this process's own id.
+    let me = unsafe { GetCurrentProcessId() };
+    instance_windows()
+        .into_iter()
+        .find(|(_, pid)| *pid == me)
+        .map(|(hwnd, _)| hwnd)
+}
+
+/// Lets a process of lower integrity send `show_message` to this instance's window: an
+/// elevated instance's window otherwise drops what a launch without elevation posts
+/// (UIPI; ChangeWindowMessageFilterEx, S-126). That one message only, and it carries no
+/// data.
+pub fn accept_show_from_lower_integrity() -> bool {
+    own_instance_window().is_some_and(|hwnd| {
+        // SAFETY: this process's own window; no filter struct is asked for.
+        unsafe {
+            ChangeWindowMessageFilterEx(hwnd, show_message(), MSGFLT_ALLOW, std::ptr::null_mut())
+                != 0
+        }
+    })
+}
+
+/// Opens `target` through the desktop's own shell (Explorer), so whatever it starts runs
+/// as the signed-in player, not with this process's administrator token (row 27): find
+/// the desktop's folder view, take its Shell.Application and call
+/// `IShellDispatch2::ShellExecute` there (S-125). On a thread of its own in a
+/// single-threaded COM apartment, and given ten seconds: every call goes to Explorer,
+/// which can be busy or restarting.
+pub fn open_as_desktop_user(target: &str) -> Result<(), String> {
+    let target = target.to_string();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("shell-open".into())
+        .spawn(move || {
+            let _ = tx.send(shell_execute_in_explorer(&target));
+        })
+        .map_err(|e| e.to_string())?;
+    rx.recv_timeout(Duration::from_secs(10))
+        .map_err(|_| "Explorer did not answer within 10 s".to_string())?
+}
+
+/// The desktop's Shell.Application, reached through its folder view (S-125). Call with
+/// COM initialised on this thread, single-threaded.
+unsafe fn desktop_shell() -> windows::core::Result<windows::Win32::UI::Shell::IShellDispatch2> {
+    use windows::core::Interface;
+    use windows::Win32::System::Com::{CoCreateInstance, IDispatch, IServiceProvider, CLSCTX_ALL};
+    use windows::Win32::System::Variant::VARIANT;
+    use windows::Win32::UI::Shell::{
+        IShellBrowser, IShellFolderViewDual, IShellView, IShellWindows, SID_STopLevelBrowser,
+        ShellWindows, CSIDL_DESKTOP, SVGIO_BACKGROUND, SWC_DESKTOP, SWFO_NEEDDISPATCH,
+    };
+    // SAFETY: the caller has initialised COM; every pointer is an interface the calls
+    // themselves returned.
+    unsafe {
+        let shell_windows: IShellWindows = CoCreateInstance(&ShellWindows, None, CLSCTX_ALL)?;
+        let mut hwnd = 0i32;
+        let desktop = shell_windows.FindWindowSW(
+            &VARIANT::from(CSIDL_DESKTOP as i32),
+            &VARIANT::default(),
+            SWC_DESKTOP,
+            &mut hwnd,
+            SWFO_NEEDDISPATCH,
+        )?;
+        let browser: IShellBrowser = desktop
+            .cast::<IServiceProvider>()?
+            .QueryService(&SID_STopLevelBrowser)?;
+        let view: IShellView = browser.QueryActiveShellView()?;
+        let background: IDispatch = view.GetItemObject(SVGIO_BACKGROUND)?;
+        background
+            .cast::<IShellFolderViewDual>()?
+            .Application()?
+            .cast()
+    }
+}
+
+/// Runs `f` with COM initialised on this thread, single-threaded, and uninitialises it
+/// after `f`'s interfaces are gone.
+fn with_com<T>(f: impl FnOnce() -> windows::core::Result<T>) -> Result<T, String> {
+    use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+    // SAFETY: paired with the CoUninitialize below on the same thread; `f` returns before it.
+    unsafe {
+        CoInitializeEx(None, COINIT_APARTMENTTHREADED)
+            .ok()
+            .map_err(|e| format!("COM: {e}"))?;
+    }
+    let r = f().map_err(|e| e.to_string());
+    // SAFETY: the matching call for the initialisation above.
+    unsafe { CoUninitialize() };
+    r
+}
+
+fn shell_execute_in_explorer(target: &str) -> Result<(), String> {
+    use windows::core::BSTR;
+    use windows::Win32::System::Variant::VARIANT;
+    with_com(|| {
+        // SAFETY: COM is initialised on this thread by `with_com`.
+        let shell = unsafe { desktop_shell() }?;
+        // Its arguments come in another order than ShellExecute's (S-125).
+        // SAFETY: an interface `desktop_shell` returned; the arguments outlive the call.
+        unsafe {
+            shell.ShellExecute(
+                &BSTR::from(target),
+                &VARIANT::from(""),
+                &VARIANT::from(""),
+                &VARIANT::from(""),
+                &VARIANT::from(SW_SHOWNORMAL),
+            )
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    /// Row 27: the desktop's Shell.Application is reachable, without opening anything.
+    /// Ignored in CI, whose runner has no desktop shell: `cargo test -- --ignored
+    /// the_desktop_shell` on a desktop.
+    #[test]
+    #[ignore]
+    fn the_desktop_shell_is_reachable() {
+        std::thread::spawn(|| super::with_com(|| unsafe { super::desktop_shell() }.map(|_| ())))
+            .join()
+            .unwrap()
+            .unwrap();
     }
 }

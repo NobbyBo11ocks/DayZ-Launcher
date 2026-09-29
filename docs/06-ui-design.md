@@ -4,7 +4,7 @@ Goal: the fastest way from "open launcher" to "in game", in a dark, quiet, infor
 
 ## 1. Window and layout
 
-- Default 1280×800, minimum 960×600; size, position and maximised state are remembered between runs (`tauri-plugin-window-state`, D-098). Custom title bar (`decorations: false`, drag region) so the theme covers the whole window: 30 px high, no app name but the logo's gas mask at the left where a framed window shows its icon (D-258), an update notice when one is pending, and our own minimise/maximise/close buttons (D-091), drawn in the accent since D-300. **Moved:** the update notice now sits at the foot of the section rail, not in the title bar (D-216).
+- Default 1280×800, minimum 960×600; size, position and maximised state are remembered between runs (`tauri-plugin-window-state`, D-098); a saved place that no longer fits the screens comes back on one, and a window closed while minimised from maximised comes back maximised (D-325). Every way of closing the window (its button, Alt+F4, the taskbar) waits up to 1.5 s for changes not yet saved (D-325). Custom title bar (`decorations: false`, drag region) so the theme covers the whole window: 30 px high, no app name but the logo's gas mask at the left where a framed window shows its icon (D-258), an update notice when one is pending, and our own minimise/maximise/close buttons (D-091), drawn in the accent since D-300. **Moved:** the update notice now sits at the foot of the section rail, not in the title bar (D-216).
 - Three regions:
 
 ```text

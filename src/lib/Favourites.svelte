@@ -78,6 +78,8 @@
     if (e.key !== "Escape" || servers.joiningId || !selected) return;
     const t = e.target;
     if (t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement) return;
+    // Handled, so the notices leave it alone (row 27).
+    e.preventDefault();
     servers.select(null);
   }
 </script>

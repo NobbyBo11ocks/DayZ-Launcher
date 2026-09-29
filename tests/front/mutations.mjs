@@ -20,6 +20,9 @@ const C = "src/lib/changes.ts";
 const VD = "src/lib/verdict.ts";
 const AV = "src/lib/avatar.ts";
 const PN = "src/lib/pane.ts";
+const CL = "src/lib/state/closing.ts";
+const ES = "src/lib/escape.ts";
+const EX = "src/lib/external.ts";
 
 /** [test file, the test's name as it starts, the fix, the source, text, replacement, what the revert does] */
 const MUTATIONS = [
@@ -196,6 +199,17 @@ const MUTATIONS = [
     '  return stale.has(m.workshopId) ? "update" : "installed";', '  return "installed";', "no update mark"],
   ["pane", "an unknown server version", "row 26 (6)", T,
     'local != null && version !== "" && version !== local', "local != null && version !== local", "an unknown version warned as different"],
+  // shell.test.mjs (row 27)
+  ["shell", "a close waits for the page's", "row 27 (11)", CL,
+    '      .then(() => invoke("close_ready"))\n', "", "the host is never told the page is done"],
+  ["shell", "a flush survives", "row 27 (11)", CL,
+    "[...pending].map((f) => Promise.resolve().then(f))", "[...pending].map((f) => f())", "a callback that throws at once rejects the flush"],
+  ["shell", "Escape goes to the notices", "row 27 (5)", ES,
+    ' || e.defaultPrevented', "", "the notices clear on an Escape a page acted on"],
+  ["shell", "Escape goes to the notices", "row 27 (16)", ES,
+    " || modalOpen", "", "the notices clear behind a modal"],
+  ["shell", "links go through the host", "row 27 (1)", EX,
+    '    await invoke("open_link", { url });', '    await invoke("plugin:opener|open_url", { url });', "links opened in-process again"],
   // pages.test.mjs
   ["pages", "favourites are read beside the list", "row 23", S,
     "    this.favouritesLoaded = true;\n",

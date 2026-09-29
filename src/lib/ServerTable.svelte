@@ -160,8 +160,10 @@
   }
 
   // Report visible ids when the viewport window itself changes (scroll, resize,
-  // filter/sort) and on a fixed 60 s cadence while the document is visible. Data
-  // updates alone must not retrigger this (D-060).
+  // filter/sort) and on a fixed 60 s cadence, skipped while the page is hidden: WebView2
+  // says so only when the window is hidden, not when it is minimised (wry keeps the
+  // webview visible then, docs/05 §1; row 27). Data updates alone must not retrigger
+  // this (D-060).
   let visTimer: ReturnType<typeof setTimeout> | undefined;
   $effect(() => {
     // Only the viewport window, never the data: `rows.length` changes on most

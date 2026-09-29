@@ -6,8 +6,8 @@
   // no embedded player and the memory budget holds.
   // Every command through the logging wrapper: a failure is recorded with its
   // command name before it is rethrown (D-158).
-  import { describe, invokeLogged as invoke, logWarn } from "./log";
-  import { openUrl } from "@tauri-apps/plugin-opener";
+  import { invokeLogged as invoke } from "./log";
+  import { openExternal } from "./external";
   import { untrack } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { news, type NewsView } from "./state/news.svelte";
@@ -138,6 +138,8 @@
   // D-256); it only cleared `playing`, which dropped focus to <body>.
   function onPlayerKey(e: KeyboardEvent) {
     if (e.key === "Escape" && playing) {
+      // Handled, so the notices leave it alone (row 27).
+      e.preventDefault();
       e.stopPropagation();
       closePlayer();
     }
@@ -147,13 +149,10 @@
    *  fetched the news again at every focus until a fetch succeeded (row 24). */
   let openError = $state<string | null>(null);
   function open(url: string) {
-    void openUrl(url)
-      .then(() => (openError = null))
-      .catch((e) => {
-        logWarn("news", `${url} could not be opened: ${describe(e)}`);
-        // In words, the opener's own text to the log (row 24, approved; as D-306 (18)).
-        openError = "The post could not be opened in your browser. The details are on the Logs page.";
-      });
+    // In words; the host logs the reason (row 24, approved; row 27).
+    void openExternal(url).then((ok) => {
+      openError = ok ? null : "The post could not be opened in your browser. The details are on the Logs page.";
+    });
   }
 </script>
 

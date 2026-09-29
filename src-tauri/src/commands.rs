@@ -157,8 +157,10 @@ pub struct AppInfo {
 }
 
 /// Static build information for the Settings page (the Diagnostics view went in D-168),
-/// the Logs page's copied report and the M0 smoke test.
-#[tauri::command]
+/// the Logs page's copied report and the M0 smoke test. `async`: it reads the registry and
+/// asks WebView2 its version, and a plain command runs on the main thread, where the page
+/// asked for it twice while it drew (docs/05 §4, row 27).
+#[tauri::command(async)]
 pub fn app_info() -> AppInfo {
     #[cfg(debug_assertions)]
     eprintln!("[ipc] app_info called from the webview");
@@ -1777,8 +1779,9 @@ pub struct LogFile {
     error: Option<String>,
 }
 
-/// Where the log file lives, for "show me the folder".
-#[tauri::command]
+/// Where the log file lives, for "show me the folder". `async`: a file check, off the
+/// main thread (docs/05 §4, row 27).
+#[tauri::command(async)]
 pub fn logs_path() -> LogFile {
     let path = crate::log::path();
     LogFile {
@@ -1786,6 +1789,60 @@ pub fn logs_path() -> LogFile {
         path: path.map(|p| p.to_string_lossy().into_owned()),
         error: crate::log::file_error(),
     }
+}
+
+/// Opens a web page in the player's browser (D-099). While the launcher runs as
+/// administrator and the desktop does not — matched to an elevated Steam (D-119), or
+/// started with Run as administrator — the opener's in-process ShellExecute started the
+/// browser as administrator too, for every site it then showed, the one-click elevation
+/// D-312 closed for Start Steam: the desktop's own shell opens the page instead, as the
+/// signed-in player (`proc::open_as_desktop_user`, row 27). Web addresses only.
+#[tauri::command(async)]
+pub fn open_link(app: AppHandle, url: String) -> AppResult<()> {
+    if !is_web_address(&url) {
+        return Err(AppError::logged(
+            "app",
+            "That link could not be opened",
+            format!(
+                "not a web address: {}",
+                url.chars().take(200).collect::<String>()
+            ),
+        ));
+    }
+    let opened =
+        if crate::proc::current_is_elevated() && crate::proc::shell_is_elevated() != Some(true) {
+            crate::proc::open_as_desktop_user(&url)
+        } else {
+            use tauri_plugin_opener::OpenerExt;
+            app.opener()
+                .open_url(&url, None::<&str>)
+                .map_err(|e| e.to_string())
+        };
+    opened.map_err(|e| {
+        AppError::logged(
+            "app",
+            "The page could not be opened in your browser",
+            format!("{url}: {e}"),
+        )
+    })
+}
+
+/// `http(s)://` and nothing a shell could read as more: no spaces, quotes or control
+/// characters, which a well-formed address carries percent-encoded.
+fn is_web_address(url: &str) -> bool {
+    let lower = url.get(..8).unwrap_or(url).to_ascii_lowercase();
+    (lower.starts_with("https://") || lower.starts_with("http://"))
+        && url.len() <= 2048
+        && url.len() > lower.find("//").map_or(0, |i| i + 2)
+        && !url
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || c == '"')
+}
+
+/// The page has kept what it had to before the window closes (`app:closing`, row 27).
+#[tauri::command]
+pub fn close_ready(app: AppHandle) {
+    crate::finish_close(&app);
 }
 
 /// The WebView's own diagnostics: unhandled errors, failed commands, view timings.
@@ -3470,6 +3527,36 @@ mod tests {
             serde_json::to_value(&list).unwrap(),
             serde_json::json!({ "age": "2 hours ago", "mods": [{ "workshopId": 1559212036u64, "name": "CF" }] })
         );
+    }
+
+    use super::is_web_address;
+
+    /// Row 27: `open_link` takes web addresses and nothing a shell reads as more.
+    #[test]
+    fn only_web_addresses_are_opened() {
+        assert!(is_web_address(
+            "https://steamcommunity.com/sharedfiles/filedetails/?id=1559212036"
+        ));
+        assert!(is_web_address("http://www.pcgamer.com/x"));
+        assert!(is_web_address(
+            "HTTPS://store.steampowered.com/news/app/221100"
+        ));
+        for bad in [
+            "https://",
+            "file:///C:/Windows/System32/calc.exe",
+            "mailto:someone@example.com",
+            r"C:\Windows\notepad.exe",
+            "https://example.com/a b",
+            "https://example.com/\"--x",
+            "https://example.com/\u{7}",
+            "steam://run/221100",
+        ] {
+            assert!(!is_web_address(bad), "{bad}");
+        }
+        assert!(!is_web_address(&format!(
+            "https://example.com/{}",
+            "a".repeat(2100)
+        )));
     }
 
     use super::fallback_query_ports;

@@ -32,9 +32,14 @@ pub fn spawn(game_dir: &Path, args: &[String]) -> AppResult<(Child, Launched)> {
             exe.display()
         )));
     }
+    // Normal priority whatever the launcher's own: a child of a below-normal process is
+    // born below normal unless its class is named (CreateProcessW, S-127), and the
+    // launcher can still be below normal for a moment after a game ends (row 27, D-151).
+    use std::os::windows::process::CommandExt;
     let child = Command::new(&exe)
         .args(args)
         .current_dir(game_dir)
+        .creation_flags(windows_sys::Win32::System::Threading::NORMAL_PRIORITY_CLASS)
         .spawn()
         .map_err(|e| AppError::io(&exe, e))?;
     let launched = Launched {

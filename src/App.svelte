@@ -19,6 +19,7 @@
   import Toasts from "./lib/Toasts.svelte";
   import Welcome from "./lib/Welcome.svelte";
   import WhatsNew from "./lib/WhatsNew.svelte";
+  import { answerCloseRequests } from "./lib/state/closing";
   import { modUpdates } from "./lib/state/mods.svelte";
   import { news } from "./lib/state/news.svelte";
   import { notices } from "./lib/state/notices.svelte";
@@ -29,6 +30,10 @@
 
   // Uncaught errors and rejected promises reach the log before anything else runs
   // (D-158): installed by main.ts's first import, ahead of the stores (row 25).
+
+  // Every close of the window waits for the page's unsaved work, for a bounded time
+  // (row 27; the host's close handler asks).
+  $effect(() => answerCloseRequests());
 
   // Workshop updates are checked at start and every fifteen minutes, so a mod its
   // author updated shows up without opening the Mods page (D-191).
@@ -344,7 +349,25 @@
       <JoinDialog serverId={servers.joiningId} onClose={() => (servers.joiningId = null)} />
       {#snippet failed()}
         <div class="join-crashed" role="presentation">
-          <div class="crashed" role="alertdialog" aria-modal="true" aria-labelledby="join-crashed-text">
+          <!-- Escape closes it and Tab stays on its one button, as in every other modal:
+               the key did nothing, and Tab walked out to the rail behind it (row 27). -->
+          <div
+            class="crashed"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="join-crashed-text"
+            tabindex="-1"
+            onkeydown={(e) => {
+              if (e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                servers.joiningId = null;
+              } else if (e.key === "Tab") {
+                e.preventDefault();
+                e.currentTarget.querySelector("button")?.focus();
+              }
+            }}
+          >
             <p id="join-crashed-text">The join window stopped working.</p>
             <!-- svelte-ignore a11y_autofocus -->
             <button class="btn" autofocus onclick={() => (servers.joiningId = null)}>Close</button>

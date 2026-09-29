@@ -10,6 +10,16 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.100",
+    notes: [
+      { kind: "fixed", text: "Links no longer start your browser as administrator when the launcher is one." },
+      { kind: "fixed", text: "Starting the launcher while it is open no longer asks for administrator rights." },
+      { kind: "fixed", text: "The window comes back on screen after a monitor or scaling change." },
+      { kind: "fixed", text: "Closing with Alt+F4 or from the taskbar keeps the changes you just made." },
+      { kind: "fixed", text: "Escape closes the server details without clearing your notices too." },
+    ],
+  },
+  {
     version: "0.1.99",
     notes: [
       { kind: "changed", text: "Server details show the last known mods when a server does not send its list." },

@@ -6,7 +6,6 @@
   // in DayZ; D-103, D-105, D-106). The update notice lives at the foot of the rail (D-216).
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import emblemUrl from "../assets/emblem.png";
-  import { flushBeforeClose } from "./state/closing";
 
   let {
     servers = null,
@@ -50,7 +49,7 @@
     <button class="wbtn" aria-label="Maximise or restore" onclick={() => win.toggleMaximize()}>
       <svg viewBox="0 0 10 10" width="10" height="10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1" /></svg>
     </button>
-    <button class="wbtn close" aria-label="Close" onclick={() => void flushBeforeClose().then(() => win.close())}>
+    <button class="wbtn close" aria-label="Close" onclick={() => void win.close()}>
       <svg viewBox="0 0 10 10" width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor" stroke-width="1.1" /></svg>
     </button>
   </div>

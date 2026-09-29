@@ -2,28 +2,34 @@
   // DayZ update posts (D-099) and one-off notices (D-303: a settings file that could
   // not be read, saved data moved, a join not added to Recent), stacked in the top-right
   // corner until dismissed. Favourite alerts used to share this rail (removed in D-182).
-  import { openUrl } from "@tauri-apps/plugin-opener";
+  import { MODAL, noticesTakeEscape } from "./escape";
+  import { openExternal } from "./external";
   import { news } from "./state/news.svelte";
   import { notices } from "./state/notices.svelte";
 
   const count = $derived(news.alerts.length + notices.items.length);
 
   function read(gid: string, url: string) {
-    void openUrl(url).catch(() => {});
+    void openExternal(url);
     news.dismissAlert(gid);
   }
 
   /** Escape clears the stack. It stays until dismissed and sits over the top right of
    *  every page, where it hid the Logs page's header controls, Mods' Rescan and Update
    *  all, and Servers' Refresh — and the keyboard focus on them (WCAG 2.4.11, D-291).
-   *  Not while a dialog is open or a field is being typed in: those keep their Escape. */
+   *  Not while a dialog is open or a field is being typed in: those keep their Escape;
+   *  nor when anything else acted on the key (`noticesTakeEscape`, row 27). */
   function onKey(e: KeyboardEvent) {
     if (e.key !== "Escape" || count === 0) return;
-    if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
-    const t = e.target;
-    if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) return;
-    for (const n of [...news.alerts]) news.dismissAlert(n.gid);
-    notices.clear();
+    const modalOpen = document.querySelector(MODAL) !== null;
+    // Once every other handler has had the key: the window's listeners run in the order
+    // their components mounted, which a page switch reverses, so a look at once missed the
+    // page's own (row 27).
+    setTimeout(() => {
+      if (!noticesTakeEscape(e, modalOpen)) return;
+      for (const n of [...news.alerts]) news.dismissAlert(n.gid);
+      notices.clear();
+    });
   }
 </script>
 

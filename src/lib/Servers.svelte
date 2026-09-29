@@ -97,8 +97,11 @@
       target instanceof HTMLSelectElement ||
       (target instanceof HTMLInputElement && !NON_TEXT_INPUTS.has(target.type));
     if (e.key === "Escape" && connectOpen) {
+      e.preventDefault();
       closeConnect();
     } else if (e.key === "Escape" && !typing && servers.selectedId) {
+      // Handled, so the notices leave it alone (row 27).
+      e.preventDefault();
       // The grid closes the pane on Escape only while it has focus; after a click on
       // the pane's own Join, star or a mod link, or on a filter, the key did nothing
       // and the pane stayed (D-247). A text field keeps its own Escape.

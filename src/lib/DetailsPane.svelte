@@ -204,7 +204,9 @@
   // selection scrolled away, hidden by a search or opened as a sibling kept its first
   // check's trust box, count and chart for as long as the pane was open (row 26). The
   // store's own rules pace it: nothing sooner than two minutes after the last check, ten
-  // for a row that could not be counted, and nothing while one is in flight.
+  // for a row that could not be counted, and nothing while one is in flight. Skipped while
+  // the page is hidden, which it is when the window is hidden, not when it is minimised
+  // (docs/05 §1; row 27).
   $effect(() => {
     const cur = id;
     if (!cur) return;
