@@ -83,10 +83,15 @@ unsafe extern "system" fn answer_show(
     _data: usize,
 ) -> windows_sys::Win32::Foundation::LRESULT {
     if message == proc::show_message() {
+        // Closing, it cannot come to the front: the launch waits for it to go and starts
+        // itself (D-326), where it used to end, trusting a window that was on its way out.
+        if CLOSING.load(std::sync::atomic::Ordering::SeqCst) {
+            return proc::CLOSING;
+        }
         if let Some(app) = APP.get() {
             bring_to_front(app);
         }
-        return 0;
+        return proc::SHOWN;
     }
     // SAFETY: the arguments are the ones this procedure was called with.
     unsafe { windows_sys::Win32::UI::Shell::DefSubclassProc(hwnd, message, wparam, lparam) }

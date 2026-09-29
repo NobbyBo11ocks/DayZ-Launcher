@@ -10,6 +10,15 @@ export type Release = { version: string; notes: Note[] };
 
 export const CHANGES: readonly Release[] = [
   {
+    version: "0.1.101",
+    notes: [
+      { kind: "removed", text: "The News page's With press tab: only Bohemia's own posts are shown." },
+      { kind: "changed", text: "News cards now fill their rows neatly at any window size, maximised too." },
+      { kind: "changed", text: "The top news post shows its whole picture and more of its text." },
+      { kind: "fixed", text: "Opening the launcher while it is still closing now starts it again." },
+    ],
+  },
+  {
     version: "0.1.100",
     notes: [
       { kind: "fixed", text: "Links no longer start your browser as administrator when the launcher is one." },

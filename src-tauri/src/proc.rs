@@ -25,7 +25,7 @@ use windows_sys::Win32::System::Threading::{
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AllowSetForegroundWindow, ChangeWindowMessageFilterEx, FindWindowExW, GetWindowThreadProcessId,
-    PostMessageW, RegisterWindowMessageW, MSGFLT_ALLOW, SW_SHOWNORMAL,
+    RegisterWindowMessageW, SendMessageTimeoutW, MSGFLT_ALLOW, SMTO_ABORTIFHUNG, SW_SHOWNORMAL,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -306,17 +306,66 @@ pub fn hand_to_running_instance() -> bool {
         if pid == me {
             continue;
         }
-        // SAFETY: `hwnd` came from the window walk; a window gone since fails the post.
-        unsafe {
+        let mut answer: usize = 0;
+        // SAFETY: `hwnd` came from the window walk; a window gone since fails the send.
+        let sent = unsafe {
             // Windows lets the process the player just started take the foreground, not
             // the one already running: that right goes over with the request.
             AllowSetForegroundWindow(pid);
-            if PostMessageW(hwnd, message, 0, 0) != 0 {
-                return true;
+            SendMessageTimeoutW(hwnd, message, 0, 0, SMTO_ABORTIFHUNG, 3000, &mut answer) != 0
+        };
+        match handover(sent, answer as isize) {
+            Handover::Done => return true,
+            Handover::AfterItExits => {
+                wait_for_exit(pid, Duration::from_secs(8));
+                return false;
             }
+            Handover::Start => {}
         }
     }
     false
+}
+
+/// What the running instance answers to `show_message`: it came to the front.
+pub const SHOWN: isize = 1;
+/// What it answers while it is closing: the launch waits for it to go, then starts.
+pub const CLOSING: isize = 2;
+
+#[derive(Debug, PartialEq, Eq)]
+enum Handover {
+    /// The running instance came to the front: this launch ends.
+    Done,
+    /// It is closing: wait for it, then start (D-326). A launch while the window closed
+    /// was answered by an instance about to exit, and neither stayed.
+    AfterItExits,
+    /// Not handed over: the message did not get through (an older instance behind UIPI,
+    /// or a hung one), or an older instance did not know it and answered 0. Start as
+    /// usual, where the plugin's own check hands over to an older instance of the same
+    /// elevation.
+    Start,
+}
+
+fn handover(sent: bool, answer: isize) -> Handover {
+    match (sent, answer) {
+        (true, SHOWN) => Handover::Done,
+        (true, CLOSING) => Handover::AfterItExits,
+        _ => Handover::Start,
+    }
+}
+
+/// Waits up to `limit` for the process `pid` to end; a process that cannot be opened is
+/// given a short pause instead.
+fn wait_for_exit(pid: u32, limit: Duration) {
+    // SAFETY: the handle is checked before use and closed after the wait.
+    unsafe {
+        let h = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+        if h.is_null() {
+            std::thread::sleep(Duration::from_secs(2));
+            return;
+        }
+        WaitForSingleObject(h, limit.as_millis().min(u128::from(u32::MAX)) as u32);
+        CloseHandle(h);
+    }
 }
 
 /// This instance's own plugin window, which answers `show_message` (row 27).
@@ -434,6 +483,32 @@ fn shell_execute_in_explorer(target: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    use super::{handover, Handover, CLOSING, SHOWN};
+
+    /// D-326: the running instance's answer decides the launch. A closing one is waited
+    /// for, not trusted; one that did not get the message, or did not know it, leaves the
+    /// launch to start (and to the plugin's own check).
+    #[test]
+    fn the_answer_decides_the_launch() {
+        assert_eq!(handover(true, SHOWN), Handover::Done);
+        assert_eq!(handover(true, CLOSING), Handover::AfterItExits);
+        assert_eq!(
+            handover(true, 0),
+            Handover::Start,
+            "an older instance that does not know the message"
+        );
+        assert_eq!(
+            handover(false, 0),
+            Handover::Start,
+            "blocked, hung, or gone"
+        );
+        assert_eq!(
+            handover(false, SHOWN),
+            Handover::Start,
+            "an answer that was never sent counts for nothing"
+        );
+    }
+
     /// Row 27: the desktop's Shell.Application is reachable, without opening anything.
     /// Ignored in CI, whose runner has no desktop shell: `cargo test -- --ignored
     /// the_desktop_shell` on a desktop.

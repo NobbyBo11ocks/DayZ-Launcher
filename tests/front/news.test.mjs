@@ -244,3 +244,22 @@ test("a picture that could not be made says so to the page, which then shows the
   assert.equal(news.thumbFailed(withPicture, true), false, "per size");
   news.stop();
 });
+
+test("the News grid's rows come out full, maximised or not (D-326)", async (t) => {
+  const app = await freshApp(t, { timers: false });
+  const { newsGrid, CARDS_MAX } = await app.load("newsgrid");
+  // Maximised on 1920 px (1624 px of grid): eight update cards were five and three.
+  assert.deepEqual(newsGrid(1624, 8), { cols: 4, count: 8 });
+  assert.deepEqual(newsGrid(1624, 12), { cols: 4, count: 12 });
+  // Nine cannot come out even within the card widths: the fewest gaps, the most columns.
+  assert.deepEqual(newsGrid(1624, 9), { cols: 5, count: 9 });
+  // The window's usual size holds three a row; eight leave one gap there, not a column of giants.
+  assert.deepEqual(newsGrid(1010, 8), { cols: 3, count: 8 });
+  // "All news": more posts than the grid shows, so whole rows of the most columns.
+  assert.deepEqual(newsGrid(1624, 59), { cols: 5, count: 25 });
+  assert.deepEqual(newsGrid(1010, 59), { cols: 3, count: 24 });
+  assert.equal(CARDS_MAX, 24);
+  // Before the grid has a width: the style sheet's own columns.
+  assert.deepEqual(newsGrid(0, 8), { cols: 0, count: 8 });
+  assert.deepEqual(newsGrid(1624, 0).count, 0);
+});

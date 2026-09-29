@@ -23,6 +23,7 @@ const PN = "src/lib/pane.ts";
 const CL = "src/lib/state/closing.ts";
 const ES = "src/lib/escape.ts";
 const EX = "src/lib/external.ts";
+const NG = "src/lib/newsgrid.ts";
 
 /** [test file, the test's name as it starts, the fix, the source, text, replacement, what the revert does] */
 const MUTATIONS = [
@@ -210,6 +211,11 @@ const MUTATIONS = [
     " || modalOpen", "", "the notices clear behind a modal"],
   ["shell", "links go through the host", "row 27 (1)", EX,
     '    await invoke("open_link", { url });', '    await invoke("plugin:opener|open_url", { url });', "links opened in-process again"],
+  // news.test.mjs, the grid (D-326)
+  ["news", "the News grid's rows come out full", "D-326", NG,
+    "    if (e < empty) {", "    if (c === most) {", "columns from the width alone: five and three"],
+  ["news", "the News grid's rows come out full", "D-326", NG,
+    "    return { cols: most, count: Math.min(rows * most, Math.floor(n / most) * most) };", "    return { cols: most, count: CARDS_MAX };", "a part-empty last row in All news"],
   // pages.test.mjs
   ["pages", "favourites are read beside the list", "row 23", S,
     "    this.favouritesLoaded = true;\n",

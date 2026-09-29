@@ -1,7 +1,9 @@
 //! DayZ news from Steam's keyless news feed (S-67, D-099): Bohemia's community
-//! announcements (updates, dev blogs, sales) plus the third-party press feeds Steam
-//! attaches to the app. Summaries are reduced to plain text here so the WebView
-//! never renders remote markup.
+//! announcements (updates, dev blogs, sales) only. The press feeds Steam attaches to the
+//! app (PC Gamer, PCGamesN, GamingOnLinux, PlayGround.ru: 8 of the newest 60 posts) were
+//! a "With press" view until the player asked for it gone (D-326); the request names
+//! Bohemia's feed, so they are not fetched at all. Summaries are reduced to plain text
+//! here so the WebView never renders remote markup.
 
 use serde::{Deserialize, Serialize};
 
@@ -13,8 +15,9 @@ const USER_AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION"),
     " (+https://github.com/NobbyBo11ocks/DayZ-Launcher)"
 );
-/// Characters of body text kept per post.
-const SUMMARY_CHARS: usize = 320;
+/// Characters of body text kept per post: enough for the featured post to fill its card
+/// on a maximised window, where 320 left most of it empty (D-326); cards show three lines.
+const SUMMARY_CHARS: usize = 900;
 /// Steam expands `{STEAM_CLAN_IMAGE}` in announcement bodies to this base (S-69).
 const CLAN_IMAGE_BASE: &str = "https://clan.akamai.steamstatic.com/images";
 /// Hosts a post picture may be fetched from for a thumbnail: Steam's clan-image CDN only.
@@ -567,6 +570,16 @@ fn failed(detail: impl std::fmt::Display) -> String {
     NEWS_FAILED.to_string()
 }
 
+/// The request for the latest `count` posts of Bohemia's own feed (`feeds=`, S-67): plain
+/// integers and fixed words only, so the URL is built without the `query` and `json`
+/// reqwest features (kept off to stay with the updater's feature set).
+fn news_url(count: u32) -> String {
+    format!(
+        "{NEWS_URL}?appid={}&count={count}&maxlength=0&format=json&feeds={OFFICIAL_FEED}",
+        crate::steam::DAYZ_APP_ID
+    )
+}
+
 /// Latest `count` posts, newest first, with full bodies (`maxlength=0`) so the
 /// pictures and video previews further down a post are found; the gzip reply for
 /// 60 posts is well under 100 KB.
@@ -576,14 +589,8 @@ pub async fn fetch(count: u32) -> Result<Vec<NewsItem>, String> {
         .timeout(std::time::Duration::from_secs(20))
         .build()
         .map_err(failed)?;
-    // Plain integers and fixed words only, so the URL is built without the `query`
-    // and `json` reqwest features (kept off to stay with the updater's feature set).
-    let url = format!(
-        "{NEWS_URL}?appid={}&count={count}&maxlength=0&format=json",
-        crate::steam::DAYZ_APP_ID
-    );
     let resp = client
-        .get(url)
+        .get(news_url(count))
         .send()
         .await
         .map_err(|e| {
@@ -605,6 +612,15 @@ pub async fn fetch(count: u32) -> Result<Vec<NewsItem>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// D-326: only Bohemia's feed is asked for; the press feeds are not fetched.
+    #[test]
+    fn asks_for_bohemias_feed_only() {
+        assert_eq!(
+            news_url(60),
+            "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid=221100&count=60&maxlength=0&format=json&feeds=steam_community_announcements"
+        );
+    }
 
     #[test]
     fn strips_markup_and_cuts() {

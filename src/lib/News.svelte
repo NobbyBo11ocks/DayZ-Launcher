@@ -12,6 +12,7 @@
   import { SvelteSet } from "svelte/reactivity";
   import { news, type NewsView } from "./state/news.svelte";
   import type { NewsItem } from "./types";
+  import { newsGrid } from "./newsgrid";
 
   $effect(() => {
     // Untracked: `beginVisit` reads the seen mark, so the effect depended on it, and
@@ -27,11 +28,14 @@
   const VIEWS: { id: NewsView; label: string; title: string }[] = [
     { id: "updates", label: "Updates", title: "Game updates, hotfixes, experimental and stable releases" },
     { id: "official", label: "All news", title: "Every post from Bohemia: updates, dev blogs, sales" },
-    { id: "press", label: "With press", title: "Also the press feeds Steam attaches to DayZ" },
   ];
 
   const featured = $derived(news.list[0] ?? null);
-  const rest = $derived(news.list.slice(1, 25));
+  /** The grid's own width, for its columns: rows come out full at any window size
+   *  (`newsGrid`, D-326). */
+  let gridWidth = $state(0);
+  const layout = $derived(newsGrid(gridWidth, news.list.length - 1));
+  const rest = $derived(news.list.slice(1, 1 + layout.count));
 
   const day = (unix: number) => new Date(unix * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
   const isNew = (n: NewsItem) => n.official && n.date > news.visitSeen;
@@ -199,7 +203,7 @@
           </div>
         </div>
       </article>
-      <div class="grid">
+      <div class="grid" bind:clientWidth={gridWidth} style:grid-template-columns={layout.cols ? `repeat(${layout.cols}, minmax(0, 1fr))` : null}>
         {#each rest as n (n.gid)}
           <article class="card" class:update={n.update} use:lazy={n.gid}>
             {#if hasPic(n)}
@@ -298,7 +302,9 @@
   .segbtn:focus-visible { outline: 2px solid var(--accent-ink); }
   .segbtn.on:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 
-  .scroll { flex: 1; min-height: 0; overflow: auto; padding-right: 4px; display: flex; flex-direction: column; gap: 12px; }
+  /* The scrollbar's room is kept whether or not it shows, so the grid's width, and the
+     column count that follows it, cannot flip as the rows change the page's height (D-326). */
+  .scroll { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding-right: 4px; display: flex; flex-direction: column; gap: 12px; }
   /* The list scrolls; its children keep their natural height instead of shrinking
      (the featured card has overflow hidden, so it would otherwise collapse to 0). */
   .scroll > * { flex: none; }
@@ -316,14 +322,18 @@
   .play.small { width: 40px; height: 40px; }
   .play.small::after { left: 15px; top: 11px; border-width: 7px 0 7px 12px; }
 
-  .featured { display: grid; grid-template-columns: minmax(280px, 42%) minmax(0, 1fr); border-radius: 14px; overflow: hidden; border: 1px solid var(--border); background: var(--bg-elev); }
+  /* The picture's column stops at 569 px, where 16:9 meets the 320 px cap: wider, on a
+     maximised window, the picture was cut top and bottom (D-326). */
+  .featured { display: grid; grid-template-columns: minmax(280px, min(42%, 569px)) minmax(0, 1fr); border-radius: 14px; overflow: hidden; border: 1px solid var(--border); background: var(--bg-elev); }
   .featured.update { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
   /* No picture: the text takes the card's width, not the left column (row 24). */
   .featured.nopic { grid-template-columns: minmax(0, 1fr); }
   /* Capped so the hero cannot eat the window on a large screen; the grid below keeps
      more cards in view (D-143). */
   .featured { max-height: 320px; }
-  .featured .media { aspect-ratio: auto; height: 100%; min-height: 200px; }
+  /* 16:9 sets the card's height where the text is shorter; where the text is taller the
+     picture stretches to it and is cut at the sides (D-326). */
+  .featured .media { aspect-ratio: 16 / 9; height: auto; min-height: 200px; align-self: stretch; }
   .featured .body { padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
   .featured h3 { margin: 0; font-size: 19px; font-weight: 650; line-height: 1.25; }
   .links { display: flex; gap: 8px; margin-top: auto; padding-top: 4px; flex-wrap: wrap; }
@@ -340,7 +350,9 @@
   .link:focus-visible { outline: 2px solid var(--accent-ink); border-radius: 4px; }
   .summary { margin: 0; font-size: 13px; color: var(--fg-muted); line-height: 1.5; overflow-wrap: anywhere; }
   .summary.clamp { display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-  .summary.feat { -webkit-line-clamp: 5; line-clamp: 5; }
+  /* Seven lines: with the longer summaries the featured card is filled rather than half
+     empty on a wide window, and still under its 320 px cap on a narrow one (D-326). */
+  .summary.feat { -webkit-line-clamp: 7; line-clamp: 7; }
 
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; padding-bottom: 4px; }
   .card { display: flex; flex-direction: column; border-radius: 12px; overflow: hidden; background: var(--bg-elev); border: 1px solid var(--border); transition: transform 150ms, border-color 150ms; min-width: 0; }

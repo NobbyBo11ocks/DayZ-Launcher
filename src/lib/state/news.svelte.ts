@@ -21,8 +21,9 @@ const FIRST_RUN_UNREAD = 5;
 const ALERT_MAX_AGE_SECS = 14 * 86_400;
 
 export type NewsAlert = { gid: string; title: string; url: string };
-/** `updates`: official game-update posts (default); `official`: every Bohemia post; `press`: plus third-party feeds. */
-export type NewsView = "updates" | "official" | "press";
+/** `updates`: official game-update posts (default); `official`: every Bohemia post. The press
+ *  feeds went with the "With press" view at the player's request (D-326). */
+export type NewsView = "updates" | "official";
 
 async function notifyIfUnfocused(n: NewsItem) {
   try {
@@ -64,7 +65,7 @@ class NewsStore {
   #timer: ReturnType<typeof setInterval> | undefined;
   #visiting = false;
 
-  list = $derived(this.items.filter((n) => (this.view === "press" ? true : n.official && (this.view === "official" || n.update))));
+  list = $derived(this.items.filter((n) => n.official && (this.view === "official" || n.update)));
   /** Game-update posts newer than the seen mark: the rail badge, counting the posts the
    *  page opens on. Every official post counted, so a badge of 3 opened on one new post;
    *  sales and dev blogs keep their New pill under All news (row 24, approved). */
